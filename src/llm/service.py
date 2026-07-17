@@ -1,4 +1,6 @@
-"""LLM 服务：ChatOpenAI 封装 + Qwen 流式工具调用兼容。"""
+"""LLM 服务：ChatOpenAI 封装 + Qwen 流式工具调用兼容。
+配置全走数据库 llm_config 表（无 yml 兜底）：PUT /api/admin/llm-config 配置，
+未配置时 _resolve_config 抛错提示先 PUT。"""
 import json
 
 from src.config import LLMConfig
@@ -58,18 +60,16 @@ def collect_stream_result(chunks: list) -> dict | None:
 
 
 class LLMService:
-    """LLM 服务：ChatOpenAI 封装 + 动态配置（页面可改）。
-    调用时优先读 PG 的 LlmConfigRow（enabled=True），fallback yml 静态配置。
-    admin PUT 后调 reset_dynamic() 触发热更新（清缓存 + 重建 client）。"""
+    """LLM 服务：配置全在数据库 llm_config 表，无 yml 兜底。
+    未配置（表空 / enabled=False / PG 异常）时 _resolve_config 抛 RuntimeError，
+    提示先 PUT /api/admin/llm-config。admin PUT 后调 reset_dynamic() 热更新。"""
 
-    def __init__(self, config: LLMConfig):
-        self._config = config          # yml 静态配置（fallback 兜底）
+    def __init__(self):
         self._client = None
         self._dynamic: dict | None = None  # 内存缓存（None=未加载）
 
     async def _load_dynamic(self) -> dict | None:
-        """从 PG 读 LlmConfigRow（enabled=True）。无则 None。
-        ponytail: PG 异常降级返回 None（fallback yml），不中断对话。"""
+        """从 PG 读 LlmConfigRow（enabled=True）。无/未启用/PG异常 均返回 None。"""
         if self._dynamic is not None:
             return self._dynamic
         try:
@@ -83,7 +83,7 @@ class LLMService:
                     "timeout": row.timeout,
                 }
         except Exception as e:
-            log.warning("读动态 LLM 配置失败，fallback yml: %s", e)
+            log.warning("读 LLM 配置失败: %s", e)
             return None
         return self._dynamic
 
@@ -93,29 +93,26 @@ class LLMService:
         self._client = None
 
     async def _resolve_config(self) -> LLMConfig:
-        """动态优先，无则 fallback yml。"""
+        """配置全在数据库，无兜底。未配置抛错。"""
         dyn = await self._load_dynamic()
-        if dyn:
-            return LLMConfig(**dyn)
-        return self._config
+        if not dyn:
+            raise RuntimeError(
+                "LLM 未配置：请先 PUT /api/admin/llm-config 存 model/base_url/api_key")
+        return LLMConfig(**dyn)
 
     def _ensure_client(self, cfg: LLMConfig):
         if self._client is None:
             from langchain_openai import ChatOpenAI
             self._client = ChatOpenAI(
-                api_key=config_api_key(cfg),
-                base_url=cfg.api_base,
-                model=cfg.model,
-                temperature=cfg.temperature,
-                timeout=cfg.timeout,
-                streaming=True,
+                api_key=cfg.api_key, base_url=cfg.api_base, model=cfg.model,
+                temperature=cfg.temperature, timeout=cfg.timeout, streaming=True,
             )
         return self._client
 
     async def chat(self, messages: list[dict], tools: list | None = None):
         """非流式一次调用（loop 主用）。每次 resolve 配置（动态可能被 admin 改）。
-        ponytail: 用 asyncio.to_thread 跑同步 invoke——langchain ainvoke 在 ASGI
-        事件循环（uvicorn）下会死锁卡住，sync invoke 放线程池规避。"""
+        ponytail: asyncio.to_thread 跑同步 invoke——langchain ainvoke 在 ASGI
+        事件循环（uvicorn）下死锁，sync invoke 放线程池规避。"""
         import asyncio
         cfg = await self._resolve_config()
         client = self._ensure_client(cfg)
@@ -131,10 +128,3 @@ class LLMService:
             client = client.bind_tools(tools)
         async for chunk in client.astream(messages):
             yield chunk
-
-
-def config_api_key(cfg: LLMConfig) -> str:
-    key = cfg.api_key or ""
-    if not key:
-        log.warning("LLM api_key 为空，确认环境变量 OPENAI_API_KEY 已设置")
-    return key

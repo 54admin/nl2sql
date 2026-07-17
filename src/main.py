@@ -1,16 +1,10 @@
 """nl2sql AI问数 FastAPI 应用入口（P0b）。
 
-启动：
-    uvicorn src.main:app --reload --port 8000
-
-数据库：
-    优先环境变量 DATABASE_URL（dev 用 sqlite 可免起 PG），否则读 config/application.yml 的 postgres 段。
-    例：DATABASE_URL=sqlite+aiosqlite:///nl2sql.db uvicorn src.main:app --port 8000
-
-Redis：连不上自动降级内存（不影响跑）。
-LLM：读 config/application.yml 的 llm 段（默认 DeepSeek-V4-Flash）；可用 PUT /api/admin/llm-config 动态改。
+启动：./run.sh  或  python3 -m uvicorn src.main:app --port 8000
+配置：config/application.yml（postgres 数据库连接 / redis / llm 兜底）
+接口文档：http://127.0.0.1:8000/docs
+模型动态配置（apikey/model/base_url）：PUT /api/admin/llm-config 存数据库，优先于 yml。
 """
-import os
 from contextlib import asynccontextmanager
 from urllib.parse import quote_plus
 
@@ -46,7 +40,7 @@ def _pg_url(pc) -> str:
 
 class _Lazy:
     """延迟解析到 lifespan 初始化的全局组件。
-    FastAPI 路由在 create_app(同步) 时注册，但组件在 lifespan(async) 才初始化，
+    路由在 create_app(同步) 时注册，组件在 lifespan(async) 才初始化，
     用 _Lazy 包装让请求到达时才解析到真实组件。"""
     def __init__(self, key: str):
         self._key = key
@@ -61,15 +55,14 @@ async def lifespan(app: FastAPI):
     setup_logging("INFO")
     log = get_logger("main")
 
-    # 数据库：优先 DATABASE_URL（dev 可 sqlite 免起 PG），否则 config.postgres
-    db_url = os.getenv("DATABASE_URL") or _pg_url(cfg.postgres)
-    await init_db(db_url)
+    # 数据库连接走 config/application.yml 的 postgres 段
+    await init_db(_pg_url(cfg.postgres))
 
     redis = RedisClient(cfg.redis)
     await redis.connect()
 
     sm = SessionManager(redis)
-    llm = LLMService(cfg.llm)
+    llm = LLMService()                     # 配置全走数据库 llm_config 表
     prompts = PromptStore()
     reg = default_registry()
     sess_state = SessionState(sm)
@@ -79,11 +72,10 @@ async def lifespan(app: FastAPI):
 
     _app_state.update(
         orchestrator=orch, session_mgr=sm, llm_service=llm, prompts=prompts)
-    log.info("nl2sql 启动完成 db=%s redis=%s model=%s",
-             "sqlite" if "sqlite" in db_url else "postgres",
+    log.info("nl2sql 启动完成 db=postgres(%s:%s/%s) redis=%s model=%s",
+             cfg.postgres.host, cfg.postgres.port, cfg.postgres.database,
              "可用" if redis.available else "降级内存", cfg.llm.model)
     yield
-    # 清理：aiosqlite 引擎需 dispose，否则进程退出时 worker 线程 hang
     from src.storage import pg_client
     if pg_client._engine is not None:
         await pg_client._engine.dispose()

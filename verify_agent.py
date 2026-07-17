@@ -24,7 +24,7 @@ async def main():
         mgr = SessionManager(redis)
         sid = await mgr.create_session("u1", "web")
 
-        llm = LLMService(cfg.llm)
+        llm = LLMService()
         reg = default_registry()
         state = SessionState(mgr)
         loop = AgentLoop(llm, reg, state, max_turns=6)

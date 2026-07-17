@@ -47,7 +47,7 @@ def test_llm_service_lazy_client_no_langchain_import():
     import sys
     before = set(sys.modules.keys())
     from src.config import LLMConfig
-    svc = LLMService(LLMConfig())
+    svc = LLMService()
     after = set(sys.modules.keys())
     assert "langchain_openai" not in after - before
     assert svc._client is None

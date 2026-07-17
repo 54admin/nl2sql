@@ -33,7 +33,7 @@ async def test_infrastructure_wires_together(tmp_path, monkeypatch):
     assert len(msgs) == 1
 
     # LLM 服务能构造（不打网关）
-    svc = LLMService(cfg.llm)
-    assert svc._config.model == "m"
+    svc = LLMService()
+    assert svc._client is None  # 配置全数据库，构造无参即可
 
     log.info("冒烟通过: session=%s msgs=%d", sid, len(msgs))

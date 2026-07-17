@@ -199,7 +199,7 @@ async def main():
     await redis.connect()
     mgr = SessionManager(redis)
     state = SessionState(mgr)
-    llm = LLMService(cfg.llm)
+    llm = LLMService()
     registry = build_stub_registry()
     loop = AgentLoop(llm, registry, state, max_turns=10)
     normalizer = Normalizer()  # P0b pass-through

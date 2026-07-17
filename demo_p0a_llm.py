@@ -9,7 +9,7 @@ async def main():
     cfg = load_config("config")
     # 网关当前可用模型（Qwen 系列暂无 channel，用 DeepSeek-V4-Flash；后续可换回）
     cfg.llm.model = "DeepSeek-V4-Flash"
-    svc = LLMService(cfg.llm)
+    svc = LLMService()
 
     question = "你好，请用一句话介绍你自己，再说一下 2 加 3 等于几。"
     print("用户：", question)
