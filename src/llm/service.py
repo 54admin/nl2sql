@@ -76,18 +76,16 @@ class LLMService:
     async def chat(self, messages: list[dict], tools: list | None = None):
         """非流式一次调用（loop 主用），返回完整响应。"""
         client = self._ensure_client()
-        kwargs = {"messages": messages}
         if tools:
-            kwargs["tools"] = tools
-        return await client.ainvoke(**kwargs)
+            client = client.bind_tools(tools)
+        return await client.ainvoke(messages)
 
     async def chat_stream(self, messages: list[dict], tools: list | None = None):
         """流式生成，yield chunk。调用方自行 collect。"""
         client = self._ensure_client()
-        kwargs = {"messages": messages}
         if tools:
-            kwargs["tools"] = tools
-        async for chunk in client.astream(**kwargs):
+            client = client.bind_tools(tools)
+        async for chunk in client.astream(messages):
             yield chunk
 
 
