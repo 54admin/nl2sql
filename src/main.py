@@ -72,9 +72,9 @@ async def lifespan(app: FastAPI):
 
     _app_state.update(
         orchestrator=orch, session_mgr=sm, llm_service=llm, prompts=prompts)
-    log.info("nl2sql 启动完成 db=postgres(%s:%s/%s) redis=%s model=%s",
+    log.info("nl2sql 启动完成 db=postgres(%s:%s/%s) redis=%s（模型配置走数据库 llm_config）",
              cfg.postgres.host, cfg.postgres.port, cfg.postgres.database,
-             "可用" if redis.available else "降级内存", cfg.llm.model)
+             "可用" if redis.available else "降级内存")
     yield
     from src.storage import pg_client
     if pg_client._engine is not None:
