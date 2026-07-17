@@ -5,6 +5,10 @@ from pathlib import Path
 
 import yaml
 
+from src.logging import get_logger
+
+log = get_logger(__name__)
+
 
 @dataclass
 class LLMConfig:
@@ -35,7 +39,6 @@ class PostgresConfig:
 @dataclass
 class AppConfig:
     name: str = "NL2SQL"
-    config_dir: str = "config"
 
 
 @dataclass
@@ -86,8 +89,10 @@ def load_config(config_dir: str = "config", profile: str | None = None) -> Appli
         prof_path = Path(config_dir) / f"application-{active}.yml"
         if prof_path.exists():
             data = _deep_merge(data, yaml.safe_load(prof_path.read_text()))
+        else:
+            log.warning("profile 文件不存在，回退基线配置: %s", prof_path)
 
-    # 环境变量覆盖（OPENAI_* 覆盖 llm 段）
+    # 环境变量覆盖（OPENAI_API_KEY 覆盖 llm.api_key）
     if os.getenv("OPENAI_API_KEY"):
         data.setdefault("llm", {})["api_key"] = os.environ["OPENAI_API_KEY"]
 
