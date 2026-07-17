@@ -97,3 +97,16 @@ class LlmConfigRow(Base):
     version: Mapped[int] = mapped_column(default=1)
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
                                                  onupdate=func.now())
+
+
+class Prompt(Base):
+    """场景化系统提示词（orchestrator 按 scene 读，组装 system message）。
+    场景如 default / attribution / correction；default 是兜底。
+    admin 后台 CRUD，热更新（PromptStore 缓存刷新）。"""
+    __tablename__ = "prompts"
+    scene: Mapped[str] = mapped_column(String(32), primary_key=True)
+    content: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(default=1)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
+                                                 onupdate=func.now())
