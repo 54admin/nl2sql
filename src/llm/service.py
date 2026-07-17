@@ -113,12 +113,15 @@ class LLMService:
         return self._client
 
     async def chat(self, messages: list[dict], tools: list | None = None):
-        """非流式一次调用（loop 主用）。每次 resolve 配置（动态可能被 admin 改）。"""
+        """非流式一次调用（loop 主用）。每次 resolve 配置（动态可能被 admin 改）。
+        ponytail: 用 asyncio.to_thread 跑同步 invoke——langchain ainvoke 在 ASGI
+        事件循环（uvicorn）下会死锁卡住，sync invoke 放线程池规避。"""
+        import asyncio
         cfg = await self._resolve_config()
         client = self._ensure_client(cfg)
         if tools:
             client = client.bind_tools(tools)
-        return await client.ainvoke(messages)
+        return await asyncio.to_thread(client.invoke, messages)
 
     async def chat_stream(self, messages: list[dict], tools: list | None = None):
         """流式生成，yield chunk。"""

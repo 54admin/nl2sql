@@ -14,6 +14,12 @@ def build_session_router(session_mgr: SessionManager) -> APIRouter:
     async def list_sessions(user_id: str):
         return {"sessions": await session_mgr.list_sessions(user_id)}
 
+    @router.post("/api/session")
+    async def create_session(user_id: str, channel: str = "web"):
+        """新建会话，返回 session_id（ask 接口需要先建会话）。"""
+        sid = await session_mgr.create_session(user_id, channel)
+        return {"session_id": sid, "user_id": user_id, "channel": channel}
+
     @router.delete("/api/session/{sid}")
     async def delete_session(sid: str):
         await session_mgr.delete_session(sid)  # 幂等
