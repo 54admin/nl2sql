@@ -81,3 +81,19 @@ class AppConfigRow(Base):
     version: Mapped[int] = mapped_column(default=1)
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
                                                  onupdate=func.now())
+
+
+class LlmConfigRow(Base):
+    """动态 LLM 配置（admin 后台可改，热更新）。单行表 id='default'。
+    LLMService 调用时优先读此表（enabled=True），无则 fallback yml。"""
+    __tablename__ = "llm_config"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default="default")
+    model: Mapped[str] = mapped_column(String(128))
+    base_url: Mapped[str] = mapped_column(String(256))
+    api_key: Mapped[str] = mapped_column(String(256))
+    temperature: Mapped[float] = mapped_column(default=0.0)
+    timeout: Mapped[int] = mapped_column(default=60)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    version: Mapped[int] = mapped_column(default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
+                                                 onupdate=func.now())

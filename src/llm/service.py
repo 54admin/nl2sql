@@ -3,6 +3,8 @@ import json
 
 from src.config import LLMConfig
 from src.logging import get_logger
+from src.storage.models import LlmConfigRow
+from src.storage.pg_client import AsyncSessionFactory
 
 log = get_logger(__name__)
 
@@ -56,33 +58,72 @@ def collect_stream_result(chunks: list) -> dict | None:
 
 
 class LLMService:
+    """LLM 服务：ChatOpenAI 封装 + 动态配置（页面可改）。
+    调用时优先读 PG 的 LlmConfigRow（enabled=True），fallback yml 静态配置。
+    admin PUT 后调 reset_dynamic() 触发热更新（清缓存 + 重建 client）。"""
+
     def __init__(self, config: LLMConfig):
-        self._config = config
+        self._config = config          # yml 静态配置（fallback 兜底）
+        self._client = None
+        self._dynamic: dict | None = None  # 内存缓存（None=未加载）
+
+    async def _load_dynamic(self) -> dict | None:
+        """从 PG 读 LlmConfigRow（enabled=True）。无则 None。
+        ponytail: PG 异常降级返回 None（fallback yml），不中断对话。"""
+        if self._dynamic is not None:
+            return self._dynamic
+        try:
+            async with AsyncSessionFactory() as s:
+                row = await s.get(LlmConfigRow, "default")
+                if row is None or not row.enabled:
+                    return None
+                self._dynamic = {
+                    "model": row.model, "api_base": row.base_url,
+                    "api_key": row.api_key, "temperature": row.temperature,
+                    "timeout": row.timeout,
+                }
+        except Exception as e:
+            log.warning("读动态 LLM 配置失败，fallback yml: %s", e)
+            return None
+        return self._dynamic
+
+    def reset_dynamic(self) -> None:
+        """admin PUT 后调用：清动态缓存 + 置空 client。下次调用按最新配置重建。"""
+        self._dynamic = None
         self._client = None
 
-    def _ensure_client(self):
+    async def _resolve_config(self) -> LLMConfig:
+        """动态优先，无则 fallback yml。"""
+        dyn = await self._load_dynamic()
+        if dyn:
+            return LLMConfig(**dyn)
+        return self._config
+
+    def _ensure_client(self, cfg: LLMConfig):
         if self._client is None:
             from langchain_openai import ChatOpenAI
             self._client = ChatOpenAI(
-                api_key=config_api_key(self._config),
-                base_url=self._config.api_base,
-                model=self._config.model,
-                temperature=self._config.temperature,
-                timeout=self._config.timeout,
+                api_key=config_api_key(cfg),
+                base_url=cfg.api_base,
+                model=cfg.model,
+                temperature=cfg.temperature,
+                timeout=cfg.timeout,
                 streaming=True,
             )
         return self._client
 
     async def chat(self, messages: list[dict], tools: list | None = None):
-        """非流式一次调用（loop 主用），返回完整响应。"""
-        client = self._ensure_client()
+        """非流式一次调用（loop 主用）。每次 resolve 配置（动态可能被 admin 改）。"""
+        cfg = await self._resolve_config()
+        client = self._ensure_client(cfg)
         if tools:
             client = client.bind_tools(tools)
         return await client.ainvoke(messages)
 
     async def chat_stream(self, messages: list[dict], tools: list | None = None):
-        """流式生成，yield chunk。调用方自行 collect。"""
-        client = self._ensure_client()
+        """流式生成，yield chunk。"""
+        cfg = await self._resolve_config()
+        client = self._ensure_client(cfg)
         if tools:
             client = client.bind_tools(tools)
         async for chunk in client.astream(messages):
