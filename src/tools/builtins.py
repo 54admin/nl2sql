@@ -1,0 +1,58 @@
+"""内置工具：echo(stub)/finish/ask_user（spec 6.2）。
+finish/ask_user 只置标志位，由 AgentLoop 观察后决定终止/挂起。
+工具本身不持久化，保持 tools 包零 P0a 依赖。"""
+from __future__ import annotations
+
+from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
+from src.tools.registry import ToolRegistry
+
+
+async def _echo(args: dict, ctx: LoopContext, cancel_token: CancelToken) -> ToolResult:
+    """回显输入文本（测试用 stub，演示工具调用链路）。"""
+    return ToolResult(summary=f"echo: {args.get('text', '')}")
+
+
+async def _finish(args: dict, ctx: LoopContext, cancel_token: CancelToken) -> ToolResult:
+    """给出最终答案并结束本轮对话。agent_loop 观察 finished=True 后终止循环。"""
+    return ToolResult(summary=args.get("answer", ""), finished=True)
+
+
+async def _ask_user(args: dict, ctx: LoopContext, cancel_token: CancelToken) -> ToolResult:
+    """向用户提问以澄清需求。agent_loop 观察 suspended=True 后存 checkpoint 并挂起。"""
+    return ToolResult(summary=args.get("question", ""), suspended=True)
+
+
+ECHO = ToolDefinition(
+    name="echo",
+    description="回显输入文本（测试用 stub，演示工具调用链路）",
+    parameters={"type": "object",
+                "properties": {"text": {"type": "string", "description": "要回显的文本"}},
+                "required": ["text"]},
+    handler=_echo,
+)
+
+FINISH = ToolDefinition(
+    name="finish",
+    description="给出最终答案并结束本轮对话。当不再需要调用其他工具时使用。",
+    parameters={"type": "object",
+                "properties": {"answer": {"type": "string", "description": "给用户的最终答案"}},
+                "required": ["answer"]},
+    handler=_finish,
+)
+
+ASK_USER = ToolDefinition(
+    name="ask_user",
+    description="向用户提问以澄清需求（如缺参、歧义）。调用后本轮暂停等待用户回答。",
+    parameters={"type": "object",
+                "properties": {"question": {"type": "string", "description": "要问用户的问题"}},
+                "required": ["question"]},
+    handler=_ask_user,
+)
+
+
+def default_registry() -> ToolRegistry:
+    """注册 echo / finish / ask_user 三个基础工具，返回新 ToolRegistry。"""
+    reg = ToolRegistry()
+    for td in (ECHO, FINISH, ASK_USER):
+        reg.register(td)
+    return reg

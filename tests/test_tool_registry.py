@@ -157,3 +157,49 @@ async def test_execute_handler_exception(ctx, cancel_token):
     r = await reg.execute("x", {}, ctx, cancel_token)
     assert "执行出错" in r.summary
     assert "炸了" in r.summary
+
+
+# ==== builtins 测试（Task 4 追加）====
+from src.tools.builtins import ECHO, FINISH, ASK_USER, default_registry
+
+
+@pytest.mark.asyncio
+async def test_echo_handler(ctx, cancel_token):
+    r = await ECHO.handler({"text": "hi"}, ctx, cancel_token)
+    assert r.summary == "echo: hi"
+    assert r.finished is False and r.suspended is False
+
+
+@pytest.mark.asyncio
+async def test_finish_handler(ctx, cancel_token):
+    r = await FINISH.handler({"answer": "done"}, ctx, cancel_token)
+    assert r.summary == "done"
+    assert r.finished is True
+
+
+@pytest.mark.asyncio
+async def test_ask_user_handler(ctx, cancel_token):
+    r = await ASK_USER.handler({"question": "哪个月?"}, ctx, cancel_token)
+    assert r.summary == "哪个月?"
+    assert r.suspended is True
+
+
+def test_default_registry_three_tools():
+    reg = default_registry()
+    names = {td.name for td in reg.available_defs()}
+    assert names == {"echo", "finish", "ask_user"}
+    tools = reg.openai_tools()
+    assert len(tools) == 3
+    for t in tools:
+        assert t["type"] == "function"
+        assert "name" in t["function"]
+        assert "parameters" in t["function"]
+
+
+def test_registry_hides_unavailable_tool():
+    from src.tools.registry import ToolRegistry
+    reg = ToolRegistry()
+    reg.register(ToolDefinition(
+        name="hidden", description="d", parameters={"type": "object"},
+        handler=ECHO.handler, availability=require_module("__no_such_module__")))
+    assert reg.openai_tools() == []  # 缺依赖自动隐藏
