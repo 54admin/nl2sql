@@ -91,6 +91,11 @@ def create_app() -> FastAPI:
     async def health():
         return {"ok": True, "ready": "orchestrator" in _app_state}
 
+    @app.get("/")
+    async def index():
+        from fastapi.responses import FileResponse
+        return FileResponse("static/index.html")
+
     app.include_router(build_ask_router(_Lazy("orchestrator")))
     app.include_router(build_session_router(_Lazy("session_mgr")))
     app.include_router(build_admin_llm_router(_Lazy("llm_service")))

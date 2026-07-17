@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 问数</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "PingFang SC", sans-serif; margin: 0; background: #f0f2f5; }
+  #app { max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; height: 100vh; }
+  header { background: #fff; padding: 12px 16px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { font-size: 16px; margin: 0; color: #333; }
+  #mode { padding: 4px 8px; border: 1px solid #ccc; border-radius: 6px; }
+  #messages { flex: 1; overflow-y: auto; padding: 16px; }
+  .msg { margin: 8px 0; padding: 10px 14px; border-radius: 12px; max-width: 75%; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+  .user { background: #4caf50; color: #fff; margin-left: auto; }
+  .assistant { background: #fff; color: #333; border: 1px solid #e0e0e0; }
+  .system { background: #fff8e1; color: #e65100; font-size: 13px; max-width: 90%; }
+  .clarify { background: #e3f2fd; color: #1565c0; max-width: 90%; }
+  .err { background: #ffebee; color: #c62828; }
+  footer { background: #fff; padding: 12px; border-top: 1px solid #e0e0e0; display: flex; gap: 8px; }
+  #input { flex: 1; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; }
+  #send { padding: 10px 22px; background: #4caf50; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  #send:disabled { background: #bdbdbd; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>AI 问数</h1>
+    <select id="mode"><option value="user">用户模式</option><option value="admin">管理员模式</option></select>
+  </header>
+  <div id="messages">
+    <div class="msg system">先在 <a href="/docs" target="_blank">/docs</a> 调 PUT /api/admin/llm-config 配好模型，再开始对话。</div>
+  </div>
+  <footer>
+    <input id="input" placeholder="输入问题，回车发送" autocomplete="off">
+    <button id="send">发送</button>
+  </footer>
+</div>
+<script>
+const USER_ID = "web-user";
+let sessionId = null;
+const msgs = document.getElementById("messages");
+const input = document.getElementById("input");
+const sendBtn = document.getElementById("send");
+const modeSel = document.getElementById("mode");
+
+function addMsg(text, cls) {
+  const div = document.createElement("div");
+  div.className = "msg " + cls;
+  div.textContent = text;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return div;
+}
+
+async function ensureSession() {
+  if (sessionId) return sessionId;
+  const resp = await fetch(`/api/session?user_id=${USER_ID}&channel=web`, {method: "POST"});
+  const data = await resp.json();
+  if (!data.session_id) throw new Error("建会话失败：" + JSON.stringify(data));
+  sessionId = data.session_id;
+  return sessionId;
+}
+
+function parseSSE(text) {
+  let type = "", dataStr = "";
+  for (const line of text.split("\n")) {
+    if (line.startsWith("event: ")) type = line.slice(7).trim();
+    else if (line.startsWith("data: ")) dataStr += line.slice(6);
+  }
+  if (!type) return null;
+  try { return {type, data: JSON.parse(dataStr).data}; }
+  catch { return {type, data: {}}; }
+}
+
+async function ask(text) {
+  const sid = await ensureSession();
+  sendBtn.disabled = true;
+  const bubble = addMsg("", "assistant");
+  try {
+    const resp = await fetch("/api/ask/sse", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({user_id: USER_ID, session_id: sid, text, mode: modeSel.value})
+    });
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "", got = false;
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, {stream: true});
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop();
+      for (const part of parts) {
+        const evt = parseSSE(part);
+        if (!evt) continue;
+        got = true;
+        if (evt.type === "done") bubble.textContent = evt.data.answer || "";
+        else if (evt.type === "assistant" && evt.data.content) bubble.textContent = evt.data.content;
+        else if (evt.type === "clarification_needed") {
+          bubble.remove();
+          addMsg("🤔 需要补充：" + evt.data.question, "clarify");
+        } else if (evt.type === "correction") {
+          addMsg("已纠正：" + evt.data.original + " → " + evt.data.normalized, "system");
+        } else if (evt.type === "error") {
+          bubble.textContent = "⚠ " + (evt.data.message || "出错");
+          bubble.className = "msg err";
+        }
+      }
+    }
+    if (!got) bubble.textContent = "（无回复）";
+  } catch (e) {
+    bubble.textContent = "⚠ 请求失败：" + e.message;
+    bubble.className = "msg err";
+  }
+  sendBtn.disabled = false;
+}
+
+function onSend() {
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  addMsg(text, "user");
+  ask(text);
+}
+
+sendBtn.addEventListener("click", onSend);
+input.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); }
+});
+</script>
+</body>
+</html>
