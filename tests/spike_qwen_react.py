@@ -221,7 +221,7 @@ async def main():
                 s.add(SessionRow(
                     id=sid, user_id="spike-user",
                     channel="web", status="idle",
-                    ttl_at=datetime.now(timezone.utc) + timedelta(hours=1)))
+                    ttl_at=datetime.now() + timedelta(hours=1)))
                 await s.commit()
         try:
             result = await asyncio.wait_for(

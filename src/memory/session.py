@@ -21,7 +21,9 @@ class SessionManager:
 
     async def create_session(self, user_id: str, channel: str) -> str:
         sid = uuid.uuid4().hex
-        now = datetime.now(timezone.utc)
+        # ponytail: naive datetime 匹配 PG TIMESTAMP WITHOUT TIME ZONE 列
+        # （PG 严格区分 aware/naive；sqlite 不在乎所以 P0a 测试没暴露）
+        now = datetime.now()
         ttl_at = now + timedelta(seconds=SESSION_TTL)
         # PG 持久
         async with AsyncSessionFactory() as s:
