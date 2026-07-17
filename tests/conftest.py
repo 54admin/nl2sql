@@ -1,6 +1,13 @@
 import pytest
 
+from src.logging import setup_logging
 from src.storage import pg_client
+
+
+@pytest.fixture(autouse=True)
+def _logging():
+    """统一日志初始化，所有测试可见 nl2sql 命名空间日志。"""
+    setup_logging("DEBUG")
 
 
 @pytest.fixture(autouse=True)
