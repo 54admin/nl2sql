@@ -1,4 +1,6 @@
 """PG 引擎 + 会话工厂。生产用 asyncpg，测试可传 sqlite。"""
+from urllib.parse import quote_plus
+
 from sqlalchemy.ext.asyncio import (
     AsyncSession, async_sessionmaker, create_async_engine)
 from sqlalchemy.pool import StaticPool
@@ -14,7 +16,10 @@ _AsyncSessionFactory: async_sessionmaker[AsyncSession] | None = None
 
 
 def _pg_url(config: PostgresConfig) -> str:
-    return (f"postgresql+asyncpg://{config.username}:{config.password}"
+    # 用户名/密码 quote_plus 编码，防止 @:/ 等字符破坏 URL 解析
+    user = quote_plus(config.username)
+    pwd = quote_plus(config.password)
+    return (f"postgresql+asyncpg://{user}:{pwd}"
             f"@{config.host}:{config.port}/{config.database}")
 
 

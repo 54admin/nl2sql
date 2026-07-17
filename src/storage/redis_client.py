@@ -47,7 +47,8 @@ class RedisClient:
             self._backend = aioredis.Redis(
                 host=self._config.host, port=self._config.port,
                 db=self._config.db, password=self._config.password or None,
-                socket_connect_timeout=1)
+                socket_connect_timeout=1,
+                decode_responses=True)  # 真 redis 返回 str，对齐 _InMemory
             await self._backend.ping()
             self.available = True
             log.info("Redis 已连接")
@@ -60,10 +61,12 @@ class RedisClient:
         return await self._backend.get(key)
 
     async def set(self, key: str, value: str, ttl: int | None = None):
-        if self.available and ttl:
-            await self._backend.set(key, value, ex=ttl)
-        elif self.available:
-            await self._backend.set(key, value)
+        # 入口统一 ttl 语义：<=0 立即过期(等价 delete)；None 永久；>0 按秒
+        if ttl is not None and ttl <= 0:
+            await self.delete(key)
+            return
+        if self.available:
+            await self._backend.set(key, value, ex=ttl if ttl else None)
         else:
             await self._backend.set(key, value, ttl=ttl)
 
