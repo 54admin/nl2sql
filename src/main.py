@@ -10,6 +10,11 @@ from urllib.parse import quote_plus
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from pathlib import Path
+
+# 首页 HTML 启动时读一次缓存（避免每次请求读磁盘 + 路径不绑 cwd）
+_INDEX_HTML = (Path(__file__).resolve().parent.parent / "static" / "index.html").read_bytes()
 
 from src.config import load_config
 from src.core.agent_loop import AgentLoop
@@ -93,8 +98,7 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     async def index():
-        from fastapi.responses import FileResponse
-        return FileResponse("static/index.html")
+        return Response(content=_INDEX_HTML, media_type="text/html")
 
     app.include_router(build_ask_router(_Lazy("orchestrator")))
     app.include_router(build_session_router(_Lazy("session_mgr")))

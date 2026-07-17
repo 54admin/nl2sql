@@ -1,4 +1,5 @@
 import asyncio
+import json
 import pytest
 
 from src.config import RedisConfig
@@ -23,10 +24,19 @@ class FakeLLM:
         self.calls = 0
         self.last_messages = None
 
-    async def chat(self, messages, tools=None):
+    async def chat_stream(self, messages, tools=None):
         self.calls += 1
         self.last_messages = messages
-        return self._responses.pop(0)
+        resp = self._responses.pop(0)
+        from src.llm.service import _Chunk
+        from types import SimpleNamespace
+        if resp.content:
+            yield _Chunk(content=resp.content)
+        for tc in resp.tool_calls:
+            yield _Chunk(tool_call_delta=[SimpleNamespace(
+                index=0, id=tc["id"],
+                function=SimpleNamespace(name=tc["name"],
+                                         arguments=json.dumps(tc.get("args", {}))))])
 
 
 class FakeRegistry:
@@ -63,7 +73,7 @@ async def test_happy_path_no_tools(env):
     loop = AgentLoop(llm, FakeRegistry(), state)
     events = await _collect(loop.run(sid, "u1", "你好", "t1", CancelToken()))
     types = [e.type for e in events]
-    assert "assistant" in types
+    assert "answer_delta" in types
     assert types[-1] == "done"
     assert events[-1].data["answer"] == "答案是42"
     assert llm.calls == 1

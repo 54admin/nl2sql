@@ -32,7 +32,7 @@ ALLOWED_TRANSITIONS: dict[SessionStatus, set[SessionStatus]] = {
                             SessionStatus.DONE, SessionStatus.ERROR, SessionStatus.IDLE},
     SessionStatus.AWAITING_CLARIFICATION: {SessionStatus.RUNNING, SessionStatus.IDLE,
                                            SessionStatus.ERROR},
-    SessionStatus.DONE: {SessionStatus.IDLE},
+    SessionStatus.DONE: {SessionStatus.IDLE, SessionStatus.RUNNING},  # done 后能继续问（同会话第二轮）
     SessionStatus.ERROR: {SessionStatus.IDLE, SessionStatus.RUNNING},
 }
 

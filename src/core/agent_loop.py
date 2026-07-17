@@ -77,15 +77,39 @@ class AgentLoop:
             for turn in range(self._max_turns):
                 cancel_token.check()
                 yield SSEEvent("turn_start", {"turn": turn}, trace_id)
-                resp = await self._llm.chat(msgs, self._registry.openai_tools())
-                tool_calls = getattr(resp, "tool_calls", None) or []
-                content = getattr(resp, "content", "") or ""
+                # 流式收 content（发 answer_delta 打字机）+ collect tool_calls 增量
+                content = ""
+                tc_acc: dict = {}
+                async for chunk in self._llm.chat_stream(msgs, self._registry.openai_tools()):
+                    cancel_token.check()
+                    if chunk.content:
+                        content += chunk.content
+                        yield SSEEvent("answer_delta", {"text": chunk.content}, trace_id)
+                    for tc in chunk.tool_call_delta:
+                        idx = getattr(tc, "index", None)
+                        idx = idx if idx is not None else 0
+                        acc = tc_acc.setdefault(idx, {"id": "", "name": "", "args": ""})
+                        if getattr(tc, "id", None):
+                            acc["id"] = tc.id
+                        fn = getattr(tc, "function", None)
+                        if fn:
+                            if fn.name:
+                                acc["name"] = fn.name
+                            if fn.arguments:
+                                acc["args"] += fn.arguments
+                tool_calls = []
+                for idx in sorted(tc_acc):
+                    v = tc_acc[idx]
+                    try:
+                        args = json.loads(v["args"]) if v["args"] else {}
+                    except Exception:
+                        args = {}
+                    tool_calls.append({"id": v["id"], "name": v["name"], "args": args})
                 if content:
                     last_answer = content
                 msgs.append({"role": "assistant", "content": content,
                              "tool_calls": _to_openai_tool_calls(tool_calls)
                              if tool_calls else []})
-                yield SSEEvent("assistant", {"content": content, "turn": turn}, trace_id)
 
                 if not tool_calls:
                     break
