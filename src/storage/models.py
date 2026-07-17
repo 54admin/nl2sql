@@ -1,0 +1,71 @@
+"""ORM 模型。对应 spec 第 12 章核心表。"""
+from datetime import datetime
+
+from sqlalchemy import String, Text, DateTime, func
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Session(Base):
+    __tablename__ = "sessions"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    channel: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(32), default="idle")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
+                                                 onupdate=func.now())
+    ttl_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Message(Base):
+    __tablename__ = "messages"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(64), index=True)
+    role: Mapped[str] = mapped_column(String(16))     # system/user/assistant/tool
+    content: Mapped[str] = mapped_column(Text)
+    trace_id: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class AuditTrace(Base):
+    __tablename__ = "audit_traces"
+    trace_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(64), index=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    raw_input: Mapped[str] = mapped_column(Text)
+    normalized_input: Mapped[str | None] = mapped_column(Text, nullable=True)
+    corrections_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tool_calls_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sql_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    knowledge_hits_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attribution_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sse_log_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    elapsed_ms: Mapped[int | None] = mapped_column(nullable=True)
+    cost_tokens: Mapped[int | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class LoopCheckpoint(Base):
+    """ask_user 挂起时的 loop 上下文快照。P0b 用。"""
+    __tablename__ = "loop_checkpoints"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(64), index=True)
+    messages_json: Mapped[str] = mapped_column(Text)
+    pending_tool: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class QueryResult(Base):
+    """execute_sql 全量结果旁路。P1 用，P0a 先建表。"""
+    __tablename__ = "query_results"
+    result_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(64), index=True)
+    columns_json: Mapped[str] = mapped_column(Text)
+    rows_json: Mapped[str] = mapped_column(Text)
+    total: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
