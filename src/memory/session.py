@@ -104,3 +104,16 @@ class SessionManager:
             if row:
                 await s.delete(row)
                 await s.commit()
+
+    async def list_sessions(self, user_id: str) -> list[dict]:
+        """查某用户全部会话，按创建时间倒序。
+        ponytail: 列表低频，直接查 PG 不走 Redis 缓存；超 1000 会话再加分页。"""
+        async with AsyncSessionFactory() as s:
+            rows = (await s.execute(
+                SessionRow.__table__.select()
+                .where(SessionRow.user_id == user_id)
+                .order_by(SessionRow.created_at.desc())
+            )).all()
+        return [{"id": r.id, "channel": r.channel, "status": r.status,
+                 "created_at": r.created_at.isoformat() if r.created_at else None}
+                for r in rows]
