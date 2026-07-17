@@ -1,4 +1,4 @@
-"""LLM 服务：openai 官方 AsyncOpenAI 直连（绕 langchain，解决 uvicorn 下 hang）。
+"""LLM 服务：openai 官方 AsyncOpenAI 直连（OpenAI 兼容协议，任意模型）。
 配置全走数据库 llm_config 表：PUT /api/admin/llm-config 配置，
 未配置时 _resolve_config 抛错提示先 PUT。"""
 import json
@@ -13,46 +13,11 @@ from src.storage.pg_client import AsyncSessionFactory
 log = get_logger(__name__)
 
 
-def collect_stream_result(chunks: list) -> dict | None:
-    """合并流式工具调用分片（langchain chunk 格式兼容；保留供未来流式工具调用用）。
-    返回 {id, name, arguments(json 字符串)} 或 None。"""
-    merged_args = {}
-    name = None
-    call_id = None
-    for chunk in chunks:
-        tcc = getattr(chunk, "tool_call_chunks", None) or []
-        for tc in tcc:
-            if tc.get("name"):
-                name = tc["name"]
-            if tc.get("id"):
-                call_id = tc["id"]
-            arg = tc.get("args")
-            if arg is None:
-                arg = tc.get("arguments")
-            if isinstance(arg, str) and arg:
-                idx = tc.get("index", 0)
-                merged_args[idx] = merged_args.get(idx, "") + arg
-    if not name and not merged_args:
-        return None
-    arguments = merged_args.get(0, "")
-    if not arguments:
-        for chunk in chunks:
-            tcs = getattr(chunk, "tool_calls", None) or []
-            for tc in tcs:
-                args = tc.get("args") or tc.get("arguments")
-                if args:
-                    arguments = json.dumps(args, ensure_ascii=False)
-                    break
-            if arguments:
-                break
-    return {"id": call_id, "name": name, "arguments": arguments}
-
-
 @dataclass
 class _Resp:
     """openai ChatCompletion 的兼容包装，供 AgentLoop 用 getattr 取 content/tool_calls。"""
     content: str
-    tool_calls: list  # [{id, name, args(dict)}]，与 langchain 解析格式一致
+    tool_calls: list  # [{id, name, args(dict)}]
 
 
 @dataclass

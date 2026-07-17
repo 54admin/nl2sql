@@ -1,5 +1,5 @@
 """spike 统计逻辑单测（不连真网关，只测 classify 纯函数）。"""
-from tests.spike_qwen_react import classify
+from tests.spike_react import classify
 
 
 def test_classify_converged():

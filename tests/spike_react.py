@@ -1,6 +1,6 @@
-"""Qwen3 自主 ReAct 稳定性 spike（spec 13 P0 末尾关键里程碑）。
+"""自主 ReAct 自主 ReAct 稳定性 spike（spec 13 P0 末尾关键里程碑）。
 
-手动跑：python -m tests.spike_qwen_react
+手动跑：python -m tests.spike_react
 验证三大能力：
   (1) 自主循环收敛——闲聊/取数 case 在 max_turns 内收到 done
   (2) ask_user 准确——缺参 case 触发 clarification_needed，注入回答后 resume 收敛
@@ -151,7 +151,7 @@ def print_report(results: list[CaseResult]) -> None:
     err_cases = [r for r in results if r.error]
 
     print(f"\n{'=' * 64}")
-    print(f"Qwen3 自主 ReAct spike 报告（共 {total} case，基于 stub 工具）")
+    print(f"自主 ReAct 自主 ReAct spike 报告（共 {total} case，基于 stub 工具）")
     print(f"{'=' * 64}")
     print(f"{'case':<12} {'收敛':>5} {'ask':>5} {'自愈':>5} {'轮数':>5} {'最终答案':<24}")
     for r in results:
@@ -168,7 +168,7 @@ def print_report(results: list[CaseResult]) -> None:
     out_dir = Path(__file__).parent / "spike_output"
     out_dir.mkdir(exist_ok=True)
     ts = time.strftime("%Y%m%d-%H%M%S")
-    lines = [f"# Qwen3 spike 报告 {ts}", "",
+    lines = [f"# 自主 ReAct spike 报告 {ts}", "",
              f"收敛 {conv}/{total}，ask_user {asked}，自愈 {healed}", ""]
     for r in results:
         lines.append(f"- **{r.case_id}**: conv={r.converged} asked={r.asked} "
@@ -179,7 +179,7 @@ def print_report(results: list[CaseResult]) -> None:
 
 
 async def main():
-    """spike 主入口：连真 Qwen3 网关跑全部 case。"""
+    """spike 主入口：连真 自主 ReAct 网关跑全部 case。"""
     try:
         from src.config import load_config
         from src.core.agent_loop import AgentLoop

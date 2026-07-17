@@ -1,5 +1,5 @@
 """工具注册表：动态 schema 重建 + coerce 强转 + 可用性过滤（spec 6.2）。
-- openai_tools: 每次按可用集合现算，防 Qwen 幻觉调隐藏工具（spec 6.2.2）
+- openai_tools: 每次按可用集合现算，防 模型 幻觉调隐藏工具（spec 6.2.2）
 - coerce_tool_args: 按 JSON Schema 强转 LLM 字符串参数（spec 6.2.3）
 - execute: 错误兜底回灌 LLM 触发错误自愈（spec 6.1）
 ponytail: 工具数 ≤10，openai_tools 不缓存；规模上来按版本号失效。"""
@@ -24,7 +24,7 @@ def _first_non_null_type(t: Any) -> str:
 
 def coerce_tool_args(parameters: dict, args: dict) -> dict:
     """按 JSON Schema 强转 LLM 返回的字符串参数（spec 6.2.3）。
-    Qwen 偶尔把 integer/number/boolean/array/object 返回成字符串，统一兜底。
+    模型 偶尔把 integer/number/boolean/array/object 返回成字符串，统一兜底。
     union type 如 ["string","null"] 取首个非 null。强转失败保留原值，不抛异常。"""
     props = parameters.get("properties", {})
     out = dict(args)
@@ -76,7 +76,7 @@ class ToolRegistry:
         return [td for td in self._defs.values() if td.availability()]
 
     def openai_tools(self) -> list[dict]:
-        """LLM 侧 schema。动态重建防 Qwen 幻觉调隐藏工具。"""
+        """LLM 侧 schema。动态重建防 模型 幻觉调隐藏工具。"""
         return [
             {"type": "function",
              "function": {"name": td.name, "description": td.description,

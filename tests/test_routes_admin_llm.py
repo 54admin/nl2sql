@@ -29,13 +29,13 @@ async def test_get_returns_yaml_source_when_no_dynamic(client):
 @pytest.mark.asyncio
 async def test_put_creates_dynamic_config(client):
     resp = await client.put("/api/admin/llm-config", json={
-        "model": "qwen3", "base_url": "http://gw", "api_key": "k",
+        "model": "test-model", "base_url": "http://gw", "api_key": "k",
         "temperature": 0.5, "timeout": 90, "enabled": True})
     assert resp.status_code == 200
     resp = await client.get("/api/admin/llm-config")
     body = resp.json()
     assert body["source"] == "dynamic"
-    assert body["dynamic"]["model"] == "qwen3"
+    assert body["dynamic"]["model"] == "test-model"
     assert body["dynamic"]["temperature"] == 0.5
 
 
