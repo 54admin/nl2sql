@@ -36,7 +36,7 @@ async def init_db(url: str | None = None, config: PostgresConfig | None = None):
     _AsyncSessionFactory = async_sessionmaker(_engine, expire_on_commit=False)
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    log.info("PG 已初始化: %s", "sqlite" if url else "postgres")
+    log.info("PG 已初始化: %s", "sqlite" if "sqlite" in target else "postgres")
 
 
 def AsyncSessionFactory() -> AsyncSession:
