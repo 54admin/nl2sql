@@ -1,7 +1,7 @@
 """ORM 模型。对应 spec 第 12 章核心表。"""
 from datetime import datetime
 
-from sqlalchemy import String, Text, DateTime, func
+from sqlalchemy import String, Text, DateTime, Integer, Boolean, ForeignKey, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -108,5 +108,102 @@ class Prompt(Base):
     content: Mapped[str] = mapped_column(Text)
     version: Mapped[int] = mapped_column(default=1)
     enabled: Mapped[bool] = mapped_column(default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
+                                                 onupdate=func.now())
+
+
+class Datasource(Base):
+    """业务数据源连接配置（密码加密存）。P1a。"""
+    __tablename__ = "datasources"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+    type: Mapped[str] = mapped_column(String(32))           # starrocks/mysql/pg
+    host: Mapped[str] = mapped_column(String(128))
+    port: Mapped[int] = mapped_column(Integer)
+    db_name: Mapped[str] = mapped_column(String(128))
+    username: Mapped[str] = mapped_column(String(128))
+    password_enc: Mapped[str] = mapped_column(Text)         # Fernet 密文
+    sync_scope: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
+                                                 onupdate=func.now())
+
+
+class MetadataTable(Base):
+    """元数据·表（反向同步 + 手写覆盖）。P1a。"""
+    __tablename__ = "metadata_tables"
+    __table_args__ = (UniqueConstraint("datasource_id", "table_name", name="uq_ds_table"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    datasource_id: Mapped[int] = mapped_column(ForeignKey("datasources.id"), index=True)
+    table_name: Mapped[str] = mapped_column(String(128))
+    table_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String(16), default="synced")  # synced/manual
+    display_columns_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hidden_columns_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
+                                                 onupdate=func.now())
+
+
+class MetadataColumn(Base):
+    """元数据·字段。P1a。"""
+    __tablename__ = "metadata_columns"
+    __table_args__ = (UniqueConstraint("table_id", "column_name", name="uq_table_col"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    table_id: Mapped[int] = mapped_column(ForeignKey("metadata_tables.id"), index=True)
+    column_name: Mapped[str] = mapped_column(String(128))
+    column_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    data_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    role_tag: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    source: Mapped[str] = mapped_column(String(16), default="synced")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
+                                                 onupdate=func.now())
+
+
+class TableRelation(Base):
+    """逻辑主外键关系（人工录入）。P1a 建口径，P1c JOIN 消费。"""
+    __tablename__ = "table_relations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    datasource_id: Mapped[int] = mapped_column(ForeignKey("datasources.id"), index=True)
+    main_table: Mapped[str] = mapped_column(String(128))
+    rel_table: Mapped[str] = mapped_column(String(128))
+    join_keys_json: Mapped[str] = mapped_column(Text)       # [{"main":"a.id","rel":"b.a_id"}]
+    join_type: Mapped[str] = mapped_column(String(16), default="inner")
+    business_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
+                                                 onupdate=func.now())
+
+
+class BusinessRule(Base):
+    """业务规则（人工录入）。P1a 建口径，后续阶段消费。"""
+    __tablename__ = "business_rules"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    category: Mapped[str] = mapped_column(String(32), index=True)  # metric/constraint/interaction/attribution
+    key: Mapped[str] = mapped_column(String(128))
+    value_json: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
+                                                 onupdate=func.now())
+
+
+class SqlTemplate(Base):
+    """SQL 模板（人工录入）。P1a 建口径，P1b 应用。"""
+    __tablename__ = "sql_templates"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    datasource_id: Mapped[int] = mapped_column(ForeignKey("datasources.id"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    trigger_keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
+    trigger_semantics: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sql_template: Mapped[str] = mapped_column(Text)
+    params_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    formatters_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
                                                  onupdate=func.now())
