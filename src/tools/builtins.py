@@ -6,6 +6,7 @@ from __future__ import annotations
 from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
 from src.tools.metadata import QUERY_METADATA
 from src.tools.registry import ToolRegistry
+from src.tools.sql_engine import EXECUTE_SQL
 
 
 async def _echo(args: dict, ctx: LoopContext, cancel_token: CancelToken) -> ToolResult:
@@ -52,8 +53,8 @@ ASK_USER = ToolDefinition(
 
 
 def default_registry() -> ToolRegistry:
-    """注册 echo / finish / ask_user + query_metadata 工具，返回新 ToolRegistry。"""
+    """注册 echo / finish / ask_user + query_metadata + execute_sql 工具，返回新 ToolRegistry。"""
     reg = ToolRegistry()
-    for td in (ECHO, FINISH, ASK_USER, QUERY_METADATA):
+    for td in (ECHO, FINISH, ASK_USER, QUERY_METADATA, EXECUTE_SQL):
         reg.register(td)
     return reg
