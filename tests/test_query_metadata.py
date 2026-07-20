@@ -49,7 +49,8 @@ async def test_handler_returns_enabled_tables(db):
     class Ctx: pass
     res = await query_metadata({"datasource_id": db}, Ctx(), None)
     parsed = json.loads(res.summary)
-    assert parsed[0]["table_name"] == "fact_power"
+    assert parsed["tables"][0]["table_name"] == "fact_power"   # P1c：结构变 tables/relations
+    assert parsed["relations"] == []   # 未配关联时是空数组，不是缺键
 
 
 @pytest.mark.asyncio
@@ -69,7 +70,25 @@ async def test_handler_defaults_to_first_datasource(db):
     class Ctx: pass
     res = await query_metadata({}, Ctx(), None)
     parsed = json.loads(res.summary)
-    assert parsed[0]["table_name"] == "fact_power"
+    assert parsed["tables"][0]["table_name"] == "fact_power"
+
+
+@pytest.mark.asyncio
+async def test_metadata_includes_relations(db):
+    """P1c：已配的逻辑关联随 metadata 返回，供 LLM 生成多表 JOIN。"""
+    from src.storage.models import TableRelation
+    async with AsyncSessionFactory() as s:
+        s.add(TableRelation(datasource_id=db, main_table="fact_power", rel_table="dim_station",
+                            join_keys_json='[{"main":"fact_power.sid","rel":"dim_station.id"}]',
+                            join_type="left", business_note="场站"))
+        await s.commit()
+    res = await query_metadata({"datasource_id": db}, type("C", (), {"session_id": "s"})(), None)
+    parsed = json.loads(res.summary)
+    assert parsed["tables"][0]["table_name"] == "fact_power"   # tables 还在
+    assert parsed["relations"][0]["rel_table"] == "dim_station"
+    assert parsed["relations"][0]["join_keys"] == [{"main": "fact_power.sid", "rel": "dim_station.id"}]
+    assert parsed["relations"][0]["join_type"] == "left"
+    assert parsed["relations"][0]["business_note"] == "场站"
 
 
 @pytest.mark.asyncio
