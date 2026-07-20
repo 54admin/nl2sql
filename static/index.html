@@ -22,19 +22,76 @@
   #input { flex: 1; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; }
   #send { padding: 10px 22px; background: #4caf50; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
   #send:disabled { background: #bdbdbd; cursor: not-allowed; }
+  /* 配置 Tab + 数据源管理样式 */
+  header nav { display: flex; gap: 6px; }
+  .tab { padding: 4px 14px; background: #eee; color: #333; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .tab.active { background: #4caf50; color: #fff; }
+  #chat-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }  /* 包住消息区+输入栏，保持原对话布局不塌 */
+  #config-panel { flex: 1; overflow: auto; padding: 16px; }
+  .cfg-layout { display: flex; gap: 16px; height: 100%; }
+  .cfg-left { width: 30%; display: flex; flex-direction: column; gap: 8px; }
+  .cfg-right { flex: 1; background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; overflow: auto; }
+  #btn-new-ds { padding: 8px; background: #4caf50; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+  .ds-item { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px; cursor: pointer; }
+  .ds-item.selected { border-color: #4caf50; box-shadow: 0 0 0 2px rgba(76,175,80,0.2); }
+  .ds-item b { font-size: 14px; }
+  .ds-item span { color: #888; font-size: 12px; margin-left: 6px; }
+  .ds-item button { margin-top: 6px; margin-right: 4px; padding: 3px 8px; font-size: 12px; border: 1px solid #ccc; background: #fafafa; border-radius: 4px; cursor: pointer; }
+  .ds-item button:hover { background: #eee; }
+  .table-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f0f0f0; }
+  .table-row label { flex: 1; cursor: pointer; }
+  .table-row .cmt { color: #888; font-size: 12px; flex: 1; }
+  .table-row .expand { padding: 2px 8px; font-size: 12px; border: 1px solid #ccc; background: #fafafa; border-radius: 4px; cursor: pointer; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 99; }
+  .modal-body { background: #fff; padding: 20px; border-radius: 10px; width: 360px; display: flex; flex-direction: column; gap: 8px; }
+  .modal-body h3 { margin: 0 0 4px; font-size: 16px; }
+  .modal-body input { padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
+  .modal-body button { padding: 8px; border: none; border-radius: 6px; cursor: pointer; }
+  #ds-save { background: #4caf50; color: #fff; }
+  #ds-cancel { background: #eee; color: #333; }
 </style>
 </head>
 <body>
 <div id="app">
   <header>
     <h1>AI 问数</h1>
+    <nav>
+      <button id="tab-chat" class="tab active">对话</button>
+      <button id="tab-config" class="tab">配置</button>
+    </nav>
     <select id="mode"><option value="user">用户模式</option><option value="admin">管理员模式</option></select>
   </header>
-  <div id="messages"></div>
-  <footer>
-    <input id="input" placeholder="输入问题，回车发送" autocomplete="off">
-    <button id="send">发送</button>
-  </footer>
+  <div id="chat-panel">
+    <div id="messages"></div>
+    <footer>
+      <input id="input" placeholder="输入问题，回车发送" autocomplete="off">
+      <button id="send">发送</button>
+    </footer>
+  </div>
+  <div id="config-panel" style="display:none">
+    <div class="cfg-layout">
+      <div class="cfg-left">
+        <button id="btn-new-ds">+ 新建数据源</button>
+        <div id="ds-list"></div>
+      </div>
+      <div class="cfg-right"><div id="tables-area">点左侧选数据源</div></div>
+    </div>
+  </div>
+</div>
+<div id="ds-modal" class="modal" style="display:none">
+  <div class="modal-body">
+    <h3 id="ds-modal-title">新建数据源</h3>
+    <input id="ds-name" placeholder="名称">
+    <input id="ds-type" placeholder="类型" value="starrocks">
+    <input id="ds-host" placeholder="host">
+    <input id="ds-port" placeholder="port" value="9030">
+    <input id="ds-db" placeholder="库名">
+    <input id="ds-user" placeholder="用户名">
+    <input id="ds-pwd" type="password" placeholder="密码">
+    <input id="ds-scope" placeholder="同步范围(前缀逗号分隔,空=全部)">
+    <button id="ds-save">保存</button>
+    <button id="ds-cancel">取消</button>
+  </div>
 </div>
 <script>
 const USER_ID = "web-user";
@@ -77,6 +134,24 @@ async function ask(text) {
   const sid = await ensureSession();
   sendBtn.disabled = true;
   const bubble = addMsg("", "assistant");
+  // 前端匀速打字队列：后端 chunk 粒度粗/间隔不均，前端逐字匀速吐，填平卡顿
+  let queue = "", timer = null, streamDone = false, finalText = "", stopped = false;
+  const TICK_MS = 38;  // 每字间隔（ms），约 26 字/秒；嫌快调大、嫌慢调小
+  function step() {
+    if (stopped) return;
+    if (!queue) {                       // 队列空：停 tick；流已结束则用 done 的权威答案定稿
+      clearInterval(timer); timer = null;
+      if (streamDone && finalText) bubble.textContent = finalText;
+      return;
+    }
+    // 动态速率：堆积多就加速（防长答案打太久），少就一字一字自然蹦
+    const n = Math.max(1, Math.floor(queue.length / 60));  // 堆积超 60 字才加速，平时逐字
+    bubble.textContent += queue.slice(0, n);
+    queue = queue.slice(n);
+  }
+  function pushDelta(t) { if (!stopped) { queue += t; if (timer === null) timer = setInterval(step, TICK_MS); } }
+  function finish(ans) { streamDone = true; finalText = ans; if (timer === null && !stopped) bubble.textContent = ans; }
+  function stopTyper() { stopped = true; if (timer) { clearInterval(timer); timer = null; } }
   try {
     const resp = await fetch("/api/ask/sse", {
       method: "POST",
@@ -96,21 +171,24 @@ async function ask(text) {
         const evt = parseSSE(part);
         if (!evt) continue;
         got = true;
-        if (evt.type === "answer_delta") bubble.textContent += evt.data.text || "";
-        else if (evt.type === "done") bubble.textContent = evt.data.answer || "";
+        if (evt.type === "answer_delta") pushDelta(evt.data.text || "");
+        else if (evt.type === "done") finish(evt.data.answer || "");
         else if (evt.type === "clarification_needed") {
+          stopTyper();
           bubble.remove();
           addMsg("🤔 需要补充：" + evt.data.question, "clarify");
         } else if (evt.type === "correction") {
           addMsg("已纠正：" + evt.data.original + " → " + evt.data.normalized, "system");
         } else if (evt.type === "error") {
+          stopTyper();
           bubble.textContent = "⚠ " + (evt.data.message || "出错");
           bubble.className = "msg err";
         }
       }
     }
-    if (!got) bubble.textContent = "（无回复）";
+    if (!got) { stopTyper(); bubble.textContent = "（无回复）"; }
   } catch (e) {
+    stopTyper();
     bubble.textContent = "⚠ 请求失败：" + e.message;
     bubble.className = "msg err";
   }
@@ -130,6 +208,138 @@ sendBtn.addEventListener("click", onSend);
 input.addEventListener("keydown", e => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); }
 });
+
+// ===== 配置页 Tab 切换 + 数据源管理 + 表勾选（plan Task 3）=====
+function showTab(which) {
+  const isChat = which === "chat";
+  document.getElementById("chat-panel").style.display = isChat ? "flex" : "none";
+  document.getElementById("config-panel").style.display = isChat ? "none" : "block";
+  document.getElementById("tab-chat").classList.toggle("active", isChat);
+  document.getElementById("tab-config").classList.toggle("active", !isChat);
+  if (!isChat) loadDatasources();
+}
+document.getElementById("tab-chat").onclick = () => showTab("chat");
+document.getElementById("tab-config").onclick = () => showTab("config");
+
+let selectedDsId = null;
+let editingDsId = null;
+
+async function loadDatasources() {
+  const r = await fetch("/api/admin/datasources");
+  const {datasources} = await r.json();
+  const list = document.getElementById("ds-list");
+  list.innerHTML = "";
+  for (const ds of datasources) {
+    const div = document.createElement("div");
+    div.className = "ds-item" + (ds.id === selectedDsId ? " selected" : "");
+    div.innerHTML = `<b>${ds.name}</b> <span>${ds.type}</span>
+      <div>
+        <button data-act="test">测试</button>
+        <button data-act="sync">同步</button>
+        <button data-act="edit">编辑</button>
+        <button data-act="del">删除</button>
+      </div>`;
+    div.onclick = (e) => {
+      if (e.target.tagName === "BUTTON") return;
+      selectedDsId = ds.id; loadDatasources(); loadTables(ds.id);
+    };
+    div.querySelector('[data-act=test]').onclick = async () => {
+      const rr = await fetch(`/api/admin/datasources/${ds.id}/test`, {method: "POST"});
+      if (rr.ok) alert("连接成功");
+      else { const d = await rr.json().catch(() => ({})); alert("连接失败: " + (d.detail || rr.status)); }
+    };
+    div.querySelector('[data-act=sync]').onclick = async () => {
+      const rr = await fetch(`/api/admin/datasources/${ds.id}/sync`, {method: "POST"});
+      if (rr.ok) { alert("同步完成: " + JSON.stringify(await rr.json())); loadTables(ds.id); }
+      else { const d = await rr.json().catch(() => ({})); alert("同步失败: " + (d.detail || rr.status)); }
+    };
+    div.querySelector('[data-act=edit]').onclick = () => openDsModal(ds);
+    div.querySelector('[data-act=del]').onclick = async () => {
+      if (!confirm("删除数据源 " + ds.name + "?")) return;
+      await fetch(`/api/admin/datasources/${ds.id}`, {method: "DELETE"});
+      if (selectedDsId === ds.id) {
+        selectedDsId = null;
+        document.getElementById("tables-area").innerHTML = "点左侧选数据源";
+      }
+      loadDatasources();
+    };
+    list.appendChild(div);
+  }
+}
+
+function openDsModal(ds) {
+  editingDsId = ds ? ds.id : null;
+  document.getElementById("ds-modal-title").textContent = ds ? "编辑数据源" : "新建数据源";
+  for (const [k, v] of Object.entries({
+    "ds-name": ds?.name, "ds-type": ds?.type || "starrocks", "ds-host": ds?.host,
+    "ds-port": ds?.port || 9030, "ds-db": ds?.db_name, "ds-user": ds?.username,
+    "ds-pwd": "", "ds-scope": ds?.sync_scope || ""})) {
+    document.getElementById(k).value = v ?? "";
+  }
+  document.getElementById("ds-modal").style.display = "flex";
+}
+
+document.getElementById("btn-new-ds").onclick = () => openDsModal(null);
+document.getElementById("ds-cancel").onclick = () => document.getElementById("ds-modal").style.display = "none";
+document.getElementById("ds-save").onclick = async () => {
+  const body = {
+    name: document.getElementById("ds-name").value.trim(),
+    type: document.getElementById("ds-type").value.trim() || "starrocks",
+    host: document.getElementById("ds-host").value.trim(),
+    port: parseInt(document.getElementById("ds-port").value),
+    db_name: document.getElementById("ds-db").value.trim(),
+    username: document.getElementById("ds-user").value.trim(),
+    sync_scope: document.getElementById("ds-scope").value.trim() || null,
+  };
+  const pwd = document.getElementById("ds-pwd").value;
+  if (!body.name || !body.host || !body.db_name || !body.username) { alert("名称/host/库/用户名必填"); return; }
+  if (editingDsId) {
+    if (pwd) body.password = pwd;   // 编辑时空密码=不改
+    await fetch(`/api/admin/datasources/${editingDsId}`, {
+      method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  } else {
+    if (!pwd) { alert("新建必须填密码"); return; }
+    body.password = pwd;
+    await fetch("/api/admin/datasources", {
+      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  }
+  document.getElementById("ds-modal").style.display = "none";
+  loadDatasources();
+};
+
+async function loadTables(dsId) {
+  const r = await fetch(`/api/admin/metadata?datasource_id=${dsId}`);
+  const {tables} = await r.json();
+  const area = document.getElementById("tables-area");
+  area.innerHTML = `<button class="expand" onclick="syncDs()">同步元数据</button>`;
+  if (!tables.length) area.innerHTML += "<p>无元数据，点「同步」拉取</p>";
+  for (const t of tables) {
+    const row = document.createElement("div");
+    row.className = "table-row";
+    row.innerHTML = `<label><input type="checkbox" ${t.enabled ? "checked" : ""}> ${t.table_name}</label>
+      <span class="cmt">${t.table_comment || ""}</span>
+      <button class="expand">字段</button>`;
+    const cb = row.querySelector("input");
+    cb.onchange = async () => {
+      const rr = await fetch(`/api/admin/metadata/tables/${t.id}`, {
+        method: "PUT", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({enabled: cb.checked})});
+      if (!rr.ok) { cb.checked = !cb.checked; alert("保存失败"); }
+    };
+    row.querySelector(".expand").onclick = () => {
+      if (!t.columns || !t.columns.length) { alert("无字段信息（先同步元数据）"); return; }
+      alert(t.columns.map(c => `${c.column_name}(${c.data_type}) ${c.column_comment || ""}`).join("\n"));
+    };
+    area.appendChild(row);
+  }
+}
+
+async function syncDs() {
+  if (!selectedDsId) return;
+  const rr = await fetch(`/api/admin/datasources/${selectedDsId}/sync`, {method: "POST"});
+  if (rr.ok) loadTables(selectedDsId);
+  else { const d = await rr.json().catch(() => ({})); alert("同步失败: " + (d.detail || rr.status)); }
+}
 </script>
 </body>
 </html>
