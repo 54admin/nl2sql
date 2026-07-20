@@ -75,6 +75,17 @@ async def test_other_three_tables_persist(db):
 
 
 @pytest.mark.asyncio
+async def test_metadata_table_enabled_defaults_false(db):
+    async with AsyncSessionFactory() as s:
+        ds = Datasource(name="d3", type="starrocks", host="h", port=1,
+                        db_name="db", username="u", password_enc="c")
+        s.add(ds); await s.flush()
+        mt = MetadataTable(datasource_id=ds.id, table_name="t", source="synced")
+        s.add(mt); await s.commit()
+        assert mt.enabled is False
+
+
+@pytest.mark.asyncio
 async def test_datasource_unique_name(db):
     """同名数据源触发 unique 约束。"""
     async with AsyncSessionFactory() as s:
