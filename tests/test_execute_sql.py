@@ -49,6 +49,15 @@ def fernet_key(monkeypatch):
     monkeypatch.setenv("NL2SQL_DS_KEY", Fernet.generate_key().decode())
 
 
+@pytest.fixture(autouse=True)
+def _no_sensitive_columns(monkeypatch):
+    """默认 _sensitive_columns 返回空集（无 sensitive 配置 = 向后兼容），
+    避免每个测试都 mock 一遍；需要 sensitive 行为的测试单独覆盖。"""
+    async def _empty(ds_id):
+        return set()
+    monkeypatch.setattr("src.tools.sql_engine._sensitive_columns", _empty)
+
+
 class Ctx:
     session_id = "sess-test"
 
@@ -103,3 +112,61 @@ async def test_validate_sql_passthrough():
 async def test_no_sql_returns_error():
     res = await execute_sql({}, Ctx(), None)
     assert "未提供 SQL" in res.summary
+
+
+@pytest.mark.asyncio
+async def test_execute_filters_sensitive_columns(monkeypatch):
+    """P1c：role_tag=sensitive 字段从摘要（columns/preview）剔除，不回灌 LLM；
+    全量结果（save_result）保留完整列。"""
+    async def fake_list(self):
+        return [{"id": 1}]
+
+    async def fake_get_engine(self, ds_id):
+        return FakeEngine(["kwh", "id_card"], [{"kwh": 1, "id_card": "110xxx"}])
+
+    saved = {}
+
+    async def fake_save(sid, cols, rows, datasource_id=None):
+        saved["cols"] = cols
+        saved["rows"] = rows
+        return "rid"
+
+    async def fake_sensitive(ds_id):
+        return {"id_card"}
+
+    monkeypatch.setattr("src.datasource.manager.DataSourceManager.list_datasources", fake_list)
+    monkeypatch.setattr("src.datasource.manager.DataSourceManager.get_engine", fake_get_engine)
+    monkeypatch.setattr("src.tools.sql_engine.save_result", fake_save)
+    monkeypatch.setattr("src.tools.sql_engine._sensitive_columns", fake_sensitive)
+
+    res = await execute_sql({"sql": "SELECT kwh,id_card FROM t"}, Ctx(), None)
+    s = json.loads(res.summary)
+    assert "id_card" not in s["columns"]    # sensitive 被滤出摘要
+    assert "kwh" in s["columns"]
+    assert "id_card" not in str(s["preview"])
+    assert saved["cols"] == ["kwh", "id_card"]   # 全量结果完整保留（前端要完整数据）
+
+
+@pytest.mark.asyncio
+async def test_execute_no_sensitive_config_passes_through(monkeypatch):
+    """role_tag 全空（未配）时不过滤，向后兼容。"""
+    async def fake_list(self):
+        return [{"id": 1}]
+
+    async def fake_get_engine(self, ds_id):
+        return FakeEngine(["kwh"], [{"kwh": 1}])
+
+    async def fake_save(sid, cols, rows, datasource_id=None):
+        return "rid"
+
+    async def fake_sensitive(ds_id):
+        return set()
+
+    monkeypatch.setattr("src.datasource.manager.DataSourceManager.list_datasources", fake_list)
+    monkeypatch.setattr("src.datasource.manager.DataSourceManager.get_engine", fake_get_engine)
+    monkeypatch.setattr("src.tools.sql_engine.save_result", fake_save)
+    monkeypatch.setattr("src.tools.sql_engine._sensitive_columns", fake_sensitive)
+
+    res = await execute_sql({"sql": "SELECT kwh FROM t"}, Ctx(), None)
+    s = json.loads(res.summary)
+    assert s["columns"] == ["kwh"]

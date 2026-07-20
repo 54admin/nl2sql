@@ -9,6 +9,8 @@ import json
 from sqlalchemy import text
 
 from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
+from src.storage.models import MetadataColumn
+from src.storage.pg_client import AsyncSessionFactory
 from src.storage.query_results import save_result
 
 
@@ -31,6 +33,16 @@ async def _execute(engine, sql: str) -> tuple[list, list]:
 def _preview(rows: list, n: int = 5) -> list:
     """前 n 行预览回灌 LLM，全量走 result_id 旁路。"""
     return rows[:n]
+
+
+async def _sensitive_columns(datasource_id: int) -> set[str]:
+    """读所有 role_tag='sensitive' 的字段名。
+    ponytail: 全库级匹配（同名列一处标 sensitive 就全部过滤），不按 datasource/表细分；
+    多源共用列名产生歧义时再换按 datasource_id+table 精确过滤。datasource_id 当前未用，留位。"""
+    async with AsyncSessionFactory() as s:
+        rows = (await s.execute(MetadataColumn.__table__.select().where(
+            MetadataColumn.role_tag == "sensitive"))).all()
+    return {r.column_name for r in rows}
 
 
 async def execute_sql(args: dict, ctx: LoopContext,
@@ -63,7 +75,15 @@ async def execute_sql(args: dict, ctx: LoopContext,
         # 自愈：不抛异常，错误信息回灌让 LLM 改 SQL 重试
         return ToolResult(summary=f"SQL 执行失败: {e}。请检查表名/字段/语法后重试。")
 
+    # 全量结果先旁路（save_result 拿完整列，前端要完整数据）
     result_id = await save_result(session_id, columns, rows, datasource_id=int(ds_id))
+
+    # 摘要过滤 sensitive 字段：role_tag=sensitive 的列不回灌 LLM（spec 第 7.5）
+    sensitive = await _sensitive_columns(int(ds_id))
+    if sensitive:
+        columns = [c for c in columns if c not in sensitive]
+        rows = [{k: v for k, v in r.items() if k not in sensitive} for r in rows]
+
     summary = {"result_id": result_id, "rows": len(rows), "columns": columns,
                "preview": _preview(rows)}
     return ToolResult(summary=json.dumps(summary, ensure_ascii=False, default=str))
