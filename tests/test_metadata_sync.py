@@ -131,3 +131,19 @@ def test_collect_sync_filters_system_tables(monkeypatch):
                         lambda conn: FakeInspector())
     result = _collect_sync(None)
     assert {r["table"] for r in result} == {"fact_power", "dim_station"}
+
+
+def test_collect_sync_includes_views(monkeypatch):
+    """_collect_sync 同时拉表和视图（视图也进问数元数据）。"""
+    from src.datasource.metadata_sync import _collect_sync
+
+    class FakeInspector:
+        def get_table_names(self): return ["fact_power"]
+        def get_view_names(self): return ["v_monthly_power"]   # 视图
+        def get_table_comment(self, name): return "注释"
+        def get_columns(self, name): return [{"name": "kwh", "type": "BIGINT", "comment": ""}]
+
+    monkeypatch.setattr("src.datasource.metadata_sync.inspect",
+                        lambda conn: FakeInspector())
+    result = _collect_sync(None)
+    assert {r["table"] for r in result} == {"fact_power", "v_monthly_power"}   # 表+视图都进

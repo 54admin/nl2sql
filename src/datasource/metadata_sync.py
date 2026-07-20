@@ -1,4 +1,4 @@
-"""元数据同步：从业务库（StarRocks）Inspector 拉表/字段，写系统 PG metadata_*。
+"""元数据同步：从业务库（StarRocks）Inspector 拉表+视图/字段，写系统 PG metadata_*。
 保留 source=manual 的手写覆盖，不被同步冲掉。同步只写 comment/type，不碰 is_primary/role_tag。"""
 from __future__ import annotations
 
@@ -34,18 +34,27 @@ def _collect_sync(sync_conn) -> list[dict]:
     自动过滤系统库/表（information_schema/mysql/performance_schema/sys），
     与 sync_scope 无关——系统对象永远不进问数元数据。"""
     insp = inspect(sync_conn)
+    # 表 + 视图（视图 try/except：某些库/方言不支持 get_view_names）
+    names = list(insp.get_table_names())
+    try:
+        names.extend(insp.get_view_names())
+    except Exception:
+        pass
     out = []
-    for table_name in insp.get_table_names():
-        if _is_system_name(table_name):
+    for name in names:
+        if _is_system_name(name):
             continue
         try:
-            tcomment = (insp.get_table_comment(table_name) or {}).get("text") or ""
+            tcomment = (insp.get_table_comment(name) or {}).get("text") or ""
         except Exception:
             tcomment = ""
-        cols = [{"name": c["name"], "type": str(c["type"]),
-                 "comment": c.get("comment") or ""}
-                for c in insp.get_columns(table_name)]
-        out.append({"table": table_name, "comment": tcomment, "columns": cols})
+        try:
+            cols = [{"name": c["name"], "type": str(c["type"]),
+                     "comment": c.get("comment") or ""}
+                    for c in insp.get_columns(name)]
+        except Exception:
+            cols = []   # 视图拉字段失败兜底空
+        out.append({"table": name, "comment": tcomment, "columns": cols})
     return out
 
 
