@@ -45,7 +45,7 @@
   .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 99; }
   .modal-body { background: #fff; padding: 20px; border-radius: 10px; width: 360px; display: flex; flex-direction: column; gap: 8px; }
   .modal-body h3 { margin: 0 0 4px; font-size: 16px; }
-  .modal-body input { padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
+  .modal-body input, .modal-body select { padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
   .modal-body button { padding: 8px; border: none; border-radius: 6px; cursor: pointer; }
   #ds-save { background: #4caf50; color: #fff; }
   #ds-cancel { background: #eee; color: #333; }
@@ -82,13 +82,15 @@
   <div class="modal-body">
     <h3 id="ds-modal-title">新建数据源</h3>
     <input id="ds-name" placeholder="名称">
-    <input id="ds-type" placeholder="类型" value="starrocks">
-    <input id="ds-host" placeholder="host">
-    <input id="ds-port" placeholder="port" value="9030">
+    <select id="ds-type">
+      <option value="starrocks">StarRocks</option>
+      <option value="mysql">MySQL</option>
+      <option value="pg">PostgreSQL</option>
+    </select>
+    <input id="ds-addr" placeholder="地址 host:port 如 10.0.0.1:9030">
     <input id="ds-db" placeholder="库名">
     <input id="ds-user" placeholder="用户名">
     <input id="ds-pwd" type="password" placeholder="密码">
-    <input id="ds-scope" placeholder="同步范围(前缀逗号分隔,空=全部)">
     <button id="ds-save">保存</button>
     <button id="ds-cancel">取消</button>
   </div>
@@ -226,6 +228,7 @@ let editingDsId = null;
 
 async function loadDatasources() {
   const r = await fetch("/api/admin/datasources");
+  if (!r.ok) { const d = await r.json().catch(() => ({})); alert("加载数据源失败: " + (d.detail || r.status)); return; }
   const {datasources} = await r.json();
   const list = document.getElementById("ds-list");
   list.innerHTML = "";
@@ -256,7 +259,8 @@ async function loadDatasources() {
     div.querySelector('[data-act=edit]').onclick = () => openDsModal(ds);
     div.querySelector('[data-act=del]').onclick = async () => {
       if (!confirm("删除数据源 " + ds.name + "?")) return;
-      await fetch(`/api/admin/datasources/${ds.id}`, {method: "DELETE"});
+      const rr = await fetch(`/api/admin/datasources/${ds.id}`, {method: "DELETE"});
+      if (!rr.ok) { const d = await rr.json().catch(() => ({})); alert("删除失败: " + (d.detail || rr.status)); return; }
       if (selectedDsId === ds.id) {
         selectedDsId = null;
         document.getElementById("tables-area").innerHTML = "点左侧选数据源";
@@ -270,49 +274,53 @@ async function loadDatasources() {
 function openDsModal(ds) {
   editingDsId = ds ? ds.id : null;
   document.getElementById("ds-modal-title").textContent = ds ? "编辑数据源" : "新建数据源";
-  for (const [k, v] of Object.entries({
-    "ds-name": ds?.name, "ds-type": ds?.type || "starrocks", "ds-host": ds?.host,
-    "ds-port": ds?.port || 9030, "ds-db": ds?.db_name, "ds-user": ds?.username,
-    "ds-pwd": "", "ds-scope": ds?.sync_scope || ""})) {
-    document.getElementById(k).value = v ?? "";
-  }
+  document.getElementById("ds-name").value = ds?.name ?? "";
+  document.getElementById("ds-type").value = ds?.type || "starrocks";
+  document.getElementById("ds-addr").value = ds ? `${ds.host}:${ds.port}` : "";
+  document.getElementById("ds-db").value = ds?.db_name ?? "";
+  document.getElementById("ds-user").value = ds?.username ?? "";
+  document.getElementById("ds-pwd").value = "";
   document.getElementById("ds-modal").style.display = "flex";
 }
 
 document.getElementById("btn-new-ds").onclick = () => openDsModal(null);
 document.getElementById("ds-cancel").onclick = () => document.getElementById("ds-modal").style.display = "none";
 document.getElementById("ds-save").onclick = async () => {
+  const [host, port] = document.getElementById("ds-addr").value.trim().split(":");
   const body = {
     name: document.getElementById("ds-name").value.trim(),
-    type: document.getElementById("ds-type").value.trim() || "starrocks",
-    host: document.getElementById("ds-host").value.trim(),
-    port: parseInt(document.getElementById("ds-port").value),
+    type: document.getElementById("ds-type").value,
+    host: (host || "").trim(),
+    port: parseInt(port) || 9030,
     db_name: document.getElementById("ds-db").value.trim(),
     username: document.getElementById("ds-user").value.trim(),
-    sync_scope: document.getElementById("ds-scope").value.trim() || null,
+    // 不发 sync_scope：后端默认 None=全部业务表，同步自动过滤系统库
   };
   const pwd = document.getElementById("ds-pwd").value;
-  if (!body.name || !body.host || !body.db_name || !body.username) { alert("名称/host/库/用户名必填"); return; }
+  if (!body.name || !body.host || !body.db_name || !body.username) { alert("名称/地址/库/用户名必填"); return; }
+  let r;
   if (editingDsId) {
     if (pwd) body.password = pwd;   // 编辑时空密码=不改
-    await fetch(`/api/admin/datasources/${editingDsId}`, {
+    r = await fetch(`/api/admin/datasources/${editingDsId}`, {
       method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   } else {
     if (!pwd) { alert("新建必须填密码"); return; }
     body.password = pwd;
-    await fetch("/api/admin/datasources", {
+    r = await fetch("/api/admin/datasources", {
       method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   }
+  if (!r.ok) { const d = await r.json().catch(() => ({})); alert("保存失败: " + (d.detail || r.status)); return; }
   document.getElementById("ds-modal").style.display = "none";
   loadDatasources();
 };
 
 async function loadTables(dsId) {
   const r = await fetch(`/api/admin/metadata?datasource_id=${dsId}`);
+  if (!r.ok) { const d = await r.json().catch(() => ({})); alert("加载表失败: " + (d.detail || r.status)); return; }
   const {tables} = await r.json();
   const area = document.getElementById("tables-area");
-  area.innerHTML = `<button class="expand" onclick="syncDs()">同步元数据</button>`;
-  if (!tables.length) area.innerHTML += "<p>无元数据，点「同步」拉取</p>";
+  area.innerHTML = `<h3 style="margin:0 0 8px;font-size:14px;">勾选要参与问数的表</h3><button class="expand" onclick="syncDs()">同步元数据</button>`;
+  if (!tables.length) area.innerHTML += "<p>点「同步元数据」拉取表，然后勾选要问数的</p>";
   for (const t of tables) {
     const row = document.createElement("div");
     row.className = "table-row";
@@ -324,7 +332,7 @@ async function loadTables(dsId) {
       const rr = await fetch(`/api/admin/metadata/tables/${t.id}`, {
         method: "PUT", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({enabled: cb.checked})});
-      if (!rr.ok) { cb.checked = !cb.checked; alert("保存失败"); }
+      if (!rr.ok) { cb.checked = !cb.checked; const d = await rr.json().catch(() => ({})); alert("保存失败: " + (d.detail || rr.status)); }
     };
     row.querySelector(".expand").onclick = () => {
       if (!t.columns || !t.columns.length) { alert("无字段信息（先同步元数据）"); return; }
