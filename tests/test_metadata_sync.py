@@ -13,9 +13,20 @@ def fernet_key(monkeypatch):
 
 
 class FakeEngine:
-    """假业务库 engine：run_sync 返回预设的表/字段，不连真库。"""
+    """假业务库 engine：connect() → FakeConn，run_sync 返回预设表/字段，不连真库。"""
     def __init__(self, fetched):
         self._fetched = fetched
+    def connect(self):
+        return FakeConn(self._fetched)
+
+
+class FakeConn:
+    def __init__(self, fetched):
+        self._fetched = fetched
+    async def __aenter__(self):
+        return self
+    async def __aexit__(self, *a):
+        pass
     async def run_sync(self, fn):
         return self._fetched
 

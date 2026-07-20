@@ -62,7 +62,8 @@ async def sync_metadata(ds_id: int, engine: AsyncEngine, sync_scope: str | None)
     """同步一个数据源的元数据。返回 {added, updated, skipped}。
 
     ponytail: 库里已删的表/字段本期不清理（避免误删手写），后续可加。"""
-    fetched = await engine.run_sync(_collect_sync)
+    async with engine.connect() as conn:
+        fetched = await conn.run_sync(_collect_sync)
     added = updated = skipped = 0
     async with AsyncSessionFactory() as s:
         for t in fetched:

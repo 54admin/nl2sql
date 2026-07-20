@@ -77,9 +77,13 @@ async def test_test_endpoint_calls_manager(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sync_endpoint(client, monkeypatch):
-    """sync 端点调 sync_metadata；mock engine.run_sync 验证接通。"""
-    class FakeEngine:
+    """sync 端点调 sync_metadata；mock engine.connect().run_sync 验证接通。"""
+    class FakeConn:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
         async def run_sync(self, fn): return []
+    class FakeEngine:
+        def connect(self): return FakeConn()
         async def dispose(self): pass
     from src.datasource.manager import DataSourceManager
     monkeypatch.setattr(DataSourceManager, "get_engine",
