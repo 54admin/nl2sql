@@ -1,0 +1,55 @@
+"""query_metadata 工具：返回某数据源里 enabled=True 的表清单（表名/注释/字段），供 LLM 选表。
+白名单衔接配置页：只有勾选参与的表才返回。"""
+from __future__ import annotations
+
+import json
+
+from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
+from src.storage.models import MetadataColumn, MetadataTable
+from src.storage.pg_client import AsyncSessionFactory
+
+
+async def _list_enabled_tables(datasource_id: int) -> list[dict]:
+    """读 enabled=True 的表 + 字段。返回 [{table_name, table_comment, columns:[{name,comment,type}]}]。
+    ponytail: 每表一次查字段（N+1），白名单表数 ≤10 规模无感；表多了再换 IN 批量加载。"""
+    async with AsyncSessionFactory() as s:
+        tables = (await s.execute(MetadataTable.__table__.select().where(
+            MetadataTable.datasource_id == datasource_id,
+            MetadataTable.enabled.is_(True)))).all()
+        out = []
+        for t in tables:
+            cols = (await s.execute(MetadataColumn.__table__.select().where(
+                MetadataColumn.table_id == t.id))).all()
+            out.append({
+                "table_name": t.table_name,
+                "table_comment": t.table_comment or "",
+                "columns": [{"name": c.column_name,
+                             "comment": c.column_comment or "",
+                             "type": c.data_type or ""} for c in cols],
+            })
+        return out
+
+
+async def query_metadata(args: dict, ctx: LoopContext,
+                         cancel_token: CancelToken) -> ToolResult:
+    """工具 handler。args 可带 datasource_id；缺省取第一个数据源（单源场景，多源绑源留 P1c）。"""
+    from src.datasource.manager import DataSourceManager
+    ds_id = args.get("datasource_id")
+    if ds_id is None:
+        rows = await DataSourceManager().list_datasources()
+        if not rows:
+            return ToolResult(summary="无可用数据源，请先在配置页添加。")
+        ds_id = rows[0]["id"]
+    tables = await _list_enabled_tables(int(ds_id))
+    if not tables:
+        return ToolResult(summary="该数据源没有勾选参与问数的表，请在配置页勾选表后再问。")
+    return ToolResult(summary=json.dumps(tables, ensure_ascii=False))
+
+
+QUERY_METADATA = ToolDefinition(
+    name="query_metadata",
+    description=("查看当前数据源里可以查询的表清单（表名/中文注释/字段）。"
+                 "先调它了解有哪些表，再决定查哪张表。无需参数。"),
+    parameters={"type": "object", "properties": {}, "required": []},
+    handler=query_metadata,
+)

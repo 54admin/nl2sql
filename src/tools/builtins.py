@@ -4,6 +4,7 @@ finish/ask_user 只置标志位，由 AgentLoop 观察后决定终止/挂起。
 from __future__ import annotations
 
 from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
+from src.tools.metadata import QUERY_METADATA
 from src.tools.registry import ToolRegistry
 
 
@@ -51,8 +52,8 @@ ASK_USER = ToolDefinition(
 
 
 def default_registry() -> ToolRegistry:
-    """注册 echo / finish / ask_user 三个基础工具，返回新 ToolRegistry。"""
+    """注册 echo / finish / ask_user + query_metadata 工具，返回新 ToolRegistry。"""
     reg = ToolRegistry()
-    for td in (ECHO, FINISH, ASK_USER):
+    for td in (ECHO, FINISH, ASK_USER, QUERY_METADATA):
         reg.register(td)
     return reg
