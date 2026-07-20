@@ -251,9 +251,12 @@ async function loadDatasources() {
       if (rr.ok) alert("连接成功");
       else { const d = await rr.json().catch(() => ({})); alert("连接失败: " + (d.detail || rr.status)); }
     };
-    div.querySelector('[data-act=sync]').onclick = async () => {
+    div.querySelector('[data-act=sync]').onclick = async (e) => {
+      const btn = e.target;
+      btn.disabled = true; btn.textContent = "同步中⏳...";
       const rr = await fetch(`/api/admin/datasources/${ds.id}/sync`, {method: "POST"});
-      if (rr.ok) { alert("同步完成: " + JSON.stringify(await rr.json())); loadTables(ds.id); }
+      btn.disabled = false; btn.textContent = "同步";
+      if (rr.ok) { const r = await rr.json(); alert(`同步完成：新增 ${r.added} / 更新 ${r.updated} / 跳过 ${r.skipped}`); loadTables(ds.id); }
       else { const d = await rr.json().catch(() => ({})); alert("同步失败: " + (d.detail || rr.status)); }
     };
     div.querySelector('[data-act=edit]').onclick = () => openDsModal(ds);
@@ -344,9 +347,13 @@ async function loadTables(dsId) {
 
 async function syncDs() {
   if (!selectedDsId) return;
+  const area = document.getElementById("tables-area");
+  const hint = document.createElement("p");
+  hint.textContent = "⏳ 同步中，拉表+视图+字段，表多可能要几十秒…";
+  area.prepend(hint);
   const rr = await fetch(`/api/admin/datasources/${selectedDsId}/sync`, {method: "POST"});
-  if (rr.ok) loadTables(selectedDsId);
-  else { const d = await rr.json().catch(() => ({})); alert("同步失败: " + (d.detail || rr.status)); }
+  if (rr.ok) { loadTables(selectedDsId); }
+  else { hint.remove(); const d = await rr.json().catch(() => ({})); alert("同步失败: " + (d.detail || rr.status)); }
 }
 </script>
 </body>
