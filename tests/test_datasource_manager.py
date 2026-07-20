@@ -1,15 +1,8 @@
 import pytest
 
-from src.datasource.crypto import encrypt
 from src.datasource.manager import DataSourceManager
 from src.storage.models import Datasource
 from src.storage.pg_client import AsyncSessionFactory, init_db
-
-
-@pytest.fixture(autouse=True)
-def fernet_key(monkeypatch):
-    from cryptography.fernet import Fernet
-    monkeypatch.setenv("NL2SQL_DS_KEY", Fernet.generate_key().decode())
 
 
 @pytest.fixture
@@ -37,11 +30,11 @@ async def test_create_then_list(db):
 
 
 @pytest.mark.asyncio
-async def test_password_stored_encrypted(db):
+async def test_password_stored_plaintext(db):
     await db.create_datasource(_payload(password="my-secret"))
     async with AsyncSessionFactory() as s:
         row = (await s.execute(Datasource.__table__.select())).first()
-        assert row.password_enc != "my-secret"   # 加密存
+        assert row.password_enc == "my-secret"   # 明文存（内网工具去加密）
 
 
 @pytest.mark.asyncio
@@ -105,7 +98,7 @@ async def test_get_engine_url_escapes_special_chars(db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_update_ignores_password_enc_injection(db):
-    # trust boundary：请求体塞 {"password_enc":"明文"} 必须被忽略，不能绕过加密
+    # trust boundary：请求体塞 {"password_enc":"..."} 必须被忽略，密码只走 password 字段
     ds_id = await db.create_datasource(_payload(password="orig"))
     async with AsyncSessionFactory() as s:
         original = (await s.get(Datasource, ds_id)).password_enc
