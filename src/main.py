@@ -35,6 +35,7 @@ from src.web.routes.admin_metadata import build_metadata_router
 from src.web.routes.admin_business_rules import build_business_rules_router
 from src.web.routes.admin_sql_templates import build_sql_templates_router
 from src.web.routes.ask import build_ask_router
+from src.web.routes.result import build_result_router
 from src.web.routes.session import build_session_router
 
 # 全局组件（lifespan 初始化，路由通过 _Lazy 延迟引用）
@@ -116,6 +117,7 @@ def create_app() -> FastAPI:
     app.include_router(build_metadata_router())
     app.include_router(build_business_rules_router())
     app.include_router(build_sql_templates_router())
+    app.include_router(build_result_router())  # P1b：前端按 result_id 取全量结果
     return app
 
 
