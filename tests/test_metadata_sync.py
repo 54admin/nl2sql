@@ -107,3 +107,27 @@ def test_collect_sync_handles_fallbacks(monkeypatch):
             {"name": "c1", "type": "BIGINT", "comment": ""},      # None→空 + type 转字符串
             {"name": "c2", "type": "VARCHAR(32)", "comment": "场站"},
         ]}]
+
+
+def test_collect_sync_filters_system_tables(monkeypatch):
+    """_collect_sync 自动过滤系统库/表（information_schema/mysql/performance_schema/sys）。
+    业务表保留，系统库.表 / 系统库名 / 大小写混写都过滤；不带 schema 的普通业务表名不误伤。"""
+    from src.datasource.metadata_sync import _collect_sync
+
+    class FakeInspector:
+        def get_table_names(self):
+            return ["fact_power",                          # 业务表，保留
+                    "dim_station",                         # 业务表，保留
+                    "information_schema.tables",           # 系统库.表，过滤
+                    "mysql.user",                          # 系统库.表，过滤
+                    "performance_schema.setup_instruments",# 过滤
+                    "sys.config",                          # 系统库.表，过滤
+                    "MYSQL",                               # 系统库名（大写），过滤
+                    "Information_Schema.foo"]              # 大小写混写，过滤
+        def get_table_comment(self, name): return ""
+        def get_columns(self, name): return []
+
+    monkeypatch.setattr("src.datasource.metadata_sync.inspect",
+                        lambda conn: FakeInspector())
+    result = _collect_sync(None)
+    assert {r["table"] for r in result} == {"fact_power", "dim_station"}

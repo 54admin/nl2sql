@@ -11,6 +11,14 @@ from src.storage.pg_client import AsyncSessionFactory
 
 log = get_logger(__name__)
 
+# 系统库/表集合：sync_scope 空=全部业务表时，自动过滤掉这些（StarRocks/MySQL/PG 通用）
+_SYSTEM_SCHEMAS = frozenset({"information_schema", "mysql", "performance_schema", "sys"})
+
+
+def _is_system_name(name: str) -> bool:
+    """库名/表名命中系统库集合则跳过。支持 schema.table 形式（任一段命中即视为系统对象）。"""
+    return any(p in _SYSTEM_SCHEMAS for p in name.lower().split("."))
+
 
 def _in_scope(table_name: str, sync_scope: str | None) -> bool:
     """sync_scope 为空=全要；非空=表名匹配任一前缀/全名才要。"""
@@ -21,10 +29,15 @@ def _in_scope(table_name: str, sync_scope: str | None) -> bool:
 
 
 def _collect_sync(sync_conn) -> list[dict]:
-    """同步函数（被 engine.run_sync 调用，在同步连接上跑 Inspector）。"""
+    """同步函数（被 engine.run_sync 调用，在同步连接上跑 Inspector）。
+
+    自动过滤系统库/表（information_schema/mysql/performance_schema/sys），
+    与 sync_scope 无关——系统对象永远不进问数元数据。"""
     insp = inspect(sync_conn)
     out = []
     for table_name in insp.get_table_names():
+        if _is_system_name(table_name):
+            continue
         try:
             tcomment = (insp.get_table_comment(table_name) or {}).get("text") or ""
         except Exception:
