@@ -43,6 +43,8 @@ async def test_sync_inserts_new_tables_and_columns(db):
         cols = (await s.execute(MetadataColumn.__table__.select())).all()
         assert {t.table_name for t in tables} == {"fact_power"}
         assert {c.column_name for c in cols} == {"kwh", "station_id"}
+        # 同步不碰 enabled：新表走 ORM default False（白名单默认不参与）
+        assert tables[0].enabled is False
 
 
 @pytest.mark.asyncio

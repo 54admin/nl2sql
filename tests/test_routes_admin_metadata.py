@@ -43,6 +43,24 @@ async def test_read_metadata(client):
 
 
 @pytest.mark.asyncio
+async def test_read_metadata_includes_enabled(client):
+    r = await client.get("/api/admin/metadata", params={"datasource_id": client._ds_id})
+    t = r.json()["tables"][0]
+    assert "enabled" in t
+    assert t["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_toggle_table_enabled(client):
+    r = await client.get("/api/admin/metadata", params={"datasource_id": client._ds_id})
+    table_id = r.json()["tables"][0]["id"]
+    r = await client.put(f"/api/admin/metadata/tables/{table_id}", json={"enabled": True})
+    assert r.json()["ok"] is True
+    r = await client.get("/api/admin/metadata", params={"datasource_id": client._ds_id})
+    assert r.json()["tables"][0]["enabled"] is True
+
+
+@pytest.mark.asyncio
 async def test_table_relations_crud(client):
     ds_id = client._ds_id
     payload = {"datasource_id": int(ds_id), "main_table": "fact_power",

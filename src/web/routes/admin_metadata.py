@@ -32,12 +32,26 @@ def build_metadata_router() -> APIRouter:
                 cols = (await s.execute(MetadataColumn.__table__.select().where(
                     MetadataColumn.table_id == t.id))).all()
                 out.append({
-                    "table_name": t.table_name, "table_comment": t.table_comment,
-                    "source": t.source,
+                    "id": t.id, "table_name": t.table_name, "table_comment": t.table_comment,
+                    "source": t.source, "enabled": t.enabled,
                     "columns": [{"column_name": c.column_name, "column_comment": c.column_comment,
                                  "data_type": c.data_type, "is_primary": c.is_primary,
                                  "role_tag": c.role_tag, "source": c.source} for c in cols]})
             return {"tables": out}
+
+    @router.put("/api/admin/metadata/tables/{table_id}")
+    async def set_table_enabled(table_id: int, req: dict) -> dict:
+        """勾选/取消表的参与问数开关。"""
+        enabled = req.get("enabled")
+        if not isinstance(enabled, bool):
+            raise HTTPException(400, "enabled 必须是 bool")
+        async with AsyncSessionFactory() as s:
+            row = await s.get(MetadataTable, table_id)
+            if row is None:
+                raise HTTPException(404, "表不存在")
+            row.enabled = enabled
+            await s.commit()
+            return {"ok": True}
 
     @router.get("/api/admin/table-relations")
     async def list_relations(datasource_id: int) -> dict:
