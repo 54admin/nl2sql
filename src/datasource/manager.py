@@ -52,6 +52,15 @@ class DataSourceManager:
         async with eng.connect() as conn:
             await conn.execute(text("SELECT 1"))
 
+    async def get_sync_scope(self, ds_id: int) -> str | None:
+        """读数据源的 sync_scope。不存在抛 KeyError（与 get_engine 语义一致）。
+        注意 sync_scope 合法可为 None（=全要），不能用 None 哨兵表示不存在。"""
+        async with AsyncSessionFactory() as s:
+            row = await s.get(Datasource, ds_id)
+        if row is None:
+            raise KeyError(f"数据源不存在: {ds_id}")
+        return row.sync_scope
+
     # ---- CRUD（只操作系统 PG，不碰业务库）----
     async def list_datasources(self) -> list[dict]:
         async with AsyncSessionFactory() as s:
