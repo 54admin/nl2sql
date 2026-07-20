@@ -30,6 +30,10 @@ from src.storage.redis_client import RedisClient
 from src.tools.builtins import default_registry
 from src.web.routes.admin_llm import build_admin_llm_router
 from src.web.routes.admin_prompts import build_admin_prompts_router
+from src.web.routes.admin_datasource import build_datasource_router
+from src.web.routes.admin_metadata import build_metadata_router
+from src.web.routes.admin_business_rules import build_business_rules_router
+from src.web.routes.admin_sql_templates import build_sql_templates_router
 from src.web.routes.ask import build_ask_router
 from src.web.routes.session import build_session_router
 
@@ -69,6 +73,8 @@ async def lifespan(app: FastAPI):
     sm = SessionManager(redis)
     llm = LLMService()                     # 配置全走数据库 llm_config 表
     prompts = PromptStore()
+    from src.datasource.manager import DataSourceManager
+    datasource_mgr = DataSourceManager()
     reg = default_registry()
     sess_state = SessionState(sm)
     loop = AgentLoop(llm, reg, sess_state)
@@ -76,7 +82,8 @@ async def lifespan(app: FastAPI):
     orch = Orchestrator(norm, loop, sm, prompt_store=prompts)
 
     _app_state.update(
-        orchestrator=orch, session_mgr=sm, llm_service=llm, prompts=prompts)
+        orchestrator=orch, session_mgr=sm, llm_service=llm, prompts=prompts,
+        datasource_mgr=datasource_mgr)
     log.info("nl2sql 启动完成 db=postgres(%s:%s/%s) redis=%s（模型配置走数据库 llm_config）",
              cfg.postgres.host, cfg.postgres.port, cfg.postgres.database,
              "可用" if redis.available else "降级内存")
@@ -104,6 +111,11 @@ def create_app() -> FastAPI:
     app.include_router(build_session_router(_Lazy("session_mgr")))
     app.include_router(build_admin_llm_router(_Lazy("llm_service")))
     app.include_router(build_admin_prompts_router(_Lazy("prompts")))
+    # P1a 新增 4 个 admin 路由：datasource 要 manager（_Lazy 延迟解析），其余 3 个纯 PG 无参
+    app.include_router(build_datasource_router(_Lazy("datasource_mgr")))
+    app.include_router(build_metadata_router())
+    app.include_router(build_business_rules_router())
+    app.include_router(build_sql_templates_router())
     return app
 
 
