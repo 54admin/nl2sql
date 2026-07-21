@@ -162,13 +162,10 @@ async def test_dashboard_groups_by_datasource_and_schema(client):
     ds = data["datasources"][0]
     assert ds["name"] == "d"
     schemas = {s["schema_name"]: s for s in ds["schemas"]}
-    assert {"dw", "ods"} <= set(schemas.keys())
-    assert {t["table_name"] for t in schemas["dw"]["tables"]} == {"fact_a", "dim_b"}
-    assert {t["table_name"] for t in schemas["ods"]["tables"]} == {"raw_c"}
-    # enabled 标志透传（一眼看哪些表勾选参与问数）
-    dw_tables = {t["table_name"]: t for t in schemas["dw"]["tables"]}
-    assert dw_tables["fact_a"]["enabled"] is True
-    assert dw_tables["dim_b"]["enabled"] is False
+    # dashboard 只显示勾选参与问数的表（enabled=true）=「配了哪些表」
+    assert "dw" in schemas
+    assert {t["table_name"] for t in schemas["dw"]["tables"]} == {"fact_a"}   # dim_b=false 不显示
+    assert "ods" not in schemas   # raw_c=false，ods 库无勾选表，不出现
 
 
 @pytest.mark.asyncio

@@ -155,7 +155,8 @@ def build_metadata_router() -> APIRouter:
                              "host": d.host, "port": d.port, "db_name": d.db_name,
                              "enabled": d.enabled}
                       for d in ds_rows}
-            mt_rows = (await s.execute(MetadataTable.__table__.select())).all()
+            mt_rows = (await s.execute(
+                MetadataTable.__table__.select().where(MetadataTable.enabled == True))).all()
 
         # 按 datasource_id → schema_name 分组
         groups: dict[int, dict[str, list]] = {d.id: {} for d in ds_rows}
