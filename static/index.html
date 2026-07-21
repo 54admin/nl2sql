@@ -136,6 +136,20 @@
   .placeholder.err { color: #c62828; }
   .sync-flash { color: #4caf50; font-size: 12px; padding: 4px 8px; margin: 0 0 4px; background: #f1f8f1; border-radius: 3px; }
 
+  /* Dashboard modal（总览） */
+  .dash-body { background: #fff; padding: 16px 20px; border-radius: 10px; width: 720px; max-height: 80vh; overflow-y: auto; }
+  .dash-body h3 { margin: 0 0 10px; font-size: 16px; }
+  .dash-ds { border: 1px solid #e0e0e0; border-radius: 6px; margin-bottom: 10px; }
+  .dash-ds-head { background: #f5f5f5; padding: 6px 10px; font-weight: 600; font-size: 13px; border-bottom: 1px solid #e0e0e0; display: flex; gap: 6px; align-items: center; }
+  .dash-ds-head .tag { font-size: 11px; color: #666; background: #fff; padding: 1px 6px; border-radius: 3px; border: 1px solid #ddd; }
+  .dash-schema { padding: 6px 10px 6px 20px; border-bottom: 1px solid #f0f0f0; }
+  .dash-schema:last-child { border-bottom: none; }
+  .dash-schema-head { font-size: 12px; color: #555; font-weight: 600; margin-bottom: 4px; }
+  .dash-table { font-size: 12px; color: #333; padding: 2px 0 2px 12px; display: flex; align-items: center; gap: 6px; }
+  .dash-table .icon { font-size: 11px; }
+  .dash-table.enabled { color: #2e7d32; }
+  .dash-table .check { font-size: 11px; color: #4caf50; }
+
   /* Modal */
   .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 99; }
   .modal-body { background: #fff; padding: 20px; border-radius: 10px; width: 360px; display: flex; flex-direction: column; gap: 8px; }
@@ -180,6 +194,7 @@
               <button class="kind-tab" data-kind="view">视图</button>
             </div>
             <button id="btn-sync">同步此库</button>
+            <button id="btn-dashboard">总览</button>
           </div>
           <input id="table-search" placeholder="搜索表名/注释…">
         </div>
@@ -210,6 +225,13 @@
     <input id="ds-pwd" type="password" placeholder="密码">
     <button id="ds-save">保存</button>
     <button id="ds-cancel">取消</button>
+  </div>
+</div>
+<div id="dash-modal" class="modal" style="display:none">
+  <div class="dash-body">
+    <h3>总览 — 数据源 / 库 / 勾选表</h3>
+    <div id="dash-content"></div>
+    <button id="dash-close" style="margin-top:12px;padding:8px;background:#eee;border:none;border-radius:6px;cursor:pointer;width:100%">关闭</button>
   </div>
 </div>
 <script>
@@ -666,8 +688,50 @@ async function loadFields(t) {
   }
 }
 
-// ===== Dashboard 总览（Step 4 补）：所有数据源 × 库分组 × 勾选表 =====
-// 占位：Step 4 commit 实现
+// ===== Dashboard 总览：所有数据源 × 库分组 × 勾选表 =====
+document.getElementById("btn-dashboard").onclick = async () => {
+  const modal = document.getElementById("dash-modal");
+  const content = document.getElementById("dash-content");
+  content.innerHTML = '<p class="placeholder">加载中…</p>';
+  modal.style.display = "flex";
+  try {
+    const r = await fetch("/api/admin/dashboard");
+    if (!r.ok) throw new Error((await r.json().catch(() => ({})).detail) || r.status);
+    const {datasources} = await r.json();
+    if (!datasources.length) {
+      content.innerHTML = '<p class="placeholder">无数据源</p>';
+      return;
+    }
+    content.innerHTML = datasources.map(ds => {
+      const schemaHtml = (ds.schemas || []).map(sk => {
+        const tbls = sk.tables || [];
+        const enabled = tbls.filter(t => t.enabled);
+        return `<div class="dash-schema">
+          <div class="dash-schema-head">📁 ${sk.schema_name} · 总 ${tbls.length} / 勾选 ${enabled.length}</div>
+          ${(enabled.length ? enabled : tbls.slice(0, 3)).map(t =>
+            `<div class="dash-table ${t.enabled ? "enabled" : ""}">
+               <span class="icon">${t.kind === "view" ? "👁" : "📋"}</span>
+               <span>${t.table_name}</span>
+               <span class="cmt" style="color:#999;font-size:11px">${t.table_comment || ""}</span>
+               ${t.enabled ? '<span class="check">✓</span>' : ""}
+             </div>`).join("")}
+        </div>`;
+      }).join("");
+      return `<div class="dash-ds">
+        <div class="dash-ds-head">
+          🗄 ${ds.name}
+          <span class="tag">${ds.type}</span>
+          <span class="tag">${ds.host}:${ds.port}</span>
+          ${ds.db_name ? `<span class="tag">默认库: ${ds.db_name}</span>` : '<span class="tag">连实例</span>'}
+        </div>
+        ${schemaHtml || '<div class="schema-placeholder">未同步任何库</div>'}
+      </div>`;
+    }).join("");
+  } catch (e) {
+    content.innerHTML = `<p class="placeholder err">加载失败: ${e.message}</p>`;
+  }
+};
+document.getElementById("dash-close").onclick = () => document.getElementById("dash-modal").style.display = "none";
 </script>
 </body>
 </html>
