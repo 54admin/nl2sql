@@ -102,6 +102,41 @@ async def test_metadata_includes_relations(db):
 
 
 @pytest.mark.asyncio
+async def test_handler_returns_qualified_name_with_schema(monkeypatch):
+    """P1b：schema_name 存在时 table_name 给 `schema.table` 全限定名——
+    LLM 直接拿它生成 SELECT FROM schema.table，execute_sql 连实例执行跨库查。"""
+    await init_db("sqlite+aiosqlite:///:memory:")
+    ds_id = await DataSourceManager().create_datasource(
+        dict(name="d", type="starrocks", host="h", port=1, db_name=None,  # 连实例不带库
+             username="u", password="p"))
+    async with AsyncSessionFactory() as s:
+        s.add(MetadataTable(datasource_id=ds_id, schema_name="dw",
+                            table_name="fact_power", enabled=True, source="synced"))
+        await s.commit()
+    # mock fetch：验证 schema 透传
+    got_schema = {}
+    async def fake_fetch(engine, table_name, schema=None):
+        got_schema["schema"] = schema
+        return [{"name": "kwh", "type": "BIGINT", "comment": "度数"}]
+    monkeypatch.setattr("src.tools.metadata.fetch_table_columns", fake_fetch)
+
+    class Ctx: pass
+    res = await query_metadata({"datasource_id": ds_id}, Ctx(), None)
+    parsed = json.loads(res.summary)
+    assert parsed["tables"][0]["table_name"] == "dw.fact_power"   # 全限定名
+    assert got_schema["schema"] == "dw"                           # schema 透传给 fetch
+
+
+@pytest.mark.asyncio
+async def test_handler_bare_name_when_no_schema(db):
+    """schema_name=None（老数据）时仍返裸表名——向后兼容。"""
+    class Ctx: pass
+    res = await query_metadata({"datasource_id": db}, Ctx(), None)
+    parsed = json.loads(res.summary)
+    assert parsed["tables"][0]["table_name"] == "fact_power"   # 无 schema 前缀
+
+
+@pytest.mark.asyncio
 async def test_handler_no_datasource(monkeypatch):
     """无数据源时给出引导提示。"""
     await init_db("sqlite+aiosqlite:///:memory:")

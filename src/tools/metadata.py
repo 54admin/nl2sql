@@ -16,7 +16,8 @@ from src.storage.pg_client import AsyncSessionFactory
 
 async def _list_enabled_tables(datasource_id: int, engine: AsyncEngine) -> list[dict]:
     """读 enabled=True 的表（表名+注释），实时拉每张表的字段。
-    返回 [{table_name, table_comment, columns:[{name,comment,type}]}]。
+    schema_name 非空时：table_name 给 `schema.table` 全限定名（execute_sql 直接拿用），
+    fetch_table_columns 也按该 schema 拉字段。空时老行为（裸表名）。
     ponytail: 每表一次连业务库拉字段，白名单表数 ≤10 规模可接受；表多了再换并发或缓存。"""
     async with AsyncSessionFactory() as s:
         tables = (await s.execute(MetadataTable.__table__.select().where(
@@ -24,9 +25,10 @@ async def _list_enabled_tables(datasource_id: int, engine: AsyncEngine) -> list[
             MetadataTable.enabled.is_(True)))).all()
     out = []
     for t in tables:
-        cols = await fetch_table_columns(engine, t.table_name)
+        cols = await fetch_table_columns(engine, t.table_name, t.schema_name)
+        full_name = f"{t.schema_name}.{t.table_name}" if t.schema_name else t.table_name
         out.append({
-            "table_name": t.table_name,
+            "table_name": full_name,
             "table_comment": t.table_comment or "",
             "columns": [{"name": c["name"], "comment": c["comment"], "type": c["type"]}
                         for c in cols],
