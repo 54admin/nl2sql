@@ -193,7 +193,7 @@
               <button class="kind-tab active" data-kind="table">表</button>
               <button class="kind-tab" data-kind="view">视图</button>
             </div>
-            <button id="btn-sync">同步此库</button>
+            <button id="btn-sync">刷新</button>
             <button id="btn-dashboard">总览</button>
           </div>
           <input id="table-search" placeholder="搜索表名/注释…">
@@ -364,7 +364,7 @@ document.getElementById("tab-config").onclick = () => showTab("config");
 
 let selectedDsId = null;
 let selectedSchema = null;      // 当前选中库（schema_name）
-let selectedTableId = null;     // 当前选中表（中栏高亮 + 右栏显示其字段）
+let selectedTableName = null;   // 当前选中表（中栏高亮 + 右栏显示其字段）；实时拉可能没 PG id，按 name 跟踪
 let currentDsName = "";         // 当前数据源名
 let currentTables = [];         // 当前库的表数组（供搜索过滤、避免重拉）
 let currentKind = "table";      // 当前 tab：table / view
@@ -393,29 +393,14 @@ document.querySelectorAll(".kind-tab").forEach(btn => {
   };
 });
 
-// 中栏顶部「同步此库」按钮：同步当前选中的库
+// 中栏顶部「刷新」按钮：重拉当前选中库的表清单（实时拉业务库，无需同步）
 btnSync.onclick = async () => {
   if (!selectedDsId || !selectedSchema) { alert("先选数据源和库"); return; }
-  btnSync.disabled = true; btnSync.textContent = "同步中⏳";
+  btnSync.disabled = true; btnSync.textContent = "刷新中⏳";
   try {
-    const r = await fetch(`/api/admin/datasources/${selectedDsId}/sync`, {
-      method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({schema_name: selectedSchema})});
-    if (r.ok) {
-      const d = await r.json();
-      const tag = document.createElement("p");
-      tag.className = "sync-flash";
-      tag.textContent = `✓ 同步完成（${selectedSchema}）：新增 ${d.added} / 更新 ${d.updated} / 跳过 ${d.skipped}`;
-      tablesArea.prepend(tag);
-      setTimeout(() => tag.remove(), 3000);
-      await loadTables(selectedDsId, selectedSchema);   // 刷新中栏
-      await refreshSchemaCounts(selectedDsId);          // 刷新库节点表数
-    } else {
-      const d = await r.json().catch(() => ({}));
-      alert("同步失败: " + (d.detail || r.status));
-    }
+    await loadObjects(selectedDsId, selectedSchema, true);   // 强制重拉
   } finally {
-    btnSync.disabled = false; btnSync.textContent = "同步此库";
+    btnSync.disabled = false; btnSync.textContent = "刷新";
   }
 };
 
@@ -508,12 +493,12 @@ function renderSchemaList(container, dsId, schemas) {
       e.stopPropagation();
       selectedDsId = dsId;
       selectedSchema = sk;
-      selectedTableId = null;
+      selectedTableName = null;
       container.querySelectorAll(".schema-item").forEach(x => x.classList.toggle("selected", x === item));
       // 同级数据源高亮
       document.querySelectorAll(".ds-item").forEach(x => x.classList.remove("selected"));
       item.closest(".ds-item").classList.add("selected");
-      loadTables(dsId, sk);
+      loadObjects(dsId, sk);
     };
     container.appendChild(item);
   }
@@ -549,7 +534,7 @@ async function refreshSchemaCounts(dsId) {
 
 function resetMidAndRight() {
   selectedDsId = null; selectedSchema = null;
-  currentTables = []; selectedTableId = null;
+  currentTables = []; selectedTableName = null;
   midTitle.textContent = "表（选库）";
   tablesArea.innerHTML = '<p class="placeholder">点左侧选数据源 → 展开库 → 选库查看表</p>';
   fieldsTitle.textContent = "字段"; fieldsCount.textContent = "";
@@ -597,22 +582,22 @@ document.getElementById("ds-save").onclick = async () => {
   loadDatasources();
 };
 
-// 加载某数据源指定库的表清单（按 schema 过滤 PG metadata）
-async function loadTables(dsId, schemaName) {
-  const r = await fetch(`/api/admin/metadata?datasource_id=${dsId}&schema_name=${encodeURIComponent(schemaName)}`);
+// 加载某数据源指定库的表清单（实时连业务库拉，左连 PG 显示 enabled/手写注释）
+async function loadObjects(dsId, schemaName) {
+  const r = await fetch(`/api/admin/datasources/${dsId}/schemas/${encodeURIComponent(schemaName)}/objects`);
   if (!r.ok) { const d = await r.json().catch(() => ({})); alert("加载表失败: " + (d.detail || r.status)); return; }
-  const {tables} = await r.json();
-  currentTables = tables;
-  selectedTableId = null;
+  const {objects} = await r.json();
+  currentTables = objects;
+  selectedTableName = null;
   midTitle.textContent = `${schemaName} · ${dsId}`;
   fieldsTitle.textContent = "字段";
   fieldsCount.textContent = "";
   fieldsArea.innerHTML = '<p class="placeholder">点左侧表查看字段</p>';
-  if (!tables.length) {
-    tablesArea.innerHTML = '<p class="placeholder">未同步到表，点右上「同步此库」拉取</p>';
+  if (!objects.length) {
+    tablesArea.innerHTML = '<p class="placeholder">该库无可见表</p>';
     return;
   }
-  renderTables(tables, tableSearch.value);
+  renderTables(objects, tableSearch.value);
 }
 
 // 渲染中栏表清单（按当前 tab + 搜索词过滤）
@@ -620,30 +605,40 @@ function renderTables(tables, q) {
   const ql = q.trim().toLowerCase();
   const list = tables
     .filter(t => t.kind === currentKind)  // tab 过滤：table / view
-    .filter(t => !ql || (t.table_name + " " + (t.table_comment || "")).toLowerCase().includes(ql));
+    .filter(t => !ql || (t.name + " " + (t.comment || "")).toLowerCase().includes(ql));
   tablesArea.innerHTML = "";
   if (!list.length) {
-    tablesArea.innerHTML = `<p class="placeholder">无${currentKind === "view" ? "视图" : "表"}${ql ? "匹配" : "，点「同步此库」拉取"}</p>`;
+    tablesArea.innerHTML = `<p class="placeholder">无${currentKind === "view" ? "视图" : "表"}${ql ? "匹配" : ""}</p>`;
     return;
   }
   for (const t of list) {
     const row = document.createElement("div");
-    row.className = "table-row" + (t.id === selectedTableId ? " selected" : "");
+    row.className = "table-row" + (t.name === selectedTableName ? " selected" : "");
     const icon = t.kind === "view" ? "👁" : "📋";
     row.innerHTML = `
       <label class="checkbox"><input type="checkbox" ${t.enabled ? "checked" : ""}></label>
       <span class="icon">${icon}</span>
-      <b class="tname">${t.table_name}</b>
-      <span class="cmt">${t.table_comment || ""}</span>
+      <b class="tname">${t.name}</b>
+      <span class="cmt">${t.comment || ""}</span>
       <span class="save-tag"></span>`;
     const cb = row.querySelector("input");
     const tag = row.querySelector(".save-tag");
     cb.onclick = (e) => e.stopPropagation();
     cb.onchange = async () => {
-      const rr = await fetch(`/api/admin/metadata/tables/${t.id}`, {
+      // PG 有 id 直接更新；没 id（业务库新表）走 upsert by ds+schema+table
+      const url = t.id
+        ? `/api/admin/metadata/tables/${t.id}`
+        : "/api/admin/metadata/tables/0";
+      const body = t.id
+        ? {enabled: cb.checked}
+        : {datasource_id: selectedDsId, schema_name: selectedSchema,
+           table_name: t.name, kind: t.kind, comment: t.comment, enabled: cb.checked};
+      const rr = await fetch(url, {
         method: "PUT", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({enabled: cb.checked})});
+        body: JSON.stringify(body)});
       if (rr.ok) {
+        const d = await rr.json();
+        if (d.id) t.id = d.id;          // upsert 新建后回写 id，下次直接更新
         t.enabled = cb.checked;
         tag.textContent = "✓ 已保存";
         setTimeout(() => tag.textContent = "", 600);
@@ -663,14 +658,18 @@ function renderTables(tables, q) {
 
 // 点表行：右栏独立字段表（懒加载 + 缓存到 t._cols，二次点不重拉）
 async function loadFields(t) {
-  selectedTableId = t.id;
+  selectedTableName = t.name;
   renderTables(currentTables, tableSearch.value);   // 重渲染以更新选中高亮
-  fieldsTitle.textContent = `字段：${t.table_name}`;
+  fieldsTitle.textContent = `字段：${t.name}`;
   fieldsCount.textContent = "";
   fieldsArea.innerHTML = '<p class="placeholder">加载字段中…</p>';
   try {
     if (!t._cols) {
-      const r = await fetch(`/api/admin/metadata/tables/${t.id}/columns`);
+      // PG 有 id 走老端点；没 id（业务库表未进 PG）走 by-key 端点实时拉
+      const url = t.id
+        ? `/api/admin/metadata/tables/${t.id}/columns`
+        : `/api/admin/datasources/${selectedDsId}/schemas/${encodeURIComponent(selectedSchema)}/tables/${encodeURIComponent(t.name)}/columns`;
+      const r = await fetch(url);
       if (!r.ok) throw new Error(r.status);
       t._cols = (await r.json()).columns;
     }
