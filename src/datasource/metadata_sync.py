@@ -83,12 +83,26 @@ async def fetch_table_columns(engine: AsyncEngine, table_name: str,
 
 
 async def fetch_objects(engine: AsyncEngine, schema: str | None) -> list[dict]:
-    """实时连业务库拉指定库的表+视图清单（仅名/kind/注释），**不写 PG**。
-    配置页点库时调——永远拿最新业务库状态（业务库新加/删的表立即可见，不依赖 PG 同步缓存）。
-    复用 _collect_sync（同名清单收集逻辑）。返回 [{name, kind, comment}]。"""
+    """实时连业务库拉指定库的表+视图清单（**仅名/kind，不拉注释**——快）。
+    配置页点库时调：永远拿最新业务库状态，不依赖 PG 缓存。
+    ponytail: 不拉 get_table_comment（N 次查询慢，615 表要 615 次），注释点表看字段时
+    （fetch_table_columns）按需拉。返回 [{name, kind}]。"""
+    def _fast(sync_conn):
+        insp = inspect(sync_conn)
+        kw = {"schema": schema} if schema else {}
+        out = []
+        for n in insp.get_table_names(**kw):
+            if not _is_system_name(n):
+                out.append({"name": n, "kind": "table"})
+        try:
+            for n in insp.get_view_names(**kw):
+                if not _is_system_name(n):
+                    out.append({"name": n, "kind": "view"})
+        except Exception:
+            pass
+        return out
     async with engine.connect() as conn:
-        fetched = await conn.run_sync(_collect_sync, schema)
-    return [{"name": t["table"], "kind": t["kind"], "comment": t["comment"]} for t in fetched]
+        return await conn.run_sync(_fast)
 
 
 async def sync_metadata(ds_id: int, engine: AsyncEngine, sync_scope: str | None,

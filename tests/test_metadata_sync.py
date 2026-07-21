@@ -231,13 +231,14 @@ def test_collect_sync_passes_schema_to_inspector(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_fetch_objects_returns_renamed_keys():
-    """fetch_objects 实时拉表清单（不写 PG），键名从 _collect_sync 的 table→name 重命名。"""
-    fetched = [{"table": "fact_power", "kind": "table", "comment": "发电"},
-               {"table": "v_monthly", "kind": "view", "comment": "月度"}]
+async def test_fetch_objects_returns_name_and_kind_only():
+    """fetch_objects 实时拉表清单（不写 PG），只返 name/kind——不拉注释（快）。
+    FakeConn.run_sync 直接返预设数据（绕过 _fast），所以 fetched 用最终格式模拟。"""
+    fetched = [{"name": "fact_power", "kind": "table"},
+               {"name": "v_monthly", "kind": "view"}]
     got = await fetch_objects(FakeEngine(fetched=fetched), "dw")
-    assert got == [{"name": "fact_power", "kind": "table", "comment": "发电"},
-                   {"name": "v_monthly", "kind": "view", "comment": "月度"}]
+    assert got == [{"name": "fact_power", "kind": "table"},
+                   {"name": "v_monthly", "kind": "view"}]
 
 
 @pytest.mark.asyncio
@@ -246,7 +247,7 @@ async def test_fetch_objects_does_not_write_pg(db):
     async with AsyncSessionFactory() as s:
         before = (await s.execute(MetadataTable.__table__.select())).all()
     assert before == []
-    await fetch_objects(FakeEngine(fetched=[{"table": "t", "kind": "table", "comment": "c"}]), "dw")
+    await fetch_objects(FakeEngine(fetched=[{"name": "t", "kind": "table"}]), "dw")
     async with AsyncSessionFactory() as s:
         after = (await s.execute(MetadataTable.__table__.select())).all()
     assert after == []   # 没写 PG

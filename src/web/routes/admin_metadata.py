@@ -80,8 +80,9 @@ def build_metadata_router() -> APIRouter:
         objects = []
         for t in tables:
             row = pg.get(t["name"])
-            # source=manual 的注释是用户手写——优先；否则用业务库 fresh 注释
-            cmt = (row.table_comment if row and row.source == "manual" else None) or t["comment"]
+            # fetch_objects 不拉注释（秒开）：注释只来自 PG 手写（source=manual）；没有则空。
+            # ponytail: 不再左连业务库 fresh 注释（点表展开看字段时按需 fetch_table_columns）
+            cmt = (row.table_comment if row and row.source == "manual" else None) or ""
             objects.append({"name": t["name"], "kind": t["kind"], "comment": cmt,
                             "enabled": bool(row.enabled) if row else False,
                             "id": row.id if row else None})

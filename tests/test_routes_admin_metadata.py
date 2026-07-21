@@ -173,11 +173,12 @@ async def test_dashboard_groups_by_datasource_and_schema(client):
 
 @pytest.mark.asyncio
 async def test_list_objects_left_joins_pg(client, monkeypatch):
-    """list_objects：实时拉表清单 + 左连 PG 显示 enabled/手写注释。
-    - business 注释默认；source=manual 的 PG 注释覆盖；enabled 按 PG 行。"""
+    """list_objects：实时拉表清单（只 name/kind）+ 左连 PG 显示 enabled/手写注释。
+    - 注释只来自 PG source=manual；其他情况为空（fetch_objects 不再拉注释，秒开）。
+    - enabled 按 PG 行。"""
     async def fake_fetch(engine, schema):
-        return [{"name": "fact_power", "kind": "table", "comment": "fresh 业务注释"},
-                {"name": "v_new", "kind": "view", "comment": "新视图"}]
+        return [{"name": "fact_power", "kind": "table"},
+                {"name": "v_new", "kind": "view"}]
     monkeypatch.setattr("src.datasource.metadata_sync.fetch_objects", fake_fetch)
 
     class _FakeMgr:
@@ -185,7 +186,7 @@ async def test_list_objects_left_joins_pg(client, monkeypatch):
             return object()   # fetch 已 mock，engine 不会被真正用
     monkeypatch.setattr("src.datasource.manager.DataSourceManager", lambda: _FakeMgr())
 
-    # 预置 PG 行：fact_power 已勾选 + 手写注释
+    # 预置 PG 行：fact_power 已勾选 + 手写注释（source=manual）
     async with AsyncSessionFactory() as s:
         s.add(MetadataTable(datasource_id=client._ds_id, schema_name="dw",
                             table_name="fact_power", enabled=True, source="manual",
@@ -199,17 +200,18 @@ async def test_list_objects_left_joins_pg(client, monkeypatch):
     assert by_name["fact_power"]["comment"] == "用户手写注释"
     assert by_name["fact_power"]["enabled"] is True
     assert by_name["fact_power"]["id"] is not None
-    # v_new：PG 没行→用业务库 fresh 注释；enabled=false；id=null
-    assert by_name["v_new"]["comment"] == "新视图"
+    # v_new：PG 没行→无注释（fetch 不拉）；enabled=false；id=null
+    assert by_name["v_new"]["comment"] == ""
     assert by_name["v_new"]["enabled"] is False
     assert by_name["v_new"]["id"] is None
 
 
 @pytest.mark.asyncio
-async def test_list_objects_pg_synced_comment_loses_to_fresh(client, monkeypatch):
-    """PG source=synced 的注释**不**覆盖业务库 fresh 注释（避免旧同步值遮蔽最新值）。"""
+async def test_list_objects_synced_comment_not_used(client, monkeypatch):
+    """PG source=synced 的注释**不**被端点使用——只有 manual 注释才覆盖。
+    fetch_objects 不返注释，synced 行注释被忽略，最终 comment 为空。"""
     async def fake_fetch(engine, schema):
-        return [{"name": "t", "kind": "table", "comment": "fresh"}]
+        return [{"name": "t", "kind": "table"}]
     monkeypatch.setattr("src.datasource.metadata_sync.fetch_objects", fake_fetch)
     class _FakeMgr:
         async def get_engine(self, _ds_id): return object()
@@ -220,7 +222,7 @@ async def test_list_objects_pg_synced_comment_loses_to_fresh(client, monkeypatch
                             table_comment="stale 旧同步注释"))
         await s.commit()
     r = await client.get(f"/api/admin/datasources/{client._ds_id}/schemas/dw/objects")
-    assert r.json()["objects"][0]["comment"] == "fresh"   # 业务库 fresh 胜出
+    assert r.json()["objects"][0]["comment"] == ""   # synced 注释被忽略
 
 
 @pytest.mark.asyncio
