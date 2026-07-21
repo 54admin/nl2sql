@@ -33,7 +33,7 @@ def build_metadata_router() -> APIRouter:
                     MetadataColumn.table_id == t.id))).all()
                 out.append({
                     "id": t.id, "table_name": t.table_name, "table_comment": t.table_comment,
-                    "source": t.source, "enabled": t.enabled,
+                    "source": t.source, "kind": t.kind, "enabled": t.enabled,
                     "columns": [{"column_name": c.column_name, "column_comment": c.column_comment,
                                  "data_type": c.data_type, "is_primary": c.is_primary,
                                  "role_tag": c.role_tag, "source": c.source} for c in cols]})

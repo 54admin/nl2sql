@@ -28,33 +28,42 @@ def _in_scope(table_name: str, sync_scope: str | None) -> bool:
     return any(table_name == p or table_name.startswith(p) for p in prefixes)
 
 
+def _collect_one(insp, name: str, kind: str) -> dict | None:
+    """收集单张表/视图的元数据。系统对象返回 None 跳过。kind: table/view。"""
+    if _is_system_name(name):
+        return None
+    try:
+        tcomment = (insp.get_table_comment(name) or {}).get("text") or ""
+    except Exception:
+        tcomment = ""
+    try:
+        cols = [{"name": c["name"], "type": str(c["type"]),
+                 "comment": c.get("comment") or ""}
+                for c in insp.get_columns(name)]
+    except Exception:
+        cols = []   # 视图拉字段失败兜底空
+    return {"table": name, "kind": kind, "comment": tcomment, "columns": cols}
+
+
 def _collect_sync(sync_conn) -> list[dict]:
     """同步函数（被 engine.run_sync 调用，在同步连接上跑 Inspector）。
 
     自动过滤系统库/表（information_schema/mysql/performance_schema/sys），
     与 sync_scope 无关——系统对象永远不进问数元数据。"""
     insp = inspect(sync_conn)
-    # 表 + 视图（视图 try/except：某些库/方言不支持 get_view_names）
-    names = list(insp.get_table_names())
+    out = []
+    for name in insp.get_table_names():
+        item = _collect_one(insp, name, "table")
+        if item:
+            out.append(item)
+    # 视图 try/except：某些库/方言不支持 get_view_names
     try:
-        names.extend(insp.get_view_names())
+        for name in insp.get_view_names():
+            item = _collect_one(insp, name, "view")
+            if item:
+                out.append(item)
     except Exception:
         pass
-    out = []
-    for name in names:
-        if _is_system_name(name):
-            continue
-        try:
-            tcomment = (insp.get_table_comment(name) or {}).get("text") or ""
-        except Exception:
-            tcomment = ""
-        try:
-            cols = [{"name": c["name"], "type": str(c["type"]),
-                     "comment": c.get("comment") or ""}
-                    for c in insp.get_columns(name)]
-        except Exception:
-            cols = []   # 视图拉字段失败兜底空
-        out.append({"table": name, "comment": tcomment, "columns": cols})
     return out
 
 
@@ -74,7 +83,8 @@ async def sync_metadata(ds_id: int, engine: AsyncEngine, sync_scope: str | None)
                 MetadataTable.table_name == t["table"]))).first()
             if row is None:
                 mt = MetadataTable(datasource_id=ds_id, table_name=t["table"],
-                                   table_comment=t["comment"], source="synced")
+                                   table_comment=t["comment"], source="synced",
+                                   kind=t.get("kind", "table"))
                 s.add(mt); await s.flush()
                 for c in t["columns"]:
                     s.add(MetadataColumn(table_id=mt.id, column_name=c["name"],
@@ -83,7 +93,8 @@ async def sync_metadata(ds_id: int, engine: AsyncEngine, sync_scope: str | None)
                 added += 1 + len(t["columns"])
             elif row.source == "synced":
                 await s.execute(MetadataTable.__table__.update().where(
-                    MetadataTable.id == row.id).values(table_comment=t["comment"]))
+                    MetadataTable.id == row.id).values(
+                        table_comment=t["comment"], kind=t.get("kind", "table")))
                 for c in t["columns"]:
                     crow = (await s.execute(MetadataColumn.__table__.select().where(
                         MetadataColumn.table_id == row.id,

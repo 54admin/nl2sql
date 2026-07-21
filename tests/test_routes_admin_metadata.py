@@ -51,6 +51,15 @@ async def test_read_metadata_includes_enabled(client):
 
 
 @pytest.mark.asyncio
+async def test_read_metadata_includes_kind(client):
+    """read_metadata 返回 kind 字段（区分表/视图）。"""
+    r = await client.get("/api/admin/metadata", params={"datasource_id": client._ds_id})
+    t = r.json()["tables"][0]
+    assert "kind" in t
+    assert t["kind"] == "table"     # ORM default
+
+
+@pytest.mark.asyncio
 async def test_toggle_table_enabled(client):
     r = await client.get("/api/admin/metadata", params={"datasource_id": client._ds_id})
     table_id = r.json()["tables"][0]["id"]

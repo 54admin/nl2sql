@@ -140,6 +140,7 @@ class MetadataTable(Base):
     table_name: Mapped[str] = mapped_column(String(128))
     table_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(String(16), default="synced")  # synced/manual
+    kind: Mapped[str] = mapped_column(String(16), default="table")  # table / view
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否参与问数（白名单，默认不参与）
     display_columns_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     hidden_columns_json: Mapped[str | None] = mapped_column(Text, nullable=True)

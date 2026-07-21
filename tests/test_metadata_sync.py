@@ -44,7 +44,7 @@ async def db():
 @pytest.mark.asyncio
 async def test_sync_inserts_new_tables_and_columns(db):
     fetched = [
-        {"table": "fact_power", "comment": "发电量事实表",
+        {"table": "fact_power", "kind": "table", "comment": "发电量事实表",
          "columns": [{"name": "kwh", "type": "BIGINT", "comment": "度数"},
                      {"name": "station_id", "type": "VARCHAR(32)", "comment": ""}]}]
     res = await sync_metadata(db, FakeEngine(fetched), "fact_,dim_")
@@ -56,6 +56,19 @@ async def test_sync_inserts_new_tables_and_columns(db):
         assert {c.column_name for c in cols} == {"kwh", "station_id"}
         # 同步不碰 enabled：新表走 ORM default False（白名单默认不参与）
         assert tables[0].enabled is False
+        assert tables[0].kind == "table"     # kind 来自 fetched
+
+
+@pytest.mark.asyncio
+async def test_sync_records_view_kind(db):
+    """fetched kind=view 写库后持久化（PG 迁移前的 SQLite 路径）。"""
+    fetched = [
+        {"table": "v_monthly_power", "kind": "view", "comment": "月度视图",
+         "columns": [{"name": "kwh", "type": "BIGINT", "comment": ""}]}]
+    await sync_metadata(db, FakeEngine(fetched), "v_,fact_")
+    async with AsyncSessionFactory() as s:
+        row = (await s.execute(MetadataTable.__table__.select())).first()
+        assert row.kind == "view"
 
 
 @pytest.mark.asyncio
@@ -63,7 +76,7 @@ async def test_sync_keeps_manual_override(db):
     """source=manual 的字段不被同步覆盖。"""
     # 先正常同步一次
     await sync_metadata(db, FakeEngine([
-        {"table": "fact_power", "comment": "旧注释",
+        {"table": "fact_power", "kind": "table", "comment": "旧注释",
          "columns": [{"name": "kwh", "type": "INT", "comment": "旧"}]}]), "fact_")
     # 手动把 kwh 改成 manual + 手写注释
     async with AsyncSessionFactory() as s:
@@ -74,7 +87,7 @@ async def test_sync_keeps_manual_override(db):
         await s.commit()
     # 再同步，kwh 类型/注释变了；手写字段不被覆盖，计入 skipped
     res = await sync_metadata(db, FakeEngine([
-        {"table": "fact_power", "comment": "新注释",
+        {"table": "fact_power", "kind": "table", "comment": "新注释",
          "columns": [{"name": "kwh", "type": "BIGINT", "comment": "新"}]}]), "fact_")
     assert res["updated"] == 1 and res["skipped"] == 1   # 表更新 1，kwh manual 跳过 1
     async with AsyncSessionFactory() as s:
@@ -87,8 +100,8 @@ async def test_sync_keeps_manual_override(db):
 async def test_sync_scope_filters(db):
     """sync_scope 外的表不同步。"""
     fetched = [
-        {"table": "fact_power", "comment": "", "columns": []},
-        {"table": "ods_raw", "comment": "", "columns": []},]   # 不在 fact_,dim_ 范围
+        {"table": "fact_power", "kind": "table", "comment": "", "columns": []},
+        {"table": "ods_raw", "kind": "table", "comment": "", "columns": []},]   # 不在 fact_,dim_ 范围
     await sync_metadata(db, FakeEngine(fetched), "fact_,dim_")
     async with AsyncSessionFactory() as s:
         names = {t.table_name for t in (await s.execute(
@@ -113,7 +126,7 @@ def test_collect_sync_handles_fallbacks(monkeypatch):
                         lambda conn: FakeInspector())
     result = _collect_sync(None)   # conn 不重要，inspect(conn) 返回 FakeInspector
     assert result == [{
-        "table": "t1", "comment": "",                 # 异常被吞成空
+        "table": "t1", "kind": "table", "comment": "",                 # 异常被吞成空
         "columns": [
             {"name": "c1", "type": "BIGINT", "comment": ""},      # None→空 + type 转字符串
             {"name": "c2", "type": "VARCHAR(32)", "comment": "场站"},
@@ -145,7 +158,7 @@ def test_collect_sync_filters_system_tables(monkeypatch):
 
 
 def test_collect_sync_includes_views(monkeypatch):
-    """_collect_sync 同时拉表和视图（视图也进问数元数据）。"""
+    """_collect_sync 同时拉表和视图（视图也进问数元数据），kind 区分。"""
     from src.datasource.metadata_sync import _collect_sync
 
     class FakeInspector:
@@ -158,3 +171,6 @@ def test_collect_sync_includes_views(monkeypatch):
                         lambda conn: FakeInspector())
     result = _collect_sync(None)
     assert {r["table"] for r in result} == {"fact_power", "v_monthly_power"}   # 表+视图都进
+    by_name = {r["table"]: r for r in result}
+    assert by_name["fact_power"]["kind"] == "table"
+    assert by_name["v_monthly_power"]["kind"] == "view"
