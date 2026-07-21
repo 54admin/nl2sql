@@ -27,7 +27,7 @@ async def client(monkeypatch):
             ds_id = ds.id
             table_id = mt.id
         # mock fetch_table_columns：columns 端点不连真库
-        async def fake_fetch(engine, table_name):
+        async def fake_fetch(engine, table_name, schema=None):
             return [{"name": "kwh", "type": "BIGINT", "comment": "度数"}]
         monkeypatch.setattr("src.datasource.metadata_sync.fetch_table_columns", fake_fetch)
         c._ds_id = ds_id
@@ -112,3 +112,60 @@ async def test_table_relations_crud(client):
     assert r.json()["ok"] is True
     r = await client.delete(f"/api/admin/table-relations/{rid}")
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_read_metadata_filters_by_schema(client):
+    """GET /metadata?schema_name=dw 只返该库的表（fixture 预置的 fact_power schema_name=None 不含）。"""
+    async with AsyncSessionFactory() as s:
+        s.add_all([
+            MetadataTable(datasource_id=client._ds_id, schema_name="dw",
+                          table_name="fact_a", source="synced"),
+            MetadataTable(datasource_id=client._ds_id, schema_name="ods",
+                          table_name="fact_b", source="synced"),
+        ])
+        await s.commit()
+    r = await client.get("/api/admin/metadata",
+                         params={"datasource_id": client._ds_id, "schema_name": "dw"})
+    tables = r.json()["tables"]
+    assert {t["table_name"] for t in tables} == {"fact_a"}
+
+
+@pytest.mark.asyncio
+async def test_read_metadata_includes_schema_field(client):
+    """返回项带 schema_name 字段（前端按库分组用）。"""
+    async with AsyncSessionFactory() as s:
+        s.add(MetadataTable(datasource_id=client._ds_id, schema_name="dw",
+                            table_name="t1", source="synced"))
+        await s.commit()
+    r = await client.get("/api/admin/metadata", params={"datasource_id": client._ds_id})
+    by_name = {t["table_name"]: t for t in r.json()["tables"]}
+    assert by_name["t1"]["schema_name"] == "dw"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_groups_by_datasource_and_schema(client):
+    """GET /dashboard：所有数据源 × 按库分组的表清单。"""
+    async with AsyncSessionFactory() as s:
+        s.add_all([
+            MetadataTable(datasource_id=client._ds_id, schema_name="dw",
+                          table_name="fact_a", source="synced", enabled=True),
+            MetadataTable(datasource_id=client._ds_id, schema_name="dw",
+                          table_name="dim_b", source="synced", enabled=False),
+            MetadataTable(datasource_id=client._ds_id, schema_name="ods",
+                          table_name="raw_c", source="synced", enabled=False),
+        ])
+        await s.commit()
+    r = await client.get("/api/admin/dashboard")
+    data = r.json()
+    assert len(data["datasources"]) == 1
+    ds = data["datasources"][0]
+    assert ds["name"] == "d"
+    schemas = {s["schema_name"]: s for s in ds["schemas"]}
+    assert {"dw", "ods"} <= set(schemas.keys())
+    assert {t["table_name"] for t in schemas["dw"]["tables"]} == {"fact_a", "dim_b"}
+    assert {t["table_name"] for t in schemas["ods"]["tables"]} == {"raw_c"}
+    # enabled 标志透传（一眼看哪些表勾选参与问数）
+    dw_tables = {t["table_name"]: t for t in schemas["dw"]["tables"]}
+    assert dw_tables["fact_a"]["enabled"] is True
+    assert dw_tables["dim_b"]["enabled"] is False

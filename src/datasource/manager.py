@@ -14,6 +14,10 @@ from src.storage.pg_client import AsyncSessionFactory
 
 log = get_logger(__name__)
 
+# 系统库集合（与 metadata_sync._SYSTEM_SCHEMAS 同义，过滤 list_schemas 用）。
+# ponytail: 不跨模块导入单一个常量，复制一份两行字面量；多了再抽到公共位置。
+_SYSTEM_SCHEMAS = frozenset({"information_schema", "mysql", "performance_schema", "sys"})
+
 # update 可写字段白名单（trust boundary）。password_enc 不在内——
 # 防请求体直接传 {"password_enc":"..."} 改密码；密码只走 password。
 # 注：密码明文存 password_enc（内网工具，去加密简化，不再依赖 NL2SQL_DS_KEY）。
@@ -29,8 +33,9 @@ class DataSourceManager:
     def _build_engine(self, row: Datasource) -> AsyncEngine:
         pwd = row.password_enc   # 明文存（内网工具去加密）
         # 用户名/密码 quote_plus，防 @:/ 等字符破坏 URL 解析（同 pg_client 范式）
-        url = (f"mysql+aiomysql://{quote_plus(row.username)}:{quote_plus(pwd)}"
-               f"@{row.host}:{row.port}/{row.db_name}")
+        # db_name 空=连实例（多库导航 / 跨库查）；非空=连指定库（兼容老数据）
+        base = f"mysql+aiomysql://{quote_plus(row.username)}:{quote_plus(pwd)}@{row.host}:{row.port}"
+        url = f"{base}/{row.db_name}" if row.db_name else f"{base}/"
         return create_async_engine(url, pool_pre_ping=True)
 
     async def get_engine(self, ds_id: int) -> AsyncEngine:
@@ -51,6 +56,18 @@ class DataSourceManager:
         eng = await self.get_engine(ds_id)
         async with eng.connect() as conn:
             await conn.execute(text("SELECT 1"))
+
+    async def list_schemas(self, ds_id: int) -> list[str]:
+        """拉数据源下所有库（schema）名——SHOW DATABASES 级别，连实例即可。
+        DBeaver 层级第一跳：数据源 > 库。系统库（information_schema/mysql/perf/sys）过滤掉。"""
+        from sqlalchemy import inspect
+        eng = await self.get_engine(ds_id)
+
+        def _get(sync_conn):
+            return list(inspect(sync_conn).get_schema_names())
+        async with eng.connect() as conn:
+            schemas = await conn.run_sync(_get)
+        return [s for s in schemas if s.lower() not in _SYSTEM_SCHEMAS]
 
     async def get_sync_scope(self, ds_id: int) -> str | None:
         """读数据源的 sync_scope。不存在抛 KeyError（与 get_engine 语义一致）。

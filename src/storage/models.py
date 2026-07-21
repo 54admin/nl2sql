@@ -113,16 +113,20 @@ class Prompt(Base):
 
 
 class Datasource(Base):
-    """业务数据源连接配置（密码加密存）。P1a。"""
+    """业务数据源连接配置（密码明文存，内网工具去加密）。P1a。
+
+    DBeaver 式层级：一个数据源 = 一个连接（实例），db_name 改 nullable——
+    建源只填连接信息，下挂多库（schema）。db_name 留空时连接串不带 /db（连实例）。
+    """
     __tablename__ = "datasources"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(64), unique=True)
     type: Mapped[str] = mapped_column(String(32))           # starrocks/mysql/pg
     host: Mapped[str] = mapped_column(String(128))
     port: Mapped[int] = mapped_column(Integer)
-    db_name: Mapped[str] = mapped_column(String(128))
+    db_name: Mapped[str | None] = mapped_column(String(128), nullable=True)  # 空=连实例（多库导航）
     username: Mapped[str] = mapped_column(String(128))
-    password_enc: Mapped[str] = mapped_column(Text)         # Fernet 密文
+    password_enc: Mapped[str] = mapped_column(Text)         # 明文存（内网工具）
     sync_scope: Mapped[str | None] = mapped_column(String(256), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
@@ -132,11 +136,17 @@ class Datasource(Base):
 
 
 class MetadataTable(Base):
-    """元数据·表（反向同步 + 手写覆盖）。P1a。"""
+    """元数据·表（反向同步 + 手写覆盖）。P1a。
+
+    schema_name 标记表属于哪个库（DBeaver 层级：源>库>表）；
+    老数据 schema_name 为空——兼容（按 datasource_id 读，前端按 schema 分组时空作为默认组）。
+    """
     __tablename__ = "metadata_tables"
-    __table_args__ = (UniqueConstraint("datasource_id", "table_name", name="uq_ds_table"),)
+    __table_args__ = (UniqueConstraint("datasource_id", "schema_name", "table_name",
+                                       name="uq_ds_schema_table"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     datasource_id: Mapped[int] = mapped_column(ForeignKey("datasources.id"), index=True)
+    schema_name: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     table_name: Mapped[str] = mapped_column(String(128))
     table_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(String(16), default="synced")  # synced/manual

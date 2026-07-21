@@ -29,8 +29,9 @@ class FakeConn:
         return self
     async def __aexit__(self, *a):
         pass
-    async def run_sync(self, fn):
+    async def run_sync(self, fn, *args, **kwargs):
         # sync 走 _collect_sync（返 fetched）；fetch_columns 走 _get_cols（返 cols）
+        # 额外 args/kwargs 接 schema_name 等（不真正调 fn，直接返预设数据）
         return self._fetched if self._fetched is not None else self._cols
 
 
@@ -184,3 +185,46 @@ async def test_fetch_table_columns_returns_columns():
             {"name": "sid", "type": "VARCHAR(32)", "comment": ""}]
     got = await fetch_table_columns(FakeEngine(cols=cols), "fact_power")
     assert got == cols
+
+
+@pytest.mark.asyncio
+async def test_sync_with_schema_name_writes_schema_field(db):
+    """sync_metadata 传 schema_name 时：拉指定库表 + metadata_tables.schema_name 持久化。"""
+    fetched = [{"table": "fact_power", "kind": "table", "comment": ""}]
+    res = await sync_metadata(db, FakeEngine(fetched=fetched), None, schema_name="dw")
+    assert res["added"] == 1
+    async with AsyncSessionFactory() as s:
+        row = (await s.execute(MetadataTable.__table__.select())).first()
+        assert row.schema_name == "dw"      # 写入了 schema_name
+        assert row.table_name == "fact_power"
+
+
+@pytest.mark.asyncio
+async def test_sync_same_table_in_different_schemas(db):
+    """同源同表名跨库共存：schema_name 区分（uq_ds_schema_table 不冲突）。"""
+    fetched = [{"table": "t", "kind": "table", "comment": ""}]
+    await sync_metadata(db, FakeEngine(fetched=fetched), None, schema_name="dw1")
+    await sync_metadata(db, FakeEngine(fetched=fetched), None, schema_name="dw2")
+    async with AsyncSessionFactory() as s:
+        rows = (await s.execute(MetadataTable.__table__.select())).all()
+        assert {r.schema_name for r in rows} == {"dw1", "dw2"}   # 两条共存
+        assert len(rows) == 2
+
+
+def test_collect_sync_passes_schema_to_inspector(monkeypatch):
+    """_collect_sync(sync_conn, schema) 把 schema 透传给 inspector.get_table_names(schema=...)。"""
+    from src.datasource.metadata_sync import _collect_sync
+
+    captured = {}
+    class FakeInspector:
+        def get_table_names(self, schema=None):
+            captured["schema"] = schema
+            return ["t1"]
+        def get_view_names(self, schema=None):
+            return []
+        def get_table_comment(self, name, schema=None):
+            return ""
+    monkeypatch.setattr("src.datasource.metadata_sync.inspect",
+                        lambda conn: FakeInspector())
+    _collect_sync(None, schema="dw2")
+    assert captured["schema"] == "dw2"

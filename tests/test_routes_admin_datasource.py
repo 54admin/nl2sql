@@ -81,7 +81,7 @@ async def test_sync_endpoint(client, monkeypatch):
     class FakeConn:
         async def __aenter__(self): return self
         async def __aexit__(self, *a): pass
-        async def run_sync(self, fn): return []
+        async def run_sync(self, fn, *args, **kwargs): return []
     class FakeEngine:
         def connect(self): return FakeConn()
         async def dispose(self): pass
@@ -115,3 +115,41 @@ async def test_sync_endpoint_404_when_missing(client):
 
 async def _async_return(v):
     return v
+
+
+@pytest.mark.asyncio
+async def test_list_schemas_endpoint(client, monkeypatch):
+    """GET /schemas 走 manager.list_schemas；mock 它返 ['dw','ods'] 验证路由接通。"""
+    from src.datasource.manager import DataSourceManager
+    async def fake_list(self, ds_id):
+        return ["dw", "ods"]
+    monkeypatch.setattr(DataSourceManager, "list_schemas", fake_list)
+    ds_id = (await client.post("/api/admin/datasources", json=_payload())).json()["id"]
+    r = await client.get(f"/api/admin/datasources/{ds_id}/schemas")
+    assert r.status_code == 200
+    assert r.json() == {"schemas": ["dw", "ods"]}
+
+
+@pytest.mark.asyncio
+async def test_sync_endpoint_with_schema_name(client, monkeypatch):
+    """POST /sync body 带 schema_name：透传给 sync_metadata（验证 body 接通）。"""
+    captured = {}
+
+    class FakeConn:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def run_sync(self, fn, *args, **kwargs):
+            captured["args"] = args
+            return []
+    class FakeEngine:
+        def connect(self): return FakeConn()
+        async def dispose(self): pass
+    from src.datasource.manager import DataSourceManager
+    monkeypatch.setattr(DataSourceManager, "get_engine",
+                        lambda self, ds_id: _async_return(FakeEngine()))
+    ds_id = (await client.post("/api/admin/datasources", json=_payload())).json()["id"]
+    r = await client.post(f"/api/admin/datasources/{ds_id}/sync",
+                          json={"schema_name": "dw"})
+    assert r.status_code == 200
+    # _collect_sync 收到 schema_name（位置参数透传）
+    assert captured["args"] == ("dw",)

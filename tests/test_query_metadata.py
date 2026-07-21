@@ -35,7 +35,7 @@ async def db(monkeypatch):
         await s.commit()
 
     # mock fetch_table_columns：fact_power 返 1 字段，其他返空（验证调过）
-    async def fake_fetch(engine, table_name):
+    async def fake_fetch(engine, table_name, schema=None):
         if table_name == "fact_power":
             return [{"name": "kwh", "type": "BIGINT", "comment": "度数"}]
         return []
