@@ -1,7 +1,7 @@
 import pytest
 
 from src.datasource.manager import DataSourceManager
-from src.datasource.metadata_sync import fetch_table_columns, sync_metadata
+from src.datasource.metadata_sync import fetch_objects, fetch_table_columns, sync_metadata
 from src.storage.models import Datasource, MetadataColumn, MetadataTable
 from src.storage.pg_client import AsyncSessionFactory, init_db
 
@@ -228,3 +228,25 @@ def test_collect_sync_passes_schema_to_inspector(monkeypatch):
                         lambda conn: FakeInspector())
     _collect_sync(None, schema="dw2")
     assert captured["schema"] == "dw2"
+
+
+@pytest.mark.asyncio
+async def test_fetch_objects_returns_renamed_keys():
+    """fetch_objects 实时拉表清单（不写 PG），键名从 _collect_sync 的 table→name 重命名。"""
+    fetched = [{"table": "fact_power", "kind": "table", "comment": "发电"},
+               {"table": "v_monthly", "kind": "view", "comment": "月度"}]
+    got = await fetch_objects(FakeEngine(fetched=fetched), "dw")
+    assert got == [{"name": "fact_power", "kind": "table", "comment": "发电"},
+                   {"name": "v_monthly", "kind": "view", "comment": "月度"}]
+
+
+@pytest.mark.asyncio
+async def test_fetch_objects_does_not_write_pg(db):
+    """fetch_objects 不写 PG——业务库拉完后 PG metadata_tables 应仍为空。"""
+    async with AsyncSessionFactory() as s:
+        before = (await s.execute(MetadataTable.__table__.select())).all()
+    assert before == []
+    await fetch_objects(FakeEngine(fetched=[{"table": "t", "kind": "table", "comment": "c"}]), "dw")
+    async with AsyncSessionFactory() as s:
+        after = (await s.execute(MetadataTable.__table__.select())).all()
+    assert after == []   # 没写 PG

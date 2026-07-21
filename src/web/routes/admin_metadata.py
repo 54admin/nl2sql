@@ -1,9 +1,12 @@
 """元数据读取 + 逻辑关系（table_relations）CRUD + dashboard 总览。P1a。
-表清单走 PG；字段懒加载（点表展开时连业务库实时拉，不存 PG）。"""
+表清单实时连业务库拉（fetch_objects，不依赖 PG 同步缓存），左连 PG 显示 enabled/手写注释。
+PG metadata_tables 只存「用户配置过的表」：勾选白名单（enabled=true）+ 手写注释（source=manual）。
+字段懒加载（点表展开时连业务库实时拉，不存 PG）。"""
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from src.storage.models import Datasource, MetadataTable, TableRelation
 from src.storage.pg_client import AsyncSessionFactory
@@ -53,19 +56,93 @@ def build_metadata_router() -> APIRouter:
         return {"columns": [{"name": c["name"], "type": c["type"], "comment": c["comment"]}
                             for c in cols]}
 
+    @router.get("/api/admin/datasources/{ds_id}/schemas/{schema}/objects")
+    async def list_objects(ds_id: int, schema: str) -> dict:
+        """实时连业务库拉该库的表+视图，左连 PG 显示 enabled/手写注释。
+        表清单永远最新（不读 PG 缓存——业务库新加/删的表立即可见）；
+        PG 只贡献 enabled 标志 + source=manual 的手写注释。PG 没记录的表 enabled=false。"""
+        from src.datasource.manager import DataSourceManager
+        from src.datasource.metadata_sync import fetch_objects
+        try:
+            engine = await DataSourceManager().get_engine(ds_id)
+        except KeyError:
+            raise HTTPException(404, "数据源不存在")
+        try:
+            tables = await fetch_objects(engine, schema)
+        except Exception as e:
+            raise HTTPException(400, f"拉表清单失败: {e}")
+        # 左连 PG metadata_tables（ds+schema）拿 enabled + 手写注释
+        async with AsyncSessionFactory() as s:
+            pg_rows = (await s.execute(select(MetadataTable).where(
+                MetadataTable.datasource_id == ds_id,
+                MetadataTable.schema_name == schema))).scalars().all()
+        pg = {r.table_name: r for r in pg_rows}
+        objects = []
+        for t in tables:
+            row = pg.get(t["name"])
+            # source=manual 的注释是用户手写——优先；否则用业务库 fresh 注释
+            cmt = (row.table_comment if row and row.source == "manual" else None) or t["comment"]
+            objects.append({"name": t["name"], "kind": t["kind"], "comment": cmt,
+                            "enabled": bool(row.enabled) if row else False,
+                            "id": row.id if row else None})
+        return {"objects": objects}
+
+    @router.get("/api/admin/datasources/{ds_id}/schemas/{schema}/tables/{table_name}/columns")
+    async def get_columns_by_key(ds_id: int, schema: str, table_name: str) -> dict:
+        """按 ds+schema+table_name 实时拉字段（无需 PG 行）。
+        配置页点任意表（含未勾选、未进 PG 的）查字段用。"""
+        from src.datasource.manager import DataSourceManager
+        from src.datasource.metadata_sync import fetch_table_columns
+        try:
+            engine = await DataSourceManager().get_engine(ds_id)
+        except KeyError:
+            raise HTTPException(404, "数据源不存在")
+        try:
+            cols = await fetch_table_columns(engine, table_name, schema)
+        except Exception as e:
+            raise HTTPException(400, f"拉字段失败: {e}")
+        return {"columns": [{"name": c["name"], "type": c["type"], "comment": c["comment"]}
+                            for c in cols]}
+
     @router.put("/api/admin/metadata/tables/{table_id}")
     async def set_table_enabled(table_id: int, req: dict) -> dict:
-        """勾选/取消表的参与问数开关。"""
+        """勾选/取消表的参与问数开关。
+        table_id > 0 → 更新该 PG 行；
+        table_id = 0 → 用 body 的 datasource_id+schema_name+table_name upsert（PG 无该行则新建）。
+        enabled=false 不删行（保留可能的手写注释）；PG 无该行又取消勾选则空操作。"""
         enabled = req.get("enabled")
         if not isinstance(enabled, bool):
             raise HTTPException(400, "enabled 必须是 bool")
         async with AsyncSessionFactory() as s:
-            row = await s.get(MetadataTable, table_id)
-            if row is None:
-                raise HTTPException(404, "表不存在")
+            if table_id:
+                row = await s.get(MetadataTable, table_id)
+                if row is None:
+                    raise HTTPException(404, "表不存在")
+            else:
+                # upsert by ds+schema+table（实时拉的表 PG 可能没行）
+                ds_id = req.get("datasource_id")
+                schema_name = req.get("schema_name")
+                tname = req.get("table_name")
+                if not (ds_id and tname):
+                    raise HTTPException(400, "id=0 时需要 datasource_id+table_name（schema_name 可空）")
+                # schema_name 为 None 时用 is_(None) 匹配（SQL = NULL 不命中）
+                schema_filter = (MetadataTable.schema_name.is_(None) if schema_name is None
+                                 else MetadataTable.schema_name == schema_name)
+                row = (await s.execute(select(MetadataTable).where(
+                    MetadataTable.datasource_id == ds_id,
+                    schema_filter,
+                    MetadataTable.table_name == tname))).scalar_one_or_none()
+                if row is None:
+                    if not enabled:
+                        return {"ok": True, "id": None}    # 无行又取消勾选——空操作
+                    # 新勾选——写一行（comment/kind 从 body 带的实时业务库值）
+                    row = MetadataTable(datasource_id=ds_id, schema_name=schema_name,
+                                        table_name=tname, table_comment=req.get("comment"),
+                                        source="synced", kind=req.get("kind", "table"))
+                    s.add(row)
             row.enabled = enabled
             await s.commit()
-            return {"ok": True}
+            return {"ok": True, "id": row.id}
 
     @router.get("/api/admin/dashboard")
     async def dashboard() -> dict:

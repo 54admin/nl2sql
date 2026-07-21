@@ -169,3 +169,122 @@ async def test_dashboard_groups_by_datasource_and_schema(client):
     dw_tables = {t["table_name"]: t for t in schemas["dw"]["tables"]}
     assert dw_tables["fact_a"]["enabled"] is True
     assert dw_tables["dim_b"]["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_list_objects_left_joins_pg(client, monkeypatch):
+    """list_objects：实时拉表清单 + 左连 PG 显示 enabled/手写注释。
+    - business 注释默认；source=manual 的 PG 注释覆盖；enabled 按 PG 行。"""
+    async def fake_fetch(engine, schema):
+        return [{"name": "fact_power", "kind": "table", "comment": "fresh 业务注释"},
+                {"name": "v_new", "kind": "view", "comment": "新视图"}]
+    monkeypatch.setattr("src.datasource.metadata_sync.fetch_objects", fake_fetch)
+
+    class _FakeMgr:
+        async def get_engine(self, _ds_id):
+            return object()   # fetch 已 mock，engine 不会被真正用
+    monkeypatch.setattr("src.datasource.manager.DataSourceManager", lambda: _FakeMgr())
+
+    # 预置 PG 行：fact_power 已勾选 + 手写注释
+    async with AsyncSessionFactory() as s:
+        s.add(MetadataTable(datasource_id=client._ds_id, schema_name="dw",
+                            table_name="fact_power", enabled=True, source="manual",
+                            table_comment="用户手写注释"))
+        await s.commit()
+
+    r = await client.get(f"/api/admin/datasources/{client._ds_id}/schemas/dw/objects")
+    assert r.status_code == 200
+    by_name = {o["name"]: o for o in r.json()["objects"]}
+    # fact_power：PG 有 manual 注释→用手写；enabled=true；有 id
+    assert by_name["fact_power"]["comment"] == "用户手写注释"
+    assert by_name["fact_power"]["enabled"] is True
+    assert by_name["fact_power"]["id"] is not None
+    # v_new：PG 没行→用业务库 fresh 注释；enabled=false；id=null
+    assert by_name["v_new"]["comment"] == "新视图"
+    assert by_name["v_new"]["enabled"] is False
+    assert by_name["v_new"]["id"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_objects_pg_synced_comment_loses_to_fresh(client, monkeypatch):
+    """PG source=synced 的注释**不**覆盖业务库 fresh 注释（避免旧同步值遮蔽最新值）。"""
+    async def fake_fetch(engine, schema):
+        return [{"name": "t", "kind": "table", "comment": "fresh"}]
+    monkeypatch.setattr("src.datasource.metadata_sync.fetch_objects", fake_fetch)
+    class _FakeMgr:
+        async def get_engine(self, _ds_id): return object()
+    monkeypatch.setattr("src.datasource.manager.DataSourceManager", lambda: _FakeMgr())
+    async with AsyncSessionFactory() as s:
+        s.add(MetadataTable(datasource_id=client._ds_id, schema_name="dw",
+                            table_name="t", enabled=True, source="synced",
+                            table_comment="stale 旧同步注释"))
+        await s.commit()
+    r = await client.get(f"/api/admin/datasources/{client._ds_id}/schemas/dw/objects")
+    assert r.json()["objects"][0]["comment"] == "fresh"   # 业务库 fresh 胜出
+
+
+@pytest.mark.asyncio
+async def test_toggle_upsert_by_key_creates_row(client):
+    """PUT /tables/0 + body 带 ds+schema+table → upsert 新建行并 enabled=true。"""
+    r = await client.put("/api/admin/metadata/tables/0", json={
+        "datasource_id": client._ds_id, "schema_name": "dw",
+        "table_name": "brand_new", "enabled": True, "kind": "table",
+        "comment": "fresh"})
+    assert r.status_code == 200
+    new_id = r.json()["id"]
+    assert new_id > 0
+    # 拉一次确认 enabled=true 落库
+    r = await client.get("/api/admin/metadata",
+                         params={"datasource_id": client._ds_id, "schema_name": "dw"})
+    by_name = {t["table_name"]: t for t in r.json()["tables"]}
+    assert by_name["brand_new"]["enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_toggle_upsert_by_key_finds_existing(client):
+    """PG 已有该行（如老同步留下的 enabled=false）→ upsert 找到该行更新 enabled=true。"""
+    async with AsyncSessionFactory() as s:
+        s.add(MetadataTable(datasource_id=client._ds_id, schema_name="dw",
+                            table_name="existing", enabled=False, source="synced"))
+        await s.commit()
+    r = await client.put("/api/admin/metadata/tables/0", json={
+        "datasource_id": client._ds_id, "schema_name": "dw",
+        "table_name": "existing", "enabled": True})
+    assert r.status_code == 200
+    # 不新建——仍是原来那一行
+    async with AsyncSessionFactory() as s:
+        rows = (await s.execute(MetadataTable.__table__.select().where(
+            MetadataTable.datasource_id == client._ds_id,
+            MetadataTable.schema_name == "dw"))).all()
+    assert len(rows) == 1
+    assert rows[0].enabled is True
+
+
+@pytest.mark.asyncio
+async def test_toggle_disable_when_no_row_is_noop(client):
+    """PG 无该行 + enabled=false → 空操作（不新建 disabled 行）。"""
+    r = await client.put("/api/admin/metadata/tables/0", json={
+        "datasource_id": client._ds_id, "schema_name": "dw",
+        "table_name": "ghost", "enabled": False})
+    assert r.status_code == 200
+    assert r.json()["id"] is None
+    async with AsyncSessionFactory() as s:
+        rows = (await s.execute(MetadataTable.__table__.select().where(
+            MetadataTable.table_name == "ghost"))).all()
+    assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_get_columns_by_key(client, monkeypatch):
+    """按 ds+schema+table 拉字段（无需 PG 行）。"""
+    async def fake_fetch(engine, table_name, schema=None):
+        assert table_name == "any_table" and schema == "dw"
+        return [{"name": "c1", "type": "INT", "comment": "列"}]
+    monkeypatch.setattr("src.datasource.metadata_sync.fetch_table_columns", fake_fetch)
+    class _FakeMgr:
+        async def get_engine(self, _ds_id): return object()
+    monkeypatch.setattr("src.datasource.manager.DataSourceManager", lambda: _FakeMgr())
+    r = await client.get(f"/api/admin/datasources/{client._ds_id}/schemas/dw/tables/any_table/columns")
+    assert r.status_code == 200
+    cols = r.json()["columns"]
+    assert cols[0]["name"] == "c1" and cols[0]["type"] == "INT"

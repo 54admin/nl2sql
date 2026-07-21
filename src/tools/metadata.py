@@ -1,7 +1,8 @@
 """query_metadata 工具：返回某数据源里 enabled=True 的表清单（表名/注释 + 实时拉的字段）+ 已配逻辑关联，
 供 LLM 选表 / 生成多表 JOIN。白名单衔接配置页：只有勾选参与的表才返回。
 
-字段懒加载：同步只存表名清单，这里对每张 enabled 表实时连业务库 fetch_table_columns 拉字段。"""
+PG metadata_tables 只存勾选白名单（enabled=true）+ 手写注释（source=manual）。
+这里读 enabled=true 的表，对每张实时连业务库 fetch_table_columns 拉字段（白名单表少，实时拉快）。"""
 from __future__ import annotations
 
 import json
