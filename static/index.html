@@ -33,7 +33,7 @@
   /* ===== 配置页：三栏 DB 工具风格 ===== */
   .cfg-layout {
     display: grid;
-    grid-template-columns: 20% 30% 1fr;   /* 左数据源 / 中表 / 右字段 */
+    grid-template-columns: 22% 33% 1fr;   /* 左数据源树 / 中表视图 / 右字段 */
     gap: 1px;
     background: #e0e0e0;                   /* gap 作分隔线 */
     height: 100%;
@@ -53,29 +53,42 @@
   }
   .cfg-col-body { flex: 1; overflow-y: auto; padding: 6px; }
 
-  /* 左栏：数据源 */
+  /* 左栏：数据源 + 库折叠树 */
   .cfg-left .cfg-col-head { justify-content: space-between; padding: 8px 10px; }
   .cfg-left .cfg-col-head > span { font-size: 13px; color: #666; font-weight: 600; }
   #btn-new-ds { padding: 5px 10px; background: #4caf50; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
   #btn-new-ds:hover { background: #43a047; }
-  .ds-item { background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 8px 10px; cursor: pointer; margin-bottom: 6px; transition: all .12s; }
+  .ds-item { background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; transition: all .12s; }
   .ds-item:hover { background: #f7f7f7; }
   .ds-item.selected { border-color: #4caf50; background: #f1f8f1; box-shadow: 0 0 0 2px rgba(76,175,80,0.12); }
-  .ds-item-head { display: flex; align-items: center; gap: 6px; }
-  .ds-item-head b { font-size: 13px; color: #222; }
-  .ds-item-head .type-tag { font-size: 11px; color: #666; background: #f0f0f0; padding: 1px 6px; border-radius: 3px; margin-left: auto; }
-  .ds-item-actions { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
-  .ds-item-actions button { padding: 2px 6px; font-size: 11px; border: 1px solid #ccc; background: #fafafa; border-radius: 3px; cursor: pointer; }
-  .ds-item-actions button:hover { background: #eee; }
-  .ds-item-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .ds-row { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .ds-row b { font-size: 13px; color: #222; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ds-row .type-tag { font-size: 11px; color: #666; background: #f0f0f0; padding: 1px 6px; border-radius: 3px; }
+  .ds-toggle { font-size: 11px; color: #888; cursor: pointer; user-select: none; padding: 0 4px; }
+  .ds-actions { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+  .ds-actions button { padding: 2px 6px; font-size: 11px; border: 1px solid #ccc; background: #fafafa; border-radius: 3px; cursor: pointer; }
+  .ds-actions button:hover { background: #eee; }
+  /* 库列表（嵌套在 ds-item 下） */
+  .schema-list { margin-top: 6px; padding-left: 14px; border-left: 2px solid #e8e8e8; margin-left: 4px; }
+  .schema-item { padding: 4px 6px; cursor: pointer; border-radius: 4px; font-size: 12px; display: flex; align-items: center; gap: 6px; color: #444; }
+  .schema-item:hover { background: #f0f7ff; }
+  .schema-item.selected { background: #e3f2fd; color: #1565c0; font-weight: 600; }
+  .schema-item .s-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .schema-item .s-count { font-size: 11px; color: #888; }
+  .schema-placeholder { font-size: 11px; color: #aaa; padding: 4px 6px; }
 
-  /* 中栏：表列表 */
+  /* 中栏：表/视图分栏 */
   .cfg-mid .cfg-col-head { flex-direction: column; align-items: stretch; padding: 8px 10px; gap: 6px; }
   .mid-row { display: flex; align-items: center; gap: 6px; }
   #mid-title { font-size: 13px; font-weight: 600; color: #333; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kind-tabs { display: flex; gap: 4px; }
+  .kind-tab { padding: 3px 10px; font-size: 12px; border: 1px solid #ccc; background: #fafafa; border-radius: 4px; cursor: pointer; color: #555; }
+  .kind-tab.active { background: #4caf50; color: #fff; border-color: #4caf50; }
   #btn-sync { padding: 4px 10px; font-size: 12px; border: 1px solid #4caf50; background: #fff; color: #4caf50; border-radius: 4px; cursor: pointer; white-space: nowrap; }
   #btn-sync:hover { background: #f1f8f1; }
   #btn-sync:disabled { opacity: 0.6; cursor: not-allowed; }
+  #btn-dashboard { padding: 4px 10px; font-size: 12px; border: 1px solid #1976d2; background: #fff; color: #1976d2; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  #btn-dashboard:hover { background: #e3f2fd; }
   #table-search { width: 100%; padding: 5px 8px; border: 1px solid #d0d0d0; border-radius: 4px; font-size: 12px; }
 
   .table-row {
@@ -152,17 +165,21 @@
   </div>
   <div id="config-panel" style="display:none">
     <div class="cfg-layout">
-      <!-- 左栏：数据源 -->
+      <!-- 左栏：数据源 > 库 折叠树 -->
       <div class="cfg-col cfg-left">
         <div class="cfg-col-head"><span>数据源</span><button id="btn-new-ds">+ 新建</button></div>
         <div id="ds-list" class="cfg-col-body"></div>
       </div>
-      <!-- 中栏：表列表（标题 + 搜索 + 同步 常驻顶部） -->
+      <!-- 中栏：表/视图分栏（标题 + tab + 搜索 + 同步 + 总览） -->
       <div class="cfg-col cfg-mid">
         <div class="cfg-col-head">
           <div class="mid-row">
-            <span id="mid-title">表（选数据源）</span>
-            <button id="btn-sync">同步</button>
+            <span id="mid-title">表（选库）</span>
+            <div class="kind-tabs">
+              <button class="kind-tab active" data-kind="table">表</button>
+              <button class="kind-tab" data-kind="view">视图</button>
+            </div>
+            <button id="btn-sync">同步此库</button>
           </div>
           <input id="table-search" placeholder="搜索表名/注释…">
         </div>
@@ -189,7 +206,6 @@
       <option value="pg">PostgreSQL</option>
     </select>
     <input id="ds-addr" placeholder="地址 host:port 如 10.0.0.1:9030">
-    <input id="ds-db" placeholder="库名">
     <input id="ds-user" placeholder="用户名">
     <input id="ds-pwd" type="password" placeholder="密码">
     <button id="ds-save">保存</button>
@@ -312,7 +328,7 @@ input.addEventListener("keydown", e => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); }
 });
 
-// ===== 配置页：Tab 切换 + 数据源管理 + 表勾选 + 字段表（三栏 DB 工具风格）=====
+// ===== 配置页：DBeaver 层级导航（数据源 > 库 > 表/视图 > 字段）=====
 function showTab(which) {
   const isChat = which === "chat";
   document.getElementById("chat-panel").style.display = isChat ? "flex" : "none";
@@ -325,9 +341,11 @@ document.getElementById("tab-chat").onclick = () => showTab("chat");
 document.getElementById("tab-config").onclick = () => showTab("config");
 
 let selectedDsId = null;
+let selectedSchema = null;      // 当前选中库（schema_name）
 let selectedTableId = null;     // 当前选中表（中栏高亮 + 右栏显示其字段）
-let currentDsName = "";         // 当前数据源名（用于中栏标题）
-let currentTables = [];         // 当前数据源的表数组（供搜索过滤、避免重拉）
+let currentDsName = "";         // 当前数据源名
+let currentTables = [];         // 当前库的表数组（供搜索过滤、避免重拉）
+let currentKind = "table";      // 当前 tab：table / view
 let editingDsId = null;
 
 // 常驻 DOM 引用（搜索/同步/三栏内容容器，避免反复 getElementById）
@@ -339,32 +357,43 @@ const tablesArea  = document.getElementById("tables-area");
 const tableSearch = document.getElementById("table-search");
 const btnSync     = document.getElementById("btn-sync");
 
-// 搜索框 → 过滤中栏表（表名+注释）
+// 搜索框 → 过滤中栏表（按当前 tab + 表名+注释）
 tableSearch.oninput = () => {
   if (currentTables.length) renderTables(currentTables, tableSearch.value);
 };
 
-// 中栏顶部「同步」按钮：同步当前选中数据源
+// 表/视图 tab 切换
+document.querySelectorAll(".kind-tab").forEach(btn => {
+  btn.onclick = () => {
+    currentKind = btn.dataset.kind;
+    document.querySelectorAll(".kind-tab").forEach(b => b.classList.toggle("active", b === btn));
+    if (currentTables.length) renderTables(currentTables, tableSearch.value);
+  };
+});
+
+// 中栏顶部「同步此库」按钮：同步当前选中的库
 btnSync.onclick = async () => {
-  if (!selectedDsId) return;
+  if (!selectedDsId || !selectedSchema) { alert("先选数据源和库"); return; }
   btnSync.disabled = true; btnSync.textContent = "同步中⏳";
   try {
-    const r = await fetch(`/api/admin/datasources/${selectedDsId}/sync`, {method: "POST"});
+    const r = await fetch(`/api/admin/datasources/${selectedDsId}/sync`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({schema_name: selectedSchema})});
     if (r.ok) {
       const d = await r.json();
-      // 顶部闪现同步结果（不弹 modal，DB 工具感）
       const tag = document.createElement("p");
       tag.className = "sync-flash";
-      tag.textContent = `✓ 同步完成：新增 ${d.added} / 更新 ${d.updated} / 跳过 ${d.skipped}`;
+      tag.textContent = `✓ 同步完成（${selectedSchema}）：新增 ${d.added} / 更新 ${d.updated} / 跳过 ${d.skipped}`;
       tablesArea.prepend(tag);
       setTimeout(() => tag.remove(), 3000);
-      await loadTables(selectedDsId, currentDsName);   // 刷新中栏
+      await loadTables(selectedDsId, selectedSchema);   // 刷新中栏
+      await refreshSchemaCounts(selectedDsId);          // 刷新库节点表数
     } else {
       const d = await r.json().catch(() => ({}));
       alert("同步失败: " + (d.detail || r.status));
     }
   } finally {
-    btnSync.disabled = false; btnSync.textContent = "同步";
+    btnSync.disabled = false; btnSync.textContent = "同步此库";
   }
 };
 
@@ -378,24 +407,44 @@ async function loadDatasources() {
     const div = document.createElement("div");
     div.className = "ds-item" + (ds.id === selectedDsId ? " selected" : "");
     div.innerHTML = `
-      <div class="ds-item-head">
+      <div class="ds-row">
+        <span class="ds-toggle">▶</span>
         <b>${ds.name}</b>
         <span class="type-tag">${ds.type}</span>
       </div>
-      <div class="ds-item-actions">
+      <div class="ds-actions">
         <button data-act="test">测试</button>
-        <button data-act="sync">同步</button>
         <button data-act="edit">编辑</button>
         <button data-act="del">删除</button>
-      </div>`;
-    // 点卡片（非按钮）= 选中数据源 → 自动加载已同步表 + 清右栏（核心 bug 修复：选源即列表）
-    div.onclick = (e) => {
+      </div>
+      <div class="schema-list" style="display:none"></div>`;
+    const toggle = div.querySelector(".ds-toggle");
+    const schemaList = div.querySelector(".schema-list");
+
+    // 点 ▶/数据源名 → 展开/折叠库列表（首次拉取）
+    div.querySelector(".ds-row").onclick = async (e) => {
       if (e.target.tagName === "BUTTON") return;
-      selectedDsId = ds.id;
-      currentDsName = ds.name;
-      selectedTableId = null;
-      loadDatasources();          // 刷新选中高亮
-      loadTables(ds.id, ds.name); // 直接读 PG metadata 已存表，无需用户点同步
+      const expanded = toggle.textContent === "▼";
+      if (expanded) {
+        toggle.textContent = "▶"; schemaList.style.display = "none"; return;
+      }
+      toggle.textContent = "▼"; schemaList.style.display = "block";
+      if (!schemaList.dataset.loaded) {
+        schemaList.innerHTML = '<div class="schema-placeholder">拉取库列表中…</div>';
+        try {
+          const rr = await fetch(`/api/admin/datasources/${ds.id}/schemas`);
+          if (!rr.ok) throw new Error((await rr.json().catch(() => ({})).detail) || rr.status);
+          const {schemas} = await rr.json();
+          schemaList.dataset.loaded = "1";
+          schemaList.dataset.schemas = JSON.stringify(schemas);
+          renderSchemaList(schemaList, ds.id, schemas);
+          await refreshSchemaCounts(ds.id);
+        } catch (err) {
+          schemaList.innerHTML = `<div class="schema-placeholder" style="color:#c62828">拉取失败: ${err.message}</div>`;
+        }
+      } else {
+        await refreshSchemaCounts(ds.id);   // 已加载过：刷新计数后保持原选中状态
+      }
     };
     div.querySelector('[data-act=test]').onclick = async (e) => {
       e.stopPropagation();
@@ -403,39 +452,86 @@ async function loadDatasources() {
       if (rr.ok) alert("连接成功");
       else { const d = await rr.json().catch(() => ({})); alert("连接失败: " + (d.detail || rr.status)); }
     };
-    div.querySelector('[data-act=sync]').onclick = async (e) => {
-      e.stopPropagation();
-      const b = e.target;
-      b.disabled = true; b.textContent = "同步⏳";
-      const rr = await fetch(`/api/admin/datasources/${ds.id}/sync`, {method: "POST"});
-      b.disabled = false; b.textContent = "同步";
-      if (rr.ok) {
-        const rj = await rr.json();
-        alert(`同步完成：新增 ${rj.added} / 更新 ${rj.updated} / 跳过 ${rj.skipped}`);
-        if (selectedDsId === ds.id) loadTables(ds.id, ds.name);
-      } else {
-        const d = await rr.json().catch(() => ({}));
-        alert("同步失败: " + (d.detail || rr.status));
-      }
-    };
     div.querySelector('[data-act=edit]').onclick = (e) => { e.stopPropagation(); openDsModal(ds); };
     div.querySelector('[data-act=del]').onclick = async (e) => {
       e.stopPropagation();
       if (!confirm("删除数据源 " + ds.name + "?")) return;
       const rr = await fetch(`/api/admin/datasources/${ds.id}`, {method: "DELETE"});
       if (!rr.ok) { const d = await rr.json().catch(() => ({})); alert("删除失败: " + (d.detail || rr.status)); return; }
-      if (selectedDsId === ds.id) {
-        // 删的是当前选中源：清空中栏+右栏
-        selectedDsId = null; currentDsName = ""; currentTables = []; selectedTableId = null;
-        midTitle.textContent = "表（选数据源）";
-        tablesArea.innerHTML = '<p class="placeholder">点左侧选数据源</p>';
-        fieldsTitle.textContent = "字段"; fieldsCount.textContent = "";
-        fieldsArea.innerHTML = '<p class="placeholder">点左侧表查看字段</p>';
-      }
+      if (selectedDsId === ds.id) resetMidAndRight();
       loadDatasources();
     };
     list.appendChild(div);
+
+    // 已选中的源 → 自动展开库列表
+    if (ds.id === selectedDsId) {
+      div.querySelector(".ds-row").click();
+    }
   }
+}
+
+// 渲染库列表节点（ds.id 下），并标「已同步 N 表」计数（从 metadata 拉）
+function renderSchemaList(container, dsId, schemas) {
+  container.innerHTML = "";
+  if (!schemas.length) {
+    container.innerHTML = '<div class="schema-placeholder">无可见库（检查权限）</div>';
+    return;
+  }
+  for (const sk of schemas) {
+    const item = document.createElement("div");
+    item.className = "schema-item" + (dsId === selectedDsId && sk === selectedSchema ? " selected" : "");
+    item.dataset.schema = sk;
+    item.innerHTML = `<span class="s-name">📁 ${sk}</span><span class="s-count"></span>`;
+    item.onclick = (e) => {
+      e.stopPropagation();
+      selectedDsId = dsId;
+      selectedSchema = sk;
+      selectedTableId = null;
+      container.querySelectorAll(".schema-item").forEach(x => x.classList.toggle("selected", x === item));
+      // 同级数据源高亮
+      document.querySelectorAll(".ds-item").forEach(x => x.classList.remove("selected"));
+      item.closest(".ds-item").classList.add("selected");
+      loadTables(dsId, sk);
+    };
+    container.appendChild(item);
+  }
+}
+
+// 拉某数据源下所有 metadata_tables，按 schema 计数标到对应库节点旁
+async function refreshSchemaCounts(dsId) {
+  try {
+    const r = await fetch(`/api/admin/metadata?datasource_id=${dsId}`);
+    if (!r.ok) return;
+    const {tables} = await r.json();
+    const counts = {};
+    for (const t of tables) {
+      const sk = t.schema_name || "(默认库)";
+      counts[sk] = (counts[sk] || 0) + 1;
+    }
+    const container = document.querySelector(`.ds-item.selected .schema-list`);  // ponytail: 简单按当前展开的容器
+    // 找到对应 dsId 的 schema-list（更稳的定位）
+    const allLists = document.querySelectorAll(".ds-list .ds-item");
+    let target = null;
+    for (const it of allLists) {
+      // ds-item 里没绑 id，按 DOM 顺序对应 datasources 列表
+    }
+    // 直接遍历所有 schema-list 容器里的 schema-item，匹配 data-schema
+    document.querySelectorAll(".schema-list").forEach(list => {
+      list.querySelectorAll(".schema-item").forEach(item => {
+        const sk = item.dataset.schema;
+        item.querySelector(".s-count").textContent = counts[sk] ? `(${counts[sk]})` : "";
+      });
+    });
+  } catch (e) { /* 计数失败不影响主流程 */ }
+}
+
+function resetMidAndRight() {
+  selectedDsId = null; selectedSchema = null;
+  currentTables = []; selectedTableId = null;
+  midTitle.textContent = "表（选库）";
+  tablesArea.innerHTML = '<p class="placeholder">点左侧选数据源 → 展开库 → 选库查看表</p>';
+  fieldsTitle.textContent = "字段"; fieldsCount.textContent = "";
+  fieldsArea.innerHTML = '<p class="placeholder">点左侧表查看字段</p>';
 }
 
 function openDsModal(ds) {
@@ -444,7 +540,6 @@ function openDsModal(ds) {
   document.getElementById("ds-name").value = ds?.name ?? "";
   document.getElementById("ds-type").value = ds?.type || "starrocks";
   document.getElementById("ds-addr").value = ds ? `${ds.host}:${ds.port}` : "";
-  document.getElementById("ds-db").value = ds?.db_name ?? "";
   document.getElementById("ds-user").value = ds?.username ?? "";
   document.getElementById("ds-pwd").value = "";
   document.getElementById("ds-modal").style.display = "flex";
@@ -459,12 +554,11 @@ document.getElementById("ds-save").onclick = async () => {
     type: document.getElementById("ds-type").value,
     host: (host || "").trim(),
     port: parseInt(port) || 9030,
-    db_name: document.getElementById("ds-db").value.trim(),
     username: document.getElementById("ds-user").value.trim(),
-    // 不发 sync_scope：后端默认 None=全部业务表，同步自动过滤系统库
+    // db_name 不再在 modal 里收——建源只填连接（实例），下挂多库走层级导航
   };
   const pwd = document.getElementById("ds-pwd").value;
-  if (!body.name || !body.host || !body.db_name || !body.username) { alert("名称/地址/库/用户名必填"); return; }
+  if (!body.name || !body.host || !body.username) { alert("名称/地址/用户名必填"); return; }
   let r;
   if (editingDsId) {
     if (pwd) body.password = pwd;   // 编辑时空密码=不改
@@ -481,32 +575,33 @@ document.getElementById("ds-save").onclick = async () => {
   loadDatasources();
 };
 
-// 加载某数据源的已同步表清单（从 PG metadata 读，未同步过的源也会立刻返回空列表）
-async function loadTables(dsId, dsName) {
-  const r = await fetch(`/api/admin/metadata?datasource_id=${dsId}`);
+// 加载某数据源指定库的表清单（按 schema 过滤 PG metadata）
+async function loadTables(dsId, schemaName) {
+  const r = await fetch(`/api/admin/metadata?datasource_id=${dsId}&schema_name=${encodeURIComponent(schemaName)}`);
   if (!r.ok) { const d = await r.json().catch(() => ({})); alert("加载表失败: " + (d.detail || r.status)); return; }
   const {tables} = await r.json();
   currentTables = tables;
   selectedTableId = null;
-  midTitle.textContent = `表（${dsName || dsId}）`;
-  // 切数据源：右栏重置为"点表查看字段"
+  midTitle.textContent = `${schemaName} · ${dsId}`;
   fieldsTitle.textContent = "字段";
   fieldsCount.textContent = "";
   fieldsArea.innerHTML = '<p class="placeholder">点左侧表查看字段</p>';
   if (!tables.length) {
-    tablesArea.innerHTML = '<p class="placeholder">未同步到表，点右上「同步」拉取</p>';
+    tablesArea.innerHTML = '<p class="placeholder">未同步到表，点右上「同步此库」拉取</p>';
     return;
   }
   renderTables(tables, tableSearch.value);
 }
 
-// 渲染中栏表清单（按 q 过滤表名+注释，大小写不敏感）
+// 渲染中栏表清单（按当前 tab + 搜索词过滤）
 function renderTables(tables, q) {
   const ql = q.trim().toLowerCase();
-  const list = tables.filter(t => !ql || (t.table_name + " " + (t.table_comment || "")).toLowerCase().includes(ql));
+  const list = tables
+    .filter(t => t.kind === currentKind)  // tab 过滤：table / view
+    .filter(t => !ql || (t.table_name + " " + (t.table_comment || "")).toLowerCase().includes(ql));
   tablesArea.innerHTML = "";
   if (!list.length) {
-    tablesArea.innerHTML = '<p class="placeholder">无匹配表</p>';
+    tablesArea.innerHTML = `<p class="placeholder">无${currentKind === "view" ? "视图" : "表"}${ql ? "匹配" : "，点「同步此库」拉取"}</p>`;
     return;
   }
   for (const t of list) {
@@ -521,7 +616,6 @@ function renderTables(tables, q) {
       <span class="save-tag"></span>`;
     const cb = row.querySelector("input");
     const tag = row.querySelector(".save-tag");
-    // 勾选框：阻止冒泡，不触发行选中
     cb.onclick = (e) => e.stopPropagation();
     cb.onchange = async () => {
       const rr = await fetch(`/api/admin/metadata/tables/${t.id}`, {
@@ -537,7 +631,6 @@ function renderTables(tables, q) {
         alert("保存失败: " + (d.detail || rr.status));
       }
     };
-    // 点行（非勾选框）→ 右栏拉该表字段
     row.onclick = (e) => {
       if (e.target === cb) return;
       loadFields(t);
@@ -572,6 +665,9 @@ async function loadFields(t) {
     fieldsArea.innerHTML = `<p class="placeholder err">加载字段失败: ${e.message}</p>`;
   }
 }
+
+// ===== Dashboard 总览（Step 4 补）：所有数据源 × 库分组 × 勾选表 =====
+// 占位：Step 4 commit 实现
 </script>
 </body>
 </html>
