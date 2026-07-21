@@ -106,7 +106,10 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     async def index():
-        return Response(content=_INDEX_HTML, media_type="text/html")
+        # 开发期每次请求读文件：改 index.html 强刷即生效，不用重启
+        # （_INDEX_HTML 是启动读的常量，--reload 不监听 html，故每次读文件）
+        html = (Path(__file__).resolve().parent.parent / "static" / "index.html").read_bytes()
+        return Response(content=html, media_type="text/html")
 
     app.include_router(build_ask_router(_Lazy("orchestrator")))
     app.include_router(build_session_router(_Lazy("session_mgr")))
