@@ -1,11 +1,11 @@
 """元数据读取 + 逻辑关系（table_relations）CRUD。P1a。
-纯 PG 操作，不依赖 DataSourceManager。"""
+表清单走 PG；字段懒加载（点表展开时连业务库实时拉，不存 PG）。"""
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from src.storage.models import MetadataColumn, MetadataTable, TableRelation
+from src.storage.models import MetadataTable, TableRelation
 from src.storage.pg_client import AsyncSessionFactory
 
 
@@ -23,21 +23,28 @@ def build_metadata_router() -> APIRouter:
 
     @router.get("/api/admin/metadata")
     async def read_metadata(datasource_id: int) -> dict:
-        """读某数据源的元数据（表 + 字段），供 P1b query_metadata 调用。"""
+        """读某数据源的表清单（不含字段——字段点表展开时按需拉 /api/admin/metadata/tables/{id}/columns）。"""
         async with AsyncSessionFactory() as s:
             tables = (await s.execute(MetadataTable.__table__.select().where(
                 MetadataTable.datasource_id == datasource_id))).all()
-            out = []
-            for t in tables:
-                cols = (await s.execute(MetadataColumn.__table__.select().where(
-                    MetadataColumn.table_id == t.id))).all()
-                out.append({
-                    "id": t.id, "table_name": t.table_name, "table_comment": t.table_comment,
-                    "source": t.source, "kind": t.kind, "enabled": t.enabled,
-                    "columns": [{"column_name": c.column_name, "column_comment": c.column_comment,
-                                 "data_type": c.data_type, "is_primary": c.is_primary,
-                                 "role_tag": c.role_tag, "source": c.source} for c in cols]})
+            out = [{"id": t.id, "table_name": t.table_name, "table_comment": t.table_comment,
+                    "source": t.source, "kind": t.kind, "enabled": t.enabled}
+                   for t in tables]
             return {"tables": out}
+
+    @router.get("/api/admin/metadata/tables/{table_id}/columns")
+    async def get_table_columns(table_id: int) -> dict:
+        """点表展开时实时拉该表字段（连业务库，字段懒加载，不存 PG）。"""
+        from src.datasource.manager import DataSourceManager
+        from src.datasource.metadata_sync import fetch_table_columns
+        async with AsyncSessionFactory() as s:
+            t = await s.get(MetadataTable, table_id)
+        if t is None:
+            raise HTTPException(404, "表不存在")
+        engine = await DataSourceManager().get_engine(t.datasource_id)
+        cols = await fetch_table_columns(engine, t.table_name)
+        return {"columns": [{"name": c["name"], "type": c["type"], "comment": c["comment"]}
+                            for c in cols]}
 
     @router.put("/api/admin/metadata/tables/{table_id}")
     async def set_table_enabled(table_id: int, req: dict) -> dict:

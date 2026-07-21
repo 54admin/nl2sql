@@ -1,33 +1,37 @@
-"""query_metadata 工具：返回某数据源里 enabled=True 的表清单（表名/注释/字段）+ 已配逻辑关联，
-供 LLM 选表 / 生成多表 JOIN。白名单衔接配置页：只有勾选参与的表才返回。"""
+"""query_metadata 工具：返回某数据源里 enabled=True 的表清单（表名/注释 + 实时拉的字段）+ 已配逻辑关联，
+供 LLM 选表 / 生成多表 JOIN。白名单衔接配置页：只有勾选参与的表才返回。
+
+字段懒加载：同步只存表名清单，这里对每张 enabled 表实时连业务库 fetch_table_columns 拉字段。"""
 from __future__ import annotations
 
 import json
 
+from sqlalchemy.ext.asyncio import AsyncEngine
+
 from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
-from src.storage.models import MetadataColumn, MetadataTable, TableRelation
+from src.datasource.metadata_sync import fetch_table_columns
+from src.storage.models import MetadataTable, TableRelation
 from src.storage.pg_client import AsyncSessionFactory
 
 
-async def _list_enabled_tables(datasource_id: int) -> list[dict]:
-    """读 enabled=True 的表 + 字段。返回 [{table_name, table_comment, columns:[{name,comment,type}]}]。
-    ponytail: 每表一次查字段（N+1），白名单表数 ≤10 规模无感；表多了再换 IN 批量加载。"""
+async def _list_enabled_tables(datasource_id: int, engine: AsyncEngine) -> list[dict]:
+    """读 enabled=True 的表（表名+注释），实时拉每张表的字段。
+    返回 [{table_name, table_comment, columns:[{name,comment,type}]}]。
+    ponytail: 每表一次连业务库拉字段，白名单表数 ≤10 规模可接受；表多了再换并发或缓存。"""
     async with AsyncSessionFactory() as s:
         tables = (await s.execute(MetadataTable.__table__.select().where(
             MetadataTable.datasource_id == datasource_id,
             MetadataTable.enabled.is_(True)))).all()
-        out = []
-        for t in tables:
-            cols = (await s.execute(MetadataColumn.__table__.select().where(
-                MetadataColumn.table_id == t.id))).all()
-            out.append({
-                "table_name": t.table_name,
-                "table_comment": t.table_comment or "",
-                "columns": [{"name": c.column_name,
-                             "comment": c.column_comment or "",
-                             "type": c.data_type or ""} for c in cols],
-            })
-        return out
+    out = []
+    for t in tables:
+        cols = await fetch_table_columns(engine, t.table_name)
+        out.append({
+            "table_name": t.table_name,
+            "table_comment": t.table_comment or "",
+            "columns": [{"name": c["name"], "comment": c["comment"], "type": c["type"]}
+                        for c in cols],
+        })
+    return out
 
 
 async def _list_relations(datasource_id: int) -> list[dict]:
@@ -48,15 +52,17 @@ async def _list_relations(datasource_id: int) -> list[dict]:
 async def query_metadata(args: dict, ctx: LoopContext,
                          cancel_token: CancelToken) -> ToolResult:
     """工具 handler。args 可带 datasource_id；缺省取第一个数据源（单源场景，多源绑源留 P1c）。
-    返回 {tables:[...], relations:[...]}：tables=白名单表，relations=已配 JOIN 口径。"""
+    返回 {tables:[...], relations:[...]}：tables=白名单表（字段实时拉），relations=已配 JOIN 口径。"""
     from src.datasource.manager import DataSourceManager
     ds_id = args.get("datasource_id")
+    mgr = DataSourceManager()
     if ds_id is None:
-        rows = await DataSourceManager().list_datasources()
+        rows = await mgr.list_datasources()
         if not rows:
             return ToolResult(summary="无可用数据源，请先在配置页添加。")
         ds_id = rows[0]["id"]
-    tables = await _list_enabled_tables(int(ds_id))
+    engine = await mgr.get_engine(int(ds_id))
+    tables = await _list_enabled_tables(int(ds_id), engine)
     if not tables:
         return ToolResult(summary="该数据源没有勾选参与问数的表，请在配置页勾选表后再问。")
     relations = await _list_relations(int(ds_id))

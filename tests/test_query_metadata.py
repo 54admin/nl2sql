@@ -3,7 +3,7 @@ import json
 import pytest
 
 from src.datasource.manager import DataSourceManager
-from src.storage.models import MetadataColumn, MetadataTable
+from src.storage.models import MetadataTable
 from src.storage.pg_client import AsyncSessionFactory, init_db
 from src.tools.metadata import _list_enabled_tables, query_metadata
 
@@ -14,29 +14,39 @@ def fernet_key(monkeypatch):
     monkeypatch.setenv("NL2SQL_DS_KEY", Fernet.generate_key().decode())
 
 
+class FakeEngine:     # 不连真库，fetch 被 mock，engine 仅作占位
+    pass
+
+
 @pytest.fixture
-async def db():
-    """预置 1 数据源 + 2 表（1 enabled 1 disabled）+ 字段。"""
+async def db(monkeypatch):
+    """预置 1 数据源 + 2 表（1 enabled 1 disabled）。字段懒加载，mock fetch 返回固定字段。"""
     await init_db("sqlite+aiosqlite:///:memory:")
     ds_id = await DataSourceManager().create_datasource(
         dict(name="d", type="starrocks", host="h", port=1, db_name="db",
              username="u", password="p"))
     async with AsyncSessionFactory() as s:
-        mt1 = MetadataTable(datasource_id=ds_id, table_name="fact_power",
-                            table_comment="发电量", enabled=True, source="synced")
-        mt2 = MetadataTable(datasource_id=ds_id, table_name="fact_old",
-                            table_comment="旧表", enabled=False, source="synced")
-        s.add_all([mt1, mt2])
-        await s.flush()
-        s.add(MetadataColumn(table_id=mt1.id, column_name="kwh",
-                             column_comment="度数", data_type="BIGINT", source="synced"))
+        s.add_all([
+            MetadataTable(datasource_id=ds_id, table_name="fact_power",
+                          table_comment="发电量", enabled=True, source="synced"),
+            MetadataTable(datasource_id=ds_id, table_name="fact_old",
+                          table_comment="旧表", enabled=False, source="synced"),
+        ])
         await s.commit()
+
+    # mock fetch_table_columns：fact_power 返 1 字段，其他返空（验证调过）
+    async def fake_fetch(engine, table_name):
+        if table_name == "fact_power":
+            return [{"name": "kwh", "type": "BIGINT", "comment": "度数"}]
+        return []
+    monkeypatch.setattr("src.tools.metadata.fetch_table_columns", fake_fetch)
     return ds_id
 
 
 @pytest.mark.asyncio
 async def test_list_only_enabled_tables(db):
-    tables = await _list_enabled_tables(db)
+    """enabled=True 的表才返回；字段从 mock 的 fetch_table_columns 实时拉。"""
+    tables = await _list_enabled_tables(db, FakeEngine())
     assert {t["table_name"] for t in tables} == {"fact_power"}   # fact_old 被 enabled=False 过滤
     assert tables[0]["table_comment"] == "发电量"
     assert tables[0]["columns"][0]["name"] == "kwh"

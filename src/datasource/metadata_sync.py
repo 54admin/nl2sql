@@ -1,12 +1,13 @@
-"""元数据同步：从业务库（StarRocks）Inspector 拉表+视图/字段，写系统 PG metadata_*。
-保留 source=manual 的手写覆盖，不被同步冲掉。同步只写 comment/type，不碰 is_primary/role_tag。"""
+"""元数据同步：从业务库（StarRocks）Inspector 拉表+视图**名清单**（只表名/注释/kind，不拉字段），
+写系统 PG metadata_tables。字段按需拉（fetch_table_columns）——点表展开 / query_metadata 时调。
+保留 source=manual 的手写覆盖，不被同步冲掉。同步只写 comment/kind，不碰 is_primary/role_tag。"""
 from __future__ import annotations
 
 from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.logging import get_logger
-from src.storage.models import MetadataColumn, MetadataTable
+from src.storage.models import MetadataTable
 from src.storage.pg_client import AsyncSessionFactory
 
 log = get_logger(__name__)
@@ -29,25 +30,20 @@ def _in_scope(table_name: str, sync_scope: str | None) -> bool:
 
 
 def _collect_one(insp, name: str, kind: str) -> dict | None:
-    """收集单张表/视图的元数据。系统对象返回 None 跳过。kind: table/view。"""
+    """收集单张表/视图的元数据（仅表名+注释+kind，**不拉字段**——字段按需 fetch_table_columns）。
+    系统对象返回 None 跳过。kind: table/view。"""
     if _is_system_name(name):
         return None
     try:
         tcomment = (insp.get_table_comment(name) or {}).get("text") or ""
     except Exception:
         tcomment = ""
-    try:
-        cols = [{"name": c["name"], "type": str(c["type"]),
-                 "comment": c.get("comment") or ""}
-                for c in insp.get_columns(name)]
-    except Exception:
-        cols = []   # 视图拉字段失败兜底空
-    return {"table": name, "kind": kind, "comment": tcomment, "columns": cols}
+    return {"table": name, "kind": kind, "comment": tcomment}
 
 
 def _collect_sync(sync_conn) -> list[dict]:
     """同步函数（被 engine.run_sync 调用，在同步连接上跑 Inspector）。
-
+    只拉表/视图名清单 + 注释，**不拉字段**（字段懒加载，同步快）。
     自动过滤系统库/表（information_schema/mysql/performance_schema/sys），
     与 sync_scope 无关——系统对象永远不进问数元数据。"""
     insp = inspect(sync_conn)
@@ -67,10 +63,23 @@ def _collect_sync(sync_conn) -> list[dict]:
     return out
 
 
-async def sync_metadata(ds_id: int, engine: AsyncEngine, sync_scope: str | None) -> dict:
-    """同步一个数据源的元数据。返回 {added, updated, skipped}。
+async def fetch_table_columns(engine: AsyncEngine, table_name: str) -> list[dict]:
+    """连业务库按需拉单张表的字段（点表展开 / query_metadata 时调）。
+    返回 [{name, type, comment}]。拉失败抛异常（调用方 catch）。"""
+    def _get_cols(sync_conn):   # run_sync 要求同步函数（在同步连接上跑 Inspector）
+        insp = inspect(sync_conn)
+        return [{"name": c["name"], "type": str(c["type"]),
+                 "comment": c.get("comment") or ""}
+                for c in insp.get_columns(table_name)]
+    async with engine.connect() as conn:
+        return await conn.run_sync(_get_cols)
 
-    ponytail: 库里已删的表/字段本期不清理（避免误删手写），后续可加。"""
+
+async def sync_metadata(ds_id: int, engine: AsyncEngine, sync_scope: str | None) -> dict:
+    """同步一个数据源的元数据（**只拉表名清单**，不拉字段）。返回 {added, updated, skipped}。
+
+    ponytail: 字段不再同步时存——按需 fetch_table_columns 实时拉；
+    库里已删的表本期不清理（避免误删手写），后续可加。"""
     async with engine.connect() as conn:
         fetched = await conn.run_sync(_collect_sync)
     added = updated = skipped = 0
@@ -82,35 +91,14 @@ async def sync_metadata(ds_id: int, engine: AsyncEngine, sync_scope: str | None)
                 MetadataTable.datasource_id == ds_id,
                 MetadataTable.table_name == t["table"]))).first()
             if row is None:
-                mt = MetadataTable(datasource_id=ds_id, table_name=t["table"],
-                                   table_comment=t["comment"], source="synced",
-                                   kind=t.get("kind", "table"))
-                s.add(mt); await s.flush()
-                for c in t["columns"]:
-                    s.add(MetadataColumn(table_id=mt.id, column_name=c["name"],
-                                         column_comment=c["comment"], data_type=c["type"],
-                                         source="synced"))
-                added += 1 + len(t["columns"])
+                s.add(MetadataTable(datasource_id=ds_id, table_name=t["table"],
+                                    table_comment=t["comment"], source="synced",
+                                    kind=t.get("kind", "table")))
+                added += 1
             elif row.source == "synced":
                 await s.execute(MetadataTable.__table__.update().where(
                     MetadataTable.id == row.id).values(
                         table_comment=t["comment"], kind=t.get("kind", "table")))
-                for c in t["columns"]:
-                    crow = (await s.execute(MetadataColumn.__table__.select().where(
-                        MetadataColumn.table_id == row.id,
-                        MetadataColumn.column_name == c["name"]))).first()
-                    if crow is None:
-                        s.add(MetadataColumn(table_id=row.id, column_name=c["name"],
-                                             column_comment=c["comment"], data_type=c["type"],
-                                             source="synced"))
-                        added += 1
-                    elif crow.source == "synced":
-                        await s.execute(MetadataColumn.__table__.update().where(
-                            MetadataColumn.id == crow.id).values(
-                                column_comment=c["comment"], data_type=c["type"]))
-                        updated += 1
-                    else:
-                        skipped += 1          # manual 字段不动
                 updated += 1
             else:
                 skipped += 1                  # 整表 manual
