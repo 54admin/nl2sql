@@ -697,7 +697,6 @@ document.getElementById("btn-dashboard").onclick = async () => {
           🗄 ${ds.name}
           <span class="tag">${ds.type}</span>
           <span class="tag">${ds.host}:${ds.port}</span>
-          ${ds.db_name ? `<span class="tag">默认库: ${ds.db_name}</span>` : '<span class="tag">连实例</span>'}
         </div>
         ${schemaHtml || '<div class="schema-placeholder">未同步任何库</div>'}
       </div>`;

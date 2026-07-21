@@ -71,15 +71,49 @@ async def fetch_table_columns(engine: AsyncEngine, table_name: str,
                               schema: str | None = None) -> list[dict]:
     """连业务库按需拉单张表的字段（点表展开 / query_metadata 时调）。
     schema 非空时拉指定库的字段（跨库元数据查询）。
-    返回 [{name, type, comment}]。拉失败抛异常（调用方 catch）。"""
+    返回 [{name, type, comment}]。拉失败抛异常（调用方 catch）。
+
+    ponytail: StarRocks 视图 SQLAlchemy Inspector.get_columns 拉不到（返空）——
+    get_columns 空时 fallback 用 SHOW FULL COLUMNS（MySQL 协议原生）拿字段名/类型/注释，
+    再不行 SELECT * LIMIT 0 拿列名。"""
     def _get_cols(sync_conn):   # run_sync 要求同步函数（在同步连接上跑 Inspector）
         insp = inspect(sync_conn)
         kw = {"schema": schema} if schema else {}
-        return [{"name": c["name"], "type": str(c["type"]),
-                 "comment": c.get("comment") or ""}
-                for c in insp.get_columns(table_name, **kw)]
+        cols = list(insp.get_columns(table_name, **kw))
+        if cols:
+            return [{"name": c["name"], "type": str(c["type"]),
+                     "comment": c.get("comment") or ""}
+                    for c in cols]
+        # fallback：视图/Inspector 不支持时，用 SHOW FULL COLUMNS 或 SELECT * LIMIT 0 兜底
+        return _fallback_columns(sync_conn, table_name, schema)
     async with engine.connect() as conn:
         return await conn.run_sync(_get_cols)
+
+
+def _fallback_columns(sync_conn, table_name: str, schema: str | None) -> list[dict]:
+    """Inspector 拉不到（StarRocks 视图等）时的兜底：SHOW FULL COLUMNS 拿字段名/类型/注释，
+    再不行 SELECT * LIMIT 0 拿列名。返回 [{name, type, comment}]。拿不到就空 list（不报错）。"""
+    from sqlalchemy import text
+    full = f"{schema}.{table_name}" if schema else table_name
+    try:
+        rows = sync_conn.execute(text(f"SHOW FULL COLUMNS FROM {full}")).fetchall()
+        out = []
+        for r in rows:
+            d = r._mapping if hasattr(r, "_mapping") else r
+            # MySQL/StarRocks SHOW FULL COLUMNS: Field/Type/.../Comment（别名大小写依方言）
+            name = d.get("Field") or d.get("field")
+            col_type = d.get("Type") or d.get("type") or ""
+            comment = d.get("Comment") or d.get("comment") or ""
+            if name:
+                out.append({"name": name, "type": str(col_type), "comment": str(comment)})
+        return out
+    except Exception:
+        # SHOW 也失败 → SELECT * LIMIT 0 拿列名（类型/注释无）
+        try:
+            result = sync_conn.execute(text(f"SELECT * FROM {full} LIMIT 0"))
+            return [{"name": c, "type": "", "comment": ""} for c in result.keys()]
+        except Exception:
+            return []
 
 
 async def fetch_objects(engine: AsyncEngine, schema: str | None) -> list[dict]:

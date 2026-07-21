@@ -168,7 +168,8 @@ def build_metadata_router() -> APIRouter:
 
         return {"datasources": [
             {**ds_map[did], "schemas": [
-                {"schema_name": sk or "(默认库)", "tables": tbls}
+                # ponytail: schema 空就空字符串（前端显示空），不发明"默认库"概念
+                {"schema_name": sk, "tables": tbls}
                 for sk, tbls in sorted(schemas.items())]}
             for did, schemas in groups.items()
         ]}

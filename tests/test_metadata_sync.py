@@ -188,6 +188,41 @@ async def test_fetch_table_columns_returns_columns():
 
 
 @pytest.mark.asyncio
+async def test_fetch_table_columns_fallback_for_view(monkeypatch):
+    """Inspector.get_columns 对 StarRocks 视图返空 → fallback SHOW FULL COLUMNS 拿字段名/类型/注释。
+    复现真实 bug：视图字段拉不到（空），靠 SHOW FULL COLUMNS 兜底。"""
+    class FakeInspector:
+        def get_columns(self, table_name, schema=None): return []   # 视图拉空 → 触发 fallback
+
+    class FakeRow:
+        def __init__(self, m): self._mapping = m
+
+    class FakeResult:
+        def fetchall(self):
+            return [FakeRow({"Field": "kwh", "Type": "BIGINT", "Comment": "度数"}),
+                    FakeRow({"Field": "sid", "Type": "VARCHAR(32)", "Comment": ""})]
+
+    class FakeSyncConn:
+        def execute(self, stmt): return FakeResult()
+
+    class FakeConn:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def run_sync(self, fn, *a, **kw): return fn(FakeSyncConn())
+
+    class FakeEngine:
+        def connect(self): return FakeConn()
+
+    monkeypatch.setattr("src.datasource.metadata_sync.inspect",
+                        lambda conn: FakeInspector())
+    got = await fetch_table_columns(FakeEngine(), "v_power", "ods")
+    assert got == [
+        {"name": "kwh", "type": "BIGINT", "comment": "度数"},
+        {"name": "sid", "type": "VARCHAR(32)", "comment": ""},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_sync_with_schema_name_writes_schema_field(db):
     """sync_metadata 传 schema_name 时：拉指定库表 + metadata_tables.schema_name 持久化。"""
     fetched = [{"table": "fact_power", "kind": "table", "comment": ""}]
