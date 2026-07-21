@@ -170,12 +170,12 @@ async def test_dashboard_groups_by_datasource_and_schema(client):
 
 @pytest.mark.asyncio
 async def test_list_objects_left_joins_pg(client, monkeypatch):
-    """list_objects：实时拉表清单（只 name/kind）+ 左连 PG 显示 enabled/手写注释。
-    - 注释只来自 PG source=manual；其他情况为空（fetch_objects 不再拉注释，秒开）。
+    """list_objects：实时拉表清单（name/kind/comment）+ 左连 PG 显示 enabled/手写注释。
+    - 注释优先 PG source=manual；否则用 fetch_objects 返的业务库注释。
     - enabled 按 PG 行。"""
     async def fake_fetch(engine, schema):
-        return [{"name": "fact_power", "kind": "table"},
-                {"name": "v_new", "kind": "view"}]
+        return [{"name": "fact_power", "kind": "table", "comment": "业务库注释"},
+                {"name": "v_new", "kind": "view", "comment": "新视图注释"}]
     monkeypatch.setattr("src.datasource.metadata_sync.fetch_objects", fake_fetch)
 
     class _FakeMgr:
@@ -193,12 +193,12 @@ async def test_list_objects_left_joins_pg(client, monkeypatch):
     r = await client.get(f"/api/admin/datasources/{client._ds_id}/schemas/dw/objects")
     assert r.status_code == 200
     by_name = {o["name"]: o for o in r.json()["objects"]}
-    # fact_power：PG 有 manual 注释→用手写；enabled=true；有 id
+    # fact_power：PG 有 manual 注释→用手写（覆盖业务库注释）；enabled=true；有 id
     assert by_name["fact_power"]["comment"] == "用户手写注释"
     assert by_name["fact_power"]["enabled"] is True
     assert by_name["fact_power"]["id"] is not None
-    # v_new：PG 没行→无注释（fetch 不拉）；enabled=false；id=null
-    assert by_name["v_new"]["comment"] == ""
+    # v_new：PG 没行→用 fetch_objects 返的业务库注释；enabled=false；id=null
+    assert by_name["v_new"]["comment"] == "新视图注释"
     assert by_name["v_new"]["enabled"] is False
     assert by_name["v_new"]["id"] is None
 
@@ -206,9 +206,9 @@ async def test_list_objects_left_joins_pg(client, monkeypatch):
 @pytest.mark.asyncio
 async def test_list_objects_synced_comment_not_used(client, monkeypatch):
     """PG source=synced 的注释**不**被端点使用——只有 manual 注释才覆盖。
-    fetch_objects 不返注释，synced 行注释被忽略，最终 comment 为空。"""
+    synced 行的 PG 注释被忽略，改用 fetch_objects 返的业务库注释。"""
     async def fake_fetch(engine, schema):
-        return [{"name": "t", "kind": "table"}]
+        return [{"name": "t", "kind": "table", "comment": "业务库最新注释"}]
     monkeypatch.setattr("src.datasource.metadata_sync.fetch_objects", fake_fetch)
     class _FakeMgr:
         async def get_engine(self, _ds_id): return object()
@@ -219,7 +219,8 @@ async def test_list_objects_synced_comment_not_used(client, monkeypatch):
                             table_comment="stale 旧同步注释"))
         await s.commit()
     r = await client.get(f"/api/admin/datasources/{client._ds_id}/schemas/dw/objects")
-    assert r.json()["objects"][0]["comment"] == ""   # synced 注释被忽略
+    # synced 注释被忽略 → 用业务库注释
+    assert r.json()["objects"][0]["comment"] == "业务库最新注释"
 
 
 @pytest.mark.asyncio

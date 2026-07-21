@@ -116,27 +116,56 @@ def _fallback_columns(sync_conn, table_name: str, schema: str | None) -> list[di
             return []
 
 
-async def fetch_objects(engine: AsyncEngine, schema: str | None) -> list[dict]:
-    """实时连业务库拉指定库的表+视图清单（**仅名/kind，不拉注释**——快）。
-    配置页点库时调：永远拿最新业务库状态，不依赖 PG 缓存。
-    ponytail: 不拉 get_table_comment（N 次查询慢，615 表要 615 次），注释点表看字段时
-    （fetch_table_columns）按需拉。返回 [{name, kind}]。"""
-    def _fast(sync_conn):
-        insp = inspect(sync_conn)
-        kw = {"schema": schema} if schema else {}
+def _fast_objects(sync_conn, schema: str | None) -> list[dict]:
+    """fetch_objects 的同步主体（被 run_sync 调用）。
+    优先 information_schema.tables **一次查询**拉 name+type+comment
+    （快 + 有注释，不逐表 get_table_comment——615 表省 615 次查询）；
+    information_schema 不可用 / 返空时 fallback Inspector（保底但无注释）。"""
+    from sqlalchemy import text
+    # 优先：information_schema.tables 一次拉表名+类型+注释（1 查询，快 + 有注释）
+    try:
+        sql = "SELECT table_name, table_type, table_comment FROM information_schema.tables"
+        params = {}
+        if schema:
+            sql += " WHERE table_schema = :s"
+            params["s"] = schema
+        rows = sync_conn.execute(text(sql), params).fetchall()
         out = []
-        for n in insp.get_table_names(**kw):
+        for r in rows:
+            d = r._mapping if hasattr(r, "_mapping") else r
+            name = d.get("table_name") or d.get("TABLE_NAME")
+            if not name or _is_system_name(name):
+                continue
+            ttype = (d.get("table_type") or d.get("TABLE_TYPE") or "").upper()
+            kind = "view" if "VIEW" in ttype else "table"
+            cmt = d.get("table_comment") or d.get("TABLE_COMMENT") or ""
+            out.append({"name": name, "kind": kind, "comment": cmt})
+        if out:
+            return out
+    except Exception:
+        pass
+    # fallback：Inspector（information_schema 不可用时，无注释但保底）
+    insp = inspect(sync_conn)
+    kw = {"schema": schema} if schema else {}
+    out = []
+    for n in insp.get_table_names(**kw):
+        if not _is_system_name(n):
+            out.append({"name": n, "kind": "table", "comment": ""})
+    try:
+        for n in insp.get_view_names(**kw):
             if not _is_system_name(n):
-                out.append({"name": n, "kind": "table"})
-        try:
-            for n in insp.get_view_names(**kw):
-                if not _is_system_name(n):
-                    out.append({"name": n, "kind": "view"})
-        except Exception:
-            pass
-        return out
+                out.append({"name": n, "kind": "view", "comment": ""})
+    except Exception:
+        pass
+    return out
+
+
+async def fetch_objects(engine: AsyncEngine, schema: str | None) -> list[dict]:
+    """实时连业务库拉指定库的表+视图清单（名/类型/注释），不写 PG。
+    配置页点库时调：永远拿最新业务库状态，不依赖 PG 缓存。
+    ponytail: 走 _fast_objects（information_schema 一次查询，快 + 有注释）。返回 [{name, kind, comment}]。"""
     async with engine.connect() as conn:
-        return await conn.run_sync(_fast)
+        return await conn.run_sync(_fast_objects, schema)
 
 
 async def sync_metadata(ds_id: int, engine: AsyncEngine, sync_scope: str | None,

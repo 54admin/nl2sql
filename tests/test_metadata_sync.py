@@ -266,14 +266,72 @@ def test_collect_sync_passes_schema_to_inspector(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_fetch_objects_returns_name_and_kind_only():
-    """fetch_objects 实时拉表清单（不写 PG），只返 name/kind——不拉注释（快）。
+async def test_fetch_objects_returns_name_kind_comment():
+    """fetch_objects 实时拉表清单（不写 PG），返 name/kind/comment 三字段。
     FakeConn.run_sync 直接返预设数据（绕过 _fast），所以 fetched 用最终格式模拟。"""
-    fetched = [{"name": "fact_power", "kind": "table"},
-               {"name": "v_monthly", "kind": "view"}]
+    fetched = [{"name": "fact_power", "kind": "table", "comment": "电量表"},
+               {"name": "v_monthly", "kind": "view", "comment": "月度视图"}]
     got = await fetch_objects(FakeEngine(fetched=fetched), "dw")
-    assert got == [{"name": "fact_power", "kind": "table"},
-                   {"name": "v_monthly", "kind": "view"}]
+    assert got == [{"name": "fact_power", "kind": "table", "comment": "电量表"},
+                   {"name": "v_monthly", "kind": "view", "comment": "月度视图"}]
+
+
+def test_fetch_objects_uses_information_schema(monkeypatch):
+    """_fast 优先 information_schema.tables 一次查询拉 name+type+comment（1 查询，不逐表）。
+    真跑 _fast：mock sync_conn.execute 返带 table_comment 的行，断言走批量路径。"""
+    from src.datasource.metadata_sync import _fast_objects  # 模块级，单测保批量路径不退回 Inspector
+
+    class FakeRow:
+        def __init__(self, m): self._mapping = m
+
+    class FakeResult:
+        def fetchall(self):
+            return [
+                FakeRow({"table_name": "fact_power", "table_type": "BASE TABLE",
+                         "table_comment": "双细则的场站维度表"}),
+                FakeRow({"table_name": "v_monthly", "table_type": "VIEW",
+                         "table_comment": "月汇总视图"}),
+                FakeRow({"table_name": "information_schema.x", "table_type": "SYSTEM VIEW",
+                         "table_comment": ""}),   # 系统对象过滤掉
+            ]
+
+    captured = {"sql": None, "params": None}
+
+    class FakeSyncConn:
+        def execute(self, stmt, params=None):
+            captured["sql"] = str(stmt)
+            captured["params"] = params
+            return FakeResult()
+
+    out = _fast_objects(FakeSyncConn(), schema="ods")
+    # 走的是 information_schema 批量路径（SQL 含 information_schema.tables）
+    assert "information_schema.tables" in captured["sql"]
+    assert captured["params"] == {"s": "ods"}
+    # 系统对象被过滤；类型映射正确；注释透传
+    assert out == [
+        {"name": "fact_power", "kind": "table", "comment": "双细则的场站维度表"},
+        {"name": "v_monthly", "kind": "view", "comment": "月汇总视图"},
+    ]
+
+
+def test_fast_objects_falls_back_to_inspector(monkeypatch):
+    """information_schema 不可用（抛异常）→ fallback Inspector，保底但无注释。"""
+    from src.datasource.metadata_sync import _fast_objects
+
+    class FakeInspector:
+        def get_table_names(self, schema=None): return ["t1"]
+        def get_view_names(self, schema=None): return ["v1"]
+    monkeypatch.setattr("src.datasource.metadata_sync.inspect",
+                        lambda conn: FakeInspector())
+
+    class FakeSyncConn:
+        def execute(self, stmt, params=None):
+            raise RuntimeError("information_schema 不可用")   # 触发 fallback
+
+    out = _fast_objects(FakeSyncConn(), schema=None)
+    # fallback 无注释但保底返 name/kind
+    assert out == [{"name": "t1", "kind": "table", "comment": ""},
+                   {"name": "v1", "kind": "view", "comment": ""}]
 
 
 @pytest.mark.asyncio
