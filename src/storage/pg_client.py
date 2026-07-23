@@ -35,6 +35,15 @@ _PG_MIGRATIONS = [
     """ALTER TABLE metadata_tables
        ADD CONSTRAINT uq_ds_schema_table UNIQUE (datasource_id, schema_name, table_name)""",
     "CREATE INDEX IF NOT EXISTS ix_metadata_tables_schema_name ON metadata_tables(schema_name)",
+    # 会话标题 + 逻辑删除（create_all 不给已存在表加列，这里幂等 ALTER）
+    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS title VARCHAR(128)",
+    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
+    # LLM 配置加上下文窗口列 + 协议列（压缩阈值/多协议用）
+    "ALTER TABLE llm_config ADD COLUMN IF NOT EXISTS max_context INTEGER DEFAULT 32000",
+    "ALTER TABLE llm_config ADD COLUMN IF NOT EXISTS protocol VARCHAR(16) DEFAULT 'openai'",
+    # audit_traces 补成败标记+最终答案列（细粒度统计用）；audit_events 是新表 create_all 建。
+    "ALTER TABLE audit_traces ADD COLUMN IF NOT EXISTS success BOOLEAN",
+    "ALTER TABLE audit_traces ADD COLUMN IF NOT EXISTS final_answer TEXT",
 ]
 
 
@@ -55,7 +64,28 @@ async def init_db(url: str | None = None, config: PostgresConfig | None = None):
         if not is_sqlite:
             for stmt in _PG_MIGRATIONS:
                 await conn.execute(text(stmt))
+            # 把 ORM 模型里的 comment= 刷进 PG（DDL 注释），单一事实源=models.py，不维护第二份 SQL。
+            # create_all 只在新建表时带 comment，已存在表不会被回填——这里显式刷一遍，幂等。
+            await conn.run_sync(_apply_model_comments)
     log.info("PG 已初始化: %s", "sqlite" if is_sqlite else "postgres")
+
+
+def _apply_model_comments(sync_conn, *args, **kwargs):
+    """把所有 ORM 表/列 comment 刷进 PG。run_sync 回调，在同步连接上发 COMMENT 语句。
+    幂等：重复跑只是覆盖，无副作用。用字面量拼注释（COMMENT 语法不支持参数绑定），
+    注释是模型里写死的中文常量、非用户输入，不存在注入风险。"""
+    from src.storage.models import Base
+    def _q(s: str) -> str:
+        # PG 字符串字面量：单引号转义为两个单引号
+        return "'" + s.replace("'", "''") + "'"
+    for table in Base.metadata.sorted_tables:
+        if table.comment:
+            sync_conn.execute(text(
+                f"COMMENT ON TABLE {table.name} IS {_q(table.comment)}"))
+        for col in table.columns:
+            if col.comment:
+                sync_conn.execute(text(
+                    f'COMMENT ON COLUMN {table.name}."{col.name}" IS {_q(col.comment)}'))
 
 
 def AsyncSessionFactory() -> AsyncSession:
