@@ -29,7 +29,8 @@ class Orchestrator:
         self._prompts = prompt_store
 
     async def handle_message(self, user_id: str, session_id: str, text: str,
-                             mode: ViewerMode, trace_id: str
+                             mode: ViewerMode, trace_id: str,
+                             cancel_token: CancelToken | None = None
                              ) -> AsyncIterator[SSEEvent]:
         # 1. 查会话状态：awaiting_clarification => 断点恢复，跳过纠错（spec 6.4）
         sess = await self._sessions.get_session(session_id)
@@ -53,7 +54,9 @@ class Orchestrator:
             system_prompt = await self._prompts.get("default")
 
         # 4. 迭代 loop，透传事件；异常转 ERROR 不中断流
-        cancel_token = CancelToken()
+        # cancel_token 由路由层注入（前端取消则置位，loop 在检查点响应）。
+        if cancel_token is None:
+            cancel_token = CancelToken()
         try:
             async for evt in self._loop.run(
                 session_id=session_id, user_id=user_id,

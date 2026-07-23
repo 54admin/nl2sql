@@ -40,27 +40,15 @@ class ViewerMode(str, Enum):
     USER = "user"
 
 
-# user 模式隐藏的事件：4 类查询细节 + 6 类 loop 内部技术事件
-# query_progress 不隐藏——给 user 进度感
-_USER_HIDDEN = frozenset({
-    SSEEventType.METADATA_LOOKUP.value,
-    SSEEventType.SQL_GENERATED.value,
-    SSEEventType.KNOWLEDGE_HIT.value,
-    SSEEventType.ATTRIBUTION_STEP.value,
-    SSEEventType.TURN_START.value,
-    SSEEventType.ASSISTANT.value,
-    SSEEventType.TOOL_CALL.value,
-    SSEEventType.TOOL_RESULT.value,
-    SSEEventType.WARNING.value,
-    SSEEventType.CANCELLED.value,
-})
+# 原双模式过滤已废弃：内网单租户工具，user/admin 同等展示，不再隐藏 tool_call 等。
+# 保留 ViewerMode 枚举（AskRequest 字段类型/前端下拉还在用），但 should_emit 恒 True。
+# ponytail: 用户要的「SQL 也展示、过程都看见」= 不分模式全透传；真要鉴权隔离等 P5 多租户再上。
+_USER_HIDDEN = frozenset()   # 空=不过滤，全部透传
 
 
 def should_emit(event: SSEEvent, mode: ViewerMode) -> bool:
-    """admin 全发；user 隐藏技术细节事件。"""
-    if mode == ViewerMode.ADMIN:
-        return True
-    return event.type not in _USER_HIDDEN
+    """不分模式：全部事件都展示给前端。"""
+    return True
 
 
 def filter_event(event: SSEEvent, mode: ViewerMode) -> SSEEvent | None:

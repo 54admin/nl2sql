@@ -13,47 +13,19 @@ def test_admin_emits_all_types():
         assert should_emit(ev, ViewerMode.ADMIN) is True
 
 
-def test_user_hides_technical_details():
-    hidden = ["metadata_lookup", "sql_generated", "knowledge_hit",
-              "attribution_step",
-              "turn_start", "assistant", "tool_call", "tool_result",
-              "warning", "cancelled"]
-    for t in hidden:
-        ev = SSEEvent(type=t, data={}, trace_id="t")
-        assert should_emit(ev, ViewerMode.USER) is False
-
-
-def test_user_emits_friendly_events():
-    friendly = ["correction", "clarification_needed", "plan",
-                "answer_delta", "done", "error"]
-    for t in friendly:
-        ev = SSEEvent(type=t, data={}, trace_id="t")
+def test_all_types_visible_no_mode_filter():
+    """不分模式：所有事件类型都透传（含原被 user 隐藏的 tool_call/sql_generated 等）。"""
+    for t in SSEEventType:
+        ev = SSEEvent(type=t.value, data={}, trace_id="t")
         assert should_emit(ev, ViewerMode.USER) is True
 
 
-def test_user_emits_visible_types():
-    visible = ["correction", "clarification_needed", "plan", "todo_update",
-               "query_progress", "intermediate", "answer_delta", "done", "error"]
-    for t in visible:
-        ev = SSEEvent(type=t, data={}, trace_id="t")
-        assert should_emit(ev, ViewerMode.USER) is True
-
-
-def test_filter_event_none_for_hidden():
-    ev = SSEEvent(type="sql_generated", data={"sql": "select 1"}, trace_id="t")
-    assert filter_event(ev, ViewerMode.USER) is None
-
-
-def test_filter_event_passthrough_visible():
-    ev = SSEEvent(type="answer_delta", data={"text": "hi"}, trace_id="t")
-    out = filter_event(ev, ViewerMode.USER)
-    assert out is ev
-
-
-def test_filter_event_admin_passthrough_hidden():
-    ev = SSEEvent(type="metadata_lookup", data={}, trace_id="t")
-    out = filter_event(ev, ViewerMode.ADMIN)
-    assert out is ev
+def test_filter_event_passthrough_all():
+    """过滤恒透传：无论 user/admin，所有事件原样返回。"""
+    for t in SSEEventType:
+        ev = SSEEvent(type=t.value, data={}, trace_id="t")
+        assert filter_event(ev, ViewerMode.USER) is ev
+        assert filter_event(ev, ViewerMode.ADMIN) is ev
 
 
 def test_format_sse_structure():

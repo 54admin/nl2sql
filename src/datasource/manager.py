@@ -116,13 +116,30 @@ class DataSourceManager:
         return True
 
     async def delete_datasource(self, ds_id: int) -> bool:
+        # 级联删关联元数据：外键无 ON DELETE CASCADE，应用层显式删干净，
+        # 否则删源后留 metadata_tables/columns/relations/sql_templates 孤儿。
+        from sqlalchemy import delete as sa_delete, select
+        from src.storage.models import (MetadataColumn, MetadataTable,
+                                        TableRelation, SqlTemplate)
         async with AsyncSessionFactory() as s:
             row = await s.get(Datasource, ds_id)
             if row is None:
                 return False
+            # 先取该源所有 metadata_table.id，再按 table_id 删 columns（依赖顺序）
+            table_ids = [r for r in (await s.execute(select(MetadataTable.id).where(
+                MetadataTable.datasource_id == ds_id))).scalars()]
+            if table_ids:
+                await s.execute(sa_delete(MetadataColumn).where(
+                    MetadataColumn.table_id.in_(table_ids)))
+            await s.execute(sa_delete(MetadataTable).where(
+                MetadataTable.datasource_id == ds_id))
+            await s.execute(sa_delete(TableRelation).where(
+                TableRelation.datasource_id == ds_id))
+            await s.execute(sa_delete(SqlTemplate).where(
+                SqlTemplate.datasource_id == ds_id))
             await s.delete(row)
             await s.commit()
-        log.info("数据源删除 id=%s", ds_id)
+        log.info("数据源删除 id=%s（级联清元数据/关系/模板）", ds_id)
         old = self._engines.pop(ds_id, None)
         if old is not None:
             await old.dispose()

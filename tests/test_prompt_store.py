@@ -11,8 +11,19 @@ async def store():
 
 
 @pytest.mark.asyncio
-async def test_get_returns_none_when_absent(store):
-    assert await store.get("default") is None
+async def test_get_default_falls_back_to_builtin_when_absent(store):
+    """default 场景未配置时返回内置兜底（保证 LLM 有两步链路引导），而非 None。"""
+    from src.core.prompt_store import DEFAULT_PROMPT
+    got = await store.get("default")
+    assert got is not None
+    assert got == DEFAULT_PROMPT
+    assert "query_metadata" in got
+
+
+@pytest.mark.asyncio
+async def test_get_unknown_scene_returns_none(store):
+    """非 default 场景未配置仍返回 None（attribution 等场景走 P3 再配）。"""
+    assert await store.get("attribution") is None
 
 
 @pytest.mark.asyncio
@@ -38,11 +49,14 @@ async def test_disabled_returns_none(store):
 
 
 @pytest.mark.asyncio
-async def test_delete(store):
+async def test_delete_falls_back_to_builtin(store):
+    """删除 default 后回到「从未配置」状态 → 兜底内置 prompt（管理员想关引导用禁用，删除=重置）。"""
+    from src.core.prompt_store import DEFAULT_PROMPT
     await store.upsert("default", "x")
     assert await store.delete("default") is True
-    assert await store.get("default") is None
-    assert await store.delete("default") is False
+    got = await store.get("default")
+    assert got == DEFAULT_PROMPT
+    assert await store.delete("default") is False  # 已无记录
 
 
 @pytest.mark.asyncio

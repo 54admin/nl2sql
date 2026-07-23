@@ -70,7 +70,7 @@ async def query_metadata(args: dict, ctx: LoopContext,
         return ToolResult(summary="该数据源没有勾选参与问数的表，请在配置页勾选表后再问。")
     relations = await _list_relations(int(ds_id))
     return ToolResult(summary=json.dumps({"tables": tables, "relations": relations},
-                                         ensure_ascii=False))
+                                         ensure_ascii=False, default=str))
 
 
 QUERY_METADATA = ToolDefinition(

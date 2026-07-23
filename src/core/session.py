@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import Enum
 
 from src.logging import get_logger
@@ -72,11 +73,13 @@ class SessionState:
                       pending_tool: str | None = None) -> str:
         """挂起：存 LoopCheckpoint + 转 awaiting。受状态机约束，仅 running 可挂起。"""
         cp_id = uuid.uuid4().hex
+        # 显式带 created_at：sqlite 下 server_default=func.now() 返字符串，
+        # 与 Python datetime 比较会类型错乱（sweep_stale 的 < cutoff 永真/假不稳）。
         async with AsyncSessionFactory() as s:
             s.add(LoopCheckpoint(
                 id=cp_id, session_id=sid,
                 messages_json=json.dumps(messages, ensure_ascii=False),
-                pending_tool=pending_tool))
+                pending_tool=pending_tool, created_at=datetime.now()))
             await s.commit()
         await self.transition(sid, SessionStatus.AWAITING_CLARIFICATION)
         log.info("挂起 sid=%s checkpoint=%s pending_tool=%s", sid, cp_id, pending_tool)
@@ -110,6 +113,39 @@ class SessionState:
             await self._delete_checkpoint(cp.id)
         await self.transition(sid, SessionStatus.IDLE)
         return True
+
+    async def sweep_stale_suspended(self, max_age_minutes: int = 30) -> int:
+        """扫所有挂起超 max_age_minutes 的会话，判过期清 checkpoint。
+        用于：服务启动时补清上次挂掉遗留的孤儿 + 运行期周期清扫。
+        返回清理的会话数。
+
+        ponytail: 按 checkpoint.created_at 筛超时的，逐个调 expire_suspended。
+        不用一条 bulk UPDATE 是为了复用状态机校验（awaiting->idle 合法）。
+        清理本身幂等：checkpoint 已不在就跳过。"""
+        cutoff = datetime.now() - timedelta(minutes=max_age_minutes)
+        async with AsyncSessionFactory() as s:
+            stale = (await s.execute(
+                LoopCheckpoint.__table__.select()
+                .where(LoopCheckpoint.created_at < cutoff)
+            )).all()
+        if not stale:
+            return 0
+        cleared = 0
+        for cp in stale:
+            sid = cp.session_id
+            # expire 内部会校验状态：仍是 awaiting 才清 checkpoint+转 idle。
+            # 会话若已被 resume/done 走掉但 checkpoint 残留（异常残留），直接删孤儿。
+            if await self.is_suspended(sid):
+                if await self.expire_suspended(sid):
+                    cleared += 1
+            else:
+                await self._delete_checkpoint(cp.id)
+                cleared += 1
+                log.info("清孤儿 checkpoint sid=%s cp=%s（会话已非挂起态）",
+                         sid, cp.id)
+        if cleared:
+            log.info("挂起超时清扫完成：清理 %d 个（阈值 %d 分钟）", cleared, max_age_minutes)
+        return cleared
 
     async def _latest_checkpoint(self, sid: str):
         """取该会话最新一条 checkpoint（按 created_at desc）。"""

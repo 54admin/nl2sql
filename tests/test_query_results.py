@@ -62,8 +62,8 @@ async def test_redis_hit_skips_pg(db, monkeypatch):
     monkeypatch.setattr(query_results, "_get_redis", _fake_get_redis)
     rid = await query_results.save_result(
         "sess2", ["a"], [{"a": 1}, {"a": 2}])
-    # payload 已在 fake Redis 里
-    assert f"result:{rid}" in fake.store
+    # payload 已在 fake Redis 里（key 带项目根前缀 nl2sql:）
+    assert f"nl2sql:result:{rid}" in fake.store
     r = await query_results.get_result(rid)
     assert r is not None
     assert r["columns"] == ["a"]

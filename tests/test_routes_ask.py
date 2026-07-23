@@ -10,7 +10,8 @@ class FakeOrchestrator:
     def __init__(self, events):
         self._events = events
 
-    async def handle_message(self, user_id, session_id, text, mode, trace_id):
+    async def handle_message(self, user_id, session_id, text, mode, trace_id,
+                             cancel_token=None):
         for e in self._events:
             yield e
 
@@ -36,14 +37,15 @@ def test_ask_sse_returns_event_stream(client):
     assert "text/event-stream" in resp.headers["content-type"]
 
 
-def test_ask_sse_user_mode_hides_sql(client):
+def test_ask_sse_user_mode_shows_all(client):
+    """不分模式：所有事件都透传，含 sql_generated。"""
     resp = client.post("/api/ask/sse", json={
         "user_id": "u1", "session_id": "s1", "text": "你好", "mode": "user"})
     body = resp.text
     assert "event: correction" in body
     assert "event: answer_delta" in body
     assert "event: done" in body
-    assert "sql_generated" not in body
+    assert "sql_generated" in body   # 不再隐藏
     assert "t1" in body
 
 
@@ -54,11 +56,12 @@ def test_ask_sse_admin_mode_shows_all(client):
     assert "sql_generated" in body
 
 
-def test_ask_sse_default_mode_is_user(client):
+def test_ask_sse_default_mode_transparent(client):
+    """默认模式也全透传（不分 user/admin）。"""
     resp = client.post("/api/ask/sse", json={
         "user_id": "u1", "session_id": "s1", "text": "你好"})
     body = resp.text
-    assert "sql_generated" not in body
+    assert "sql_generated" in body
 
 
 def test_ask_sse_invalid_mode_returns_422(client):

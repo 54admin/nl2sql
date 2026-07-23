@@ -13,6 +13,10 @@ log = get_logger(__name__)
 
 RESULT_TTL = 3600  # Redis TTL，1 小时
 
+# redis key 加项目根前缀，与会话侧统一（树形工具按 : 分层显示成 nl2sql/ 根下多域）。
+REDIS_ROOT = "nl2sql"
+RESULT_KEY = f"{REDIS_ROOT}:result:{{rid}}"
+
 # 模块级懒加载单例。connect() 内部失败会自动降级到 _InMemory 后端。
 # ponytail: 全进程一个 client 够用；多实例/连接池等吞吐瓶颈再换。
 _redis: RedisClient | None = None
@@ -42,8 +46,10 @@ async def save_result(session_id: str, columns: list, rows: list,
     P1b-5 集成 execute_sql 时按需给 ORM 加字段再补写。
     """
     result_id = uuid4().hex
-    columns_json = json.dumps(columns, ensure_ascii=False)
-    rows_json = json.dumps(rows, ensure_ascii=False)
+    # default=str：StarRocks 数值列返 Decimal、时间列返 datetime，json.dumps 默认不认。
+    # 兜底转 str 保住值不丢精度（全量旁路用于展示/审计，str 足够）。
+    columns_json = json.dumps(columns, ensure_ascii=False, default=str)
+    rows_json = json.dumps(rows, ensure_ascii=False, default=str)
 
     # PG：审计/持久，必成功（失败直接抛，主链路该挂就挂）
     async with AsyncSessionFactory() as s:
@@ -54,11 +60,11 @@ async def save_result(session_id: str, columns: list, rows: list,
 
     # Redis：TTL 快速取，旁路非关键，挂了不影响主链路（PG 兜底）
     payload = json.dumps({"columns": columns, "rows": rows,
-                          "total": len(rows)}, ensure_ascii=False)
+                          "total": len(rows)}, ensure_ascii=False, default=str)
     try:
         r = await _get_redis()
         if r is not None:
-            await r.set(f"result:{result_id}", payload, ttl=RESULT_TTL)
+            await r.set(RESULT_KEY.format(rid=result_id), payload, ttl=RESULT_TTL)
     except Exception as e:
         log.warning("result 写 Redis 失败（result_id=%s），PG 已兜底: %s",
                     result_id, e)
@@ -72,7 +78,7 @@ async def get_result(result_id: str) -> dict | None:
     try:
         r = await _get_redis()
         if r is not None:
-            raw = await r.get(f"result:{result_id}")
+            raw = await r.get(RESULT_KEY.format(rid=result_id))
             if raw:
                 return json.loads(raw)
     except Exception as e:

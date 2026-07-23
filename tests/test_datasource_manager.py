@@ -64,6 +64,36 @@ async def test_delete(db):
 
 
 @pytest.mark.asyncio
+async def test_delete_cascades_metadata(db):
+    """删数据源要级联清 metadata_tables/columns/relations/sql_templates，不留孤儿。"""
+    from src.storage.models import (MetadataColumn, MetadataTable,
+                                    TableRelation, SqlTemplate)
+    from src.storage.pg_client import AsyncSessionFactory
+    ds_id = await db.create_datasource(_payload())
+    async with AsyncSessionFactory() as s:
+        mt = MetadataTable(datasource_id=ds_id, schema_name="db1",
+                           table_name="fact_a", source="synced")
+        s.add(mt); await s.flush()
+        s.add(MetadataColumn(table_id=mt.id, column_name="k",
+                             source="synced"))
+        s.add(TableRelation(datasource_id=ds_id, main_table="a",
+                            rel_table="b", join_keys_json="[]"))
+        s.add(SqlTemplate(datasource_id=ds_id, name="t",
+                          sql_template="SELECT 1"))
+        await s.commit()
+    assert await db.delete_datasource(ds_id) is True
+    async with AsyncSessionFactory() as s:
+        assert (await s.execute(MetadataTable.__table__.select().where(
+            MetadataTable.datasource_id == ds_id))).all() == []
+        assert (await s.execute(MetadataColumn.__table__.select().where(
+            MetadataColumn.table_id == mt.id))).all() == []
+        assert (await s.execute(TableRelation.__table__.select().where(
+            TableRelation.datasource_id == ds_id))).all() == []
+        assert (await s.execute(SqlTemplate.__table__.select().where(
+            SqlTemplate.datasource_id == ds_id))).all() == []
+
+
+@pytest.mark.asyncio
 async def test_get_engine_lazily_built_and_cached(db, monkeypatch):
     ds_id = await db.create_datasource(_payload())
     built = []

@@ -203,12 +203,14 @@ async def test_fetch_table_columns_fallback_for_view(monkeypatch):
                     FakeRow({"Field": "sid", "Type": "VARCHAR(32)", "Comment": ""})]
 
     class FakeSyncConn:
-        def execute(self, stmt): return FakeResult()
+        # execute 被 _fast_columns 双参调用（information_schema 查询）→ 返的行无 column_name
+        # 键 → _fast_columns 返空 → 自动回落 _inspector_columns → SHOW FULL COLUMNS
+        def execute(self, stmt, params=None): return FakeResult()
 
     class FakeConn:
         async def __aenter__(self): return self
         async def __aexit__(self, *a): pass
-        async def run_sync(self, fn, *a, **kw): return fn(FakeSyncConn())
+        async def run_sync(self, fn, *a, **kw): return fn(FakeSyncConn(), *a, **kw)
 
     class FakeEngine:
         def connect(self): return FakeConn()
@@ -220,6 +222,64 @@ async def test_fetch_table_columns_fallback_for_view(monkeypatch):
         {"name": "kwh", "type": "BIGINT", "comment": "度数"},
         {"name": "sid", "type": "VARCHAR(32)", "comment": ""},
     ]
+
+
+def test_fast_columns_uses_information_schema(monkeypatch):
+    """_fast_columns 优先 information_schema.columns 一次查询拉 name+type+comment
+    （与 _fast_objects 对称）。真跑 _fast：mock sync_conn.execute 返带 column_comment 的行，
+    断言走批量路径、参数 {s:schema, t:table} 正确、注释透传、字段按 ordinal_position 顺序。"""
+    from src.datasource.metadata_sync import _fast_columns
+
+    class FakeRow:
+        def __init__(self, m): self._mapping = m
+
+    class FakeResult:
+        def fetchall(self):
+            return [
+                FakeRow({"column_name": "id", "column_type": "BIGINT",
+                         "data_type": "bigint", "column_comment": "主键"}),
+                FakeRow({"column_name": "kwh", "column_type": "DECIMAL(18,4)",
+                         "data_type": "decimal", "column_comment": "度数"}),
+                FakeRow({"column_name": "sid", "column_type": "VARCHAR(32)",
+                         "data_type": "varchar", "column_comment": ""}),
+            ]
+
+    captured = {"sql": None, "params": None}
+
+    class FakeSyncConn:
+        def execute(self, stmt, params=None):
+            captured["sql"] = str(stmt)
+            captured["params"] = params
+            return FakeResult()
+
+    out = _fast_columns(FakeSyncConn(), "fact_power", "ods")
+    # 走的是 information_schema.columns 批量路径
+    assert "information_schema.columns" in captured["sql"]
+    assert captured["params"] == {"s": "ods", "t": "fact_power"}
+    # 字段名/类型/注释透传（表和视图同路径）
+    assert out == [
+        {"name": "id", "type": "BIGINT", "comment": "主键"},
+        {"name": "kwh", "type": "DECIMAL(18,4)", "comment": "度数"},
+        {"name": "sid", "type": "VARCHAR(32)", "comment": ""},
+    ]
+
+
+def test_fast_columns_falls_back_to_inspector(monkeypatch):
+    """information_schema 不可用（抛异常）→ fallback Inspector，保底。"""
+    from src.datasource.metadata_sync import _fast_columns
+
+    class FakeInspector:
+        def get_columns(self, table_name, schema=None):
+            return [{"name": "id", "type": "BIGINT", "comment": "主键"}]
+    monkeypatch.setattr("src.datasource.metadata_sync.inspect",
+                        lambda conn: FakeInspector())
+
+    class FakeSyncConn:
+        def execute(self, stmt, params=None):
+            raise RuntimeError("information_schema 不可用")
+
+    out = _fast_columns(FakeSyncConn(), "fact_power", "ods")
+    assert out == [{"name": "id", "type": "BIGINT", "comment": "主键"}]
 
 
 @pytest.mark.asyncio

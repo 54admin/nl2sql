@@ -86,8 +86,8 @@ class ToolRegistry:
 
     async def execute(self, name: str, args: dict,
                       ctx: LoopContext, cancel_token: CancelToken) -> ToolResult:
-        """按名取工具 → coerce 参数 → 调 handler。
-        工具不存在/不可用/抛异常均返回带错误摘要的 ToolResult，回灌 LLM 触发错误自愈。"""
+        """按名取工具 → coerce 参数 → 调 handler（可恢复错误退避重试）。
+        工具不存在/不可用/不可恢复异常均返回带错误摘要的 ToolResult，回灌 LLM 触发自愈。"""
         td = self._defs.get(name)
         if td is None:
             return ToolResult(summary=f"错误：工具 '{name}' 不存在")
@@ -95,7 +95,38 @@ class ToolRegistry:
             return ToolResult(summary=f"错误：工具 '{name}' 当前不可用")
         coerced = coerce_tool_args(td.parameters, args)
         try:
-            return await td.handler(coerced, ctx, cancel_token)
+            return await _call_with_retry(
+                lambda: td.handler(coerced, ctx, cancel_token))
         except Exception as e:
             log.exception("工具 %s 执行异常", name)
             return ToolResult(summary=f"工具 '{name}' 执行出错: {e}")
+
+
+async def _call_with_retry(coro_fn, *, max_retries: int = 2, base_delay: float = 0.5):
+    """工具执行可恢复错误（超时/连接抖动）退避重试，不可恢复直接抛。
+    ponytail: 工具比 LLM 重试更保守（2 次）——SQL 执行多为不可恢复（语法错/权限），
+    重试价值低且可能放大副作用；仅 DB 瞬断这种可恢复场景值得重试。"""
+    import asyncio
+    last_err = None
+    for attempt in range(1, max_retries + 2):
+        try:
+            return await coro_fn()
+        except asyncio.CancelledError:
+            raise   # 取消不重试，直接抛
+        except Exception as e:
+            last_err = e
+            if not _is_retryable(e) or attempt > max_retries:
+                raise
+            delay = min(base_delay * (2 ** (attempt - 1)), 10.0)
+            log.warning("工具执行可恢复错误，%.1fs 后重试(%d/%d): %s",
+                        delay, attempt, max_retries, e)
+            await asyncio.sleep(delay)
+    raise last_err
+
+
+def _is_retryable(err: Exception) -> bool:
+    """工具执行可恢复错误：连接/超时类。SQL 语法错/权限错不可恢复。"""
+    name = type(err).__name__
+    hints = ("TimeoutError", "OperationalError", "ConnectionError",
+             "ConnectionResetError", "InterfaceError")
+    return any(h in name for h in hints)

@@ -73,21 +73,64 @@ async def fetch_table_columns(engine: AsyncEngine, table_name: str,
     schema 非空时拉指定库的字段（跨库元数据查询）。
     返回 [{name, type, comment}]。拉失败抛异常（调用方 catch）。
 
-    ponytail: StarRocks 视图 SQLAlchemy Inspector.get_columns 拉不到（返空）——
-    get_columns 空时 fallback 用 SHOW FULL COLUMNS（MySQL 协议原生）拿字段名/类型/注释，
-    再不行 SELECT * LIMIT 0 拿列名。"""
-    def _get_cols(sync_conn):   # run_sync 要求同步函数（在同步连接上跑 Inspector）
-        insp = inspect(sync_conn)
-        kw = {"schema": schema} if schema else {}
-        cols = list(insp.get_columns(table_name, **kw))
-        if cols:
-            return [{"name": c["name"], "type": str(c["type"]),
-                     "comment": c.get("comment") or ""}
-                    for c in cols]
-        # fallback：视图/Inspector 不支持时，用 SHOW FULL COLUMNS 或 SELECT * LIMIT 0 兜底
-        return _fallback_columns(sync_conn, table_name, schema)
+    ponytail: 走 _fast_columns —— information_schema.columns **一次查询**拉
+    name+type+comment（1 查询，快 + 有注释；StarRocks 上字段注释只有这条通道能拿到：
+    Inspector.get_columns 不填 comment，SHOW FULL COLUMNS 也不返 Comment 列）；
+    information_schema 不可用 / 返空时 fallback Inspector（保底）。"""
     async with engine.connect() as conn:
-        return await conn.run_sync(_get_cols)
+        return await conn.run_sync(_fast_columns, table_name, schema)
+
+
+def _fast_columns(sync_conn, table_name: str, schema: str | None) -> list[dict]:
+    """fetch_table_columns 的同步主体（被 run_sync 调用）。
+    优先 information_schema.columns **一次查询**拉 name+type+comment
+    （快 + 有注释，与 _fast_objects 对称：表注释靠 information_schema.tables.table_comment，
+    字段注释靠 information_schema.columns.column_comment）；
+    information_schema 不可用 / 返空时 fallback Inspector → SHOW FULL COLUMNS → SELECT * LIMIT 0。
+
+    表和视图同路径：information_schema.columns 同时覆盖两者。"""
+    from sqlalchemy import text
+    # 优先：information_schema.columns 一次拉字段名+类型+注释（1 查询，快 + 有注释）
+    try:
+        sql = ("SELECT column_name, column_type, data_type, column_comment "
+               "FROM information_schema.columns WHERE table_name = :t")
+        params: dict = {"t": table_name}
+        if schema:
+            sql += " AND table_schema = :s"
+            params["s"] = schema
+        sql += " ORDER BY ordinal_position"
+        rows = sync_conn.execute(text(sql), params).fetchall()
+        out = []
+        for r in rows:
+            d = r._mapping if hasattr(r, "_mapping") else r
+            name = d.get("column_name") or d.get("COLUMN_NAME")
+            if not name:
+                continue
+            # column_type 更完整（如 VARCHAR(32)），data_type 兜底（如 varchar）
+            col_type = (d.get("column_type") or d.get("COLUMN_TYPE")
+                        or d.get("data_type") or d.get("DATA_TYPE") or "")
+            cmt = d.get("column_comment") or d.get("COLUMN_COMMENT") or ""
+            out.append({"name": name, "type": str(col_type), "comment": str(cmt)})
+        if out:
+            return out
+    except Exception:
+        pass
+    # fallback：Inspector（information_schema 不可用时，多方言保底）
+    return _inspector_columns(sync_conn, table_name, schema)
+
+
+def _inspector_columns(sync_conn, table_name: str, schema: str | None) -> list[dict]:
+    """_fast_columns 的兜底：Inspector.get_columns 拿字段（多方言兼容），
+    空（StarRocks 视图等）时再 fallback SHOW FULL COLUMNS / SELECT * LIMIT 0。"""
+    insp = inspect(sync_conn)
+    kw = {"schema": schema} if schema else {}
+    cols = list(insp.get_columns(table_name, **kw))
+    if cols:
+        return [{"name": c["name"], "type": str(c["type"]),
+                 "comment": c.get("comment") or ""}
+                for c in cols]
+    # 再 fallback：视图/Inspector 不支持时，SHOW FULL COLUMNS 或 SELECT * LIMIT 0 兜底
+    return _fallback_columns(sync_conn, table_name, schema)
 
 
 def _fallback_columns(sync_conn, table_name: str, schema: str | None) -> list[dict]:
