@@ -54,12 +54,21 @@ class AgentLoop:
     done/cancelled/error/clarification_needed 之一。"""
 
     def __init__(self, llm: LLMService, registry: ToolRegistry, state: SessionState,
-                 *, max_turns: int = 10, max_ask_user: int = 2):
+                 *, max_turns: int = 10, max_ask_user: int = 2,
+                 max_context: int | None = None,
+                 session_manager=None, audit=None):
         self._llm = llm
         self._registry = registry
         self._state = state
         self._max_turns = max_turns
         self._max_ask_user = max_ask_user
+        # 压缩阈值（token，逼近即压）。对齐 Claude Code：window 即阈值，绝对值非占比。
+        # None=运行时读 LLM 配置/环境变量 max_context，拿不到用 32000 兜底。
+        self._max_context = max_context
+        # 会话历史读写：注入则用，不注入则降级无记忆（兼容旧测试 FakeLLM 不传）
+        self._sessions = session_manager
+        # 审计落库器：注入则每事件落 audit_events，不注入则跳过（测试可关）
+        self._audit = audit
 
     async def run(self, session_id: str, user_id: str, user_msg: str,
                   trace_id: str, cancel_token: CancelToken,
@@ -68,6 +77,13 @@ class AgentLoop:
         ctx = LoopContext(session_id, user_id, trace_id)
         msgs = await self._prepare_messages(session_id, user_msg, is_resume,
                                             system_prompt)
+        # 审计 trace 开始（注入了才落）：记原始输入+启动计时
+        if self._audit is not None:
+            try:
+                self._audit.begin(trace_id, session_id, user_id, user_msg,
+                                  getattr(msgs[-1], "content", None) if msgs else None)
+            except Exception as ex:
+                log.warning("审计 begin 失败（忽略）: %s", ex)
 
         last_answer = ""
         ask_count = 0
@@ -85,6 +101,7 @@ class AgentLoop:
                     if chunk.content:
                         content += chunk.content
                         yield SSEEvent("answer_delta", {"text": chunk.content}, trace_id)
+                        self._audit_event("answer_delta", {"text": chunk.content}, trace_id, turn)
                     for tc in chunk.tool_call_delta:
                         idx = getattr(tc, "index", None)
                         idx = idx if idx is not None else 0
@@ -92,11 +109,17 @@ class AgentLoop:
                         if getattr(tc, "id", None):
                             acc["id"] = tc.id
                         fn = getattr(tc, "function", None)
+                        # anthropic 路径的 _AnthropicTCDelta 没有 .function，回退到顶层 name/args
                         if fn:
                             if fn.name:
                                 acc["name"] = fn.name
                             if fn.arguments:
                                 acc["args"] += fn.arguments
+                        else:
+                            if getattr(tc, "name", None):
+                                acc["name"] = tc.name
+                            if getattr(tc, "args", None):
+                                acc["args"] += tc.args
                 tool_calls = []
                 for idx in sorted(tc_acc):
                     v = tc_acc[idx]
@@ -128,6 +151,7 @@ class AgentLoop:
                     cid = tc.get("id")
                     yield SSEEvent("tool_call",
                                    {"name": name, "args": args, "id": cid}, trace_id)
+                    self._audit_event("tool_call", {"name": name, "args": args, "id": cid}, trace_id, turn)
 
                     if (name, _args_key(args)) in dup_keys:
                         tip = "已调用过相同工具和参数，请基于已有结果直接作答。"
@@ -136,6 +160,8 @@ class AgentLoop:
                         yield SSEEvent("tool_result",
                                        {"name": name, "summary": tip,
                                         "converged": True}, trace_id)
+                        self._audit_event("tool_result", {"name": name, "summary": tip,
+                                                          "converged": True}, trace_id, turn)
                         continue
 
                     if name == ASK_USER:
@@ -146,6 +172,7 @@ class AgentLoop:
                                          "content": tip})
                             yield SSEEvent("tool_result",
                                            {"name": name, "summary": tip}, trace_id)
+                            self._audit_event("tool_result", {"name": name, "summary": tip}, trace_id, turn)
                             continue
 
                     result = await self._registry.execute(name, args, ctx, cancel_token)
@@ -158,6 +185,8 @@ class AgentLoop:
                         yield SSEEvent("clarification_needed",
                                        {"question": result.summary, "turn": turn},
                                        trace_id)
+                        self._audit_event("clarification_needed",
+                                          {"question": result.summary, "turn": turn}, trace_id, turn)
                         return
 
                     msgs.append({"role": "tool", "tool_call_id": cid,
@@ -165,6 +194,8 @@ class AgentLoop:
                     yield SSEEvent("tool_result",
                                    {"name": name, "summary": result.summary,
                                     "result_id": result.result_id}, trace_id)
+                    self._audit_event("tool_result", {"name": name, "summary": result.summary,
+                                                      "result_id": result.result_id}, trace_id, turn)
 
                     if result.finished:
                         # finish 的最终答案以 LLM 给的 args.answer 为准（spec 6.2），
@@ -176,26 +207,75 @@ class AgentLoop:
                 if finished:
                     break
 
-                self._maybe_compress(msgs)
+                await self._maybe_compress(msgs)
             else:
                 yield SSEEvent("warning",
                                {"reason": "max_turns", "max": self._max_turns},
                                trace_id)
+                self._audit_event("warning", {"reason": "max_turns", "max": self._max_turns}, trace_id, turn)
+
+            # 正常结束（done）：把本轮 user + 最终答案回写会话历史，供下轮多轮记忆
+            await self._persist_history(session_id, user_msg, last_answer, trace_id)
+            await self._audit_finalize(True, last_answer, trace_id)
 
             await self._state.transition(session_id, SessionStatus.DONE)
             yield SSEEvent("done", {"answer": last_answer}, trace_id)
         except asyncio.CancelledError:
             log.info("agent loop 被取消 sid=%s turn=%s", session_id, turn)
             await self._state.transition(session_id, SessionStatus.IDLE)
+            # 取消也回写：至少存上用户问了啥，切会话能看到
+            await self._persist_history(session_id, user_msg, last_answer or "（已取消）", trace_id)
+            await self._audit_finalize(False, last_answer or "（已取消）", trace_id)
             yield SSEEvent("cancelled", {"turn": turn}, trace_id)
         except Exception as e:
             log.exception("agent loop 异常 sid=%s", session_id)
+            # 异常也回写：存上用户问题 + 错误文案，切会话能看到"问过啥"
+            from src.llm.service import describe_llm_error
+            err_text = describe_llm_error(e)
+            await self._persist_history(session_id, user_msg, f"⚠ {err_text}", trace_id)
+            await self._audit_finalize(False, f"⚠ {err_text}", trace_id)
             try:
                 await self._state.transition(session_id, SessionStatus.ERROR)
             except ValueError:
                 log.warning("异常处理时状态转换失败，忽略: sid=%s", session_id)
             yield SSEEvent("error",
-                           {"message": str(e), "answer": last_answer}, trace_id)
+                           {"message": err_text, "answer": last_answer},
+                           trace_id)
+
+    def _audit_event(self, evt_type: str, data: dict, trace_id: str,
+                     turn: int | None = None) -> None:
+        """把单个事件喂给审计落库器（注入了才落）。answer_delta 合并、失败不抛。"""
+        if self._audit is None:
+            return
+        try:
+            self._audit.event(trace_id, evt_type, data, turn)
+        except Exception as ex:
+            log.warning("审计记事件失败（忽略）: %s", ex)
+
+    async def _audit_finalize(self, success: bool, final_answer: str,
+                              trace_id: str) -> None:
+        """trace 结束落汇总行+事件流。失败不抛。"""
+        if self._audit is None:
+            return
+        try:
+            await self._audit.finalize(success, final_answer)
+        except Exception as ex:
+            log.warning("审计落库失败（忽略）: %s", ex)
+
+    async def _persist_history(self, session_id: str, user_msg: str,
+                               assistant_msg: str, trace_id: str) -> None:
+        """把本轮 user + assistant 回写会话历史，供多轮记忆 + 切会话回填。
+        done/error/cancelled 三种结束都调，保证切会话至少能看到"问过啥+答/错"。
+        失败不抛（历史写挂了不该毁掉对话主链路）。"""
+        if self._sessions is None:
+            return
+        try:
+            await self._sessions.append_message(
+                session_id, "user", user_msg, trace_id)
+            await self._sessions.append_message(
+                session_id, "assistant", assistant_msg, trace_id)
+        except Exception as e:
+            log.warning("回写会话历史失败，忽略: sid=%s %s", session_id, e)
 
     async def _prepare_messages(self, session_id: str, user_msg: str,
                                 is_resume: bool,
@@ -209,9 +289,130 @@ class AgentLoop:
         msgs: list[dict] = []
         if system_prompt:
             msgs.append({"role": "system", "content": system_prompt})
+        # 注入会话历史（不含本轮）：上一轮及更早的 user/assistant 文本回合。
+        # resume 分支已返回带 checkpoint 的 messages（含历史+工具上下文），不走这里。
+        if self._sessions is not None:
+            hist = await self._sessions.get_messages(session_id)
+            for m in hist:
+                msgs.append({"role": m["role"], "content": m["content"]})
         msgs.append({"role": "user", "content": user_msg})
         return msgs
 
-    def _maybe_compress(self, msgs: list[dict]) -> None:
-        """ponytail: 占位。P1 接 token 计数按 80% 阈值压早期 tool 结果。"""
-        return None
+    async def _maybe_compress(self, msgs: list[dict]) -> None:
+        """上下文逼近窗口阈值时压缩：中段按 group（user→assistant→tool）切分摘要。
+        对齐 Claude Code auto-compact：绝对 token 阈值触发（非占比），按 group 切，
+        LLM 摘要非截断，保留最近 group 不压。
+        ponytail: 字符数粗估 token（1 token≈4 字符，中文偏 2）；拿不到阈值用 32000 默认。
+        拿不到 LLM 摘要能力（FakeLLM 无 summarize/chat）时跳过，不毁对话。"""
+        threshold_tokens = await self._resolve_max_context()
+        threshold_chars = threshold_tokens * 4   # 粗估 4 字符/token
+        total_chars = sum(len(m.get("content", "")) for m in msgs)
+        if total_chars < threshold_chars:
+            return
+        # 按 group 切分：[user, assistant, (tool...)] 为一组。
+        # 保留最近 2 个 group 不压（当前轮上下文），其余中段 group 喂摘要。
+        groups = _split_into_groups(msgs)
+        if len(groups) <= 3:   # 太少没东西可压（too_few_groups）
+            return
+        keep_groups = 2
+        old_groups = groups[:-keep_groups]
+        recent_groups = groups[-keep_groups:]
+        # system 消息（最前的）原样保留；中段非 system group 喂摘要
+        head = [m for m in old_groups[0] if m.get("role") == "system"] if old_groups else []
+        body = [m for g in old_groups for m in g if m.get("role") != "system"]
+        if not body:
+            return
+        try:
+            digest = await self._summarize_segment(body)
+        except Exception as e:
+            log.warning("会话压缩失败，跳过: %s", e)
+            return
+        summary_msg = {
+            "role": "system",
+            "content": (f"[对话摘要-压缩] 以下是早期对话的压缩摘要，供参考上下文：\n{digest}")
+        }
+        # 重组：head + 摘要 + 最近 group（展平）
+        recent_flat = [m for g in recent_groups for m in g]
+        msgs.clear()
+        msgs.extend(head + [summary_msg] + recent_flat)
+
+    async def _resolve_max_context(self) -> int:
+        """拿压缩触发阈值（token）：优先构造参数 → 环境变量 → LLM 配置 max_context → 32000。
+        对齐 Claude Code：环境变量最高优先级（CLAUDE_CODE_MAX_CONTEXT_TOKENS 同构），
+        内置表覆盖在用模型（DeepSeek/Qwen），查不到走配置，绝不瞎猜。"""
+        import os
+        env_ctx = os.environ.get("NL2SQL_MAX_CONTEXT")
+        if env_ctx and env_ctx.isdigit():
+            return int(env_ctx)
+        if self._max_context is not None:
+            return self._max_context
+        try:
+            cfg = await self._llm._resolve_config()   # 生产 LLMService 有此方法
+            from_cfg = getattr(cfg, "max_context", 0) or 0
+            # 优先按模型名查内置表（在用模型窗口），查不到用配置值，再查不到 32000
+            from_table = _model_window(getattr(cfg, "model", ""))
+            return from_table or from_cfg or 32000
+        except Exception:
+            return 32000
+
+    async def _summarize_segment(self, segment: list[dict]) -> str:
+        """把中段历史消息整体喂 LLM 摘要。对齐 Claude Code 摘要模板：
+        聚焦①用户问了什么 ②做了什么 ③关键数据/表名/结论 ④未决事项。"""
+        text = "\n".join(
+            f"[{m.get('role')}] {m.get('content', '')}" for m in segment)
+        if hasattr(self._llm, "summarize"):
+            return await self._llm.summarize(text)
+        prompt_msgs = [
+            {"role": "system", "content": COMPACT_SUMMARY_PROMPT},
+            {"role": "user", "content": text},
+        ]
+        resp = await self._llm.chat(prompt_msgs)
+        return resp.content
+
+
+# Claude Code 同款摘要模板（中文版）：聚焦四要素，去冗余保关键。
+COMPACT_SUMMARY_PROMPT = (
+    "你是对话摘要助手。把给定的多轮对话压缩成关键信息摘要，按以下四点组织：\n"
+    "1) 用户问了什么（用户意图/追问）\n"
+    "2) 做了什么（调了哪些工具、查了哪些表/字段、执行了什么SQL）\n"
+    "3) 关键数据/结果（表名、字段名、数值、结论）\n"
+    "4) 未决事项（还没回答的、待用户确认的）\n"
+    "去掉冗余细节和重复行，只保留对话继续所需的关键信息。"
+)
+
+
+# 内置模型→窗口表（只覆盖在用模型，对齐 Claude Code：表小，查不到走配置，绝不瞎猜）。
+# ponytail: 新模型按实际窗口补这两行即可，无需穷举。
+_MODEL_WINDOWS: dict[str, int] = {
+    "deepseek-v3": 64000, "deepseek-v4": 64000,
+    "qwen3-32b": 32000, "qwen3-72b": 32000, "qwen2.5-72b": 131072,
+}
+
+
+def _model_window(model: str) -> int:
+    """模型名→窗口。小写前缀匹配（覆盖版本后缀），查不到返回 0。"""
+    if not model:
+        return 0
+    key = model.lower()
+    for prefix, win in _MODEL_WINDOWS.items():
+        if key.startswith(prefix):
+            return win
+    return 0
+
+
+def _split_into_groups(msgs: list[dict]) -> list[list[dict]]:
+    """把消息列表按对话轮切分：每个 group 以 user 开头，含其后 assistant+tool 序列。
+    开头连续的非 user 消息（如 system）并入首个 group。对齐 Claude Code 的 group 切分。"""
+    if not msgs:
+        return []
+    groups: list[list[dict]] = []
+    cur: list[dict] = []
+    for m in msgs:
+        if m.get("role") == "user" and cur:
+            groups.append(cur)
+            cur = [m]
+        else:
+            cur.append(m)
+    if cur:
+        groups.append(cur)
+    return groups
