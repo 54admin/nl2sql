@@ -19,6 +19,10 @@ class LLMConfig:
     model: str = ""
     temperature: float = 0.0
     timeout: int = 60
+    max_context: int = 32000   # 模型上下文窗口（token），会话压缩按占比触发用
+    # 协议：openai（/v1/chat/completions + Bearer）或 anthropic（/v1/messages + x-api-key）。
+    # 同一网关常按协议分额度桶——anthropic 路径往往有额度，openai 路径易配额超限。
+    protocol: str = "openai"
 
 
 @dataclass
