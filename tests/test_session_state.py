@@ -3,8 +3,10 @@ import pytest
 from src.config import RedisConfig
 from src.core.session import SessionState, SessionStatus
 from src.memory.session import SessionManager
-from src.storage.pg_client import init_db
+from src.storage.models import LoopCheckpoint
+from src.storage.pg_client import AsyncSessionFactory, init_db
 from src.storage.redis_client import RedisClient
+from datetime import datetime, timedelta
 
 
 @pytest.fixture
@@ -120,6 +122,61 @@ async def test_expire_suspended(state):
 async def test_expire_non_suspended_returns_false(state):
     sid = await state._sm.create_session("u1", "web")
     assert await state.expire_suspended(sid) is False
+
+
+# ---- sweep_stale_suspended ----
+@pytest.mark.asyncio
+async def test_sweep_skips_fresh_suspended(state):
+    """刚挂起的（未超时）不应被清。"""
+    sid = await state._sm.create_session("u1", "web")
+    await state.transition(sid, SessionStatus.RUNNING)
+    await state.suspend(sid, [], pending_tool="c1")
+    n = await state.sweep_stale_suspended(max_age_minutes=30)
+    assert n == 0
+    assert (await state.current_status(sid)) == SessionStatus.AWAITING_CLARIFICATION
+    assert await state.is_suspended(sid)
+
+
+@pytest.mark.asyncio
+async def test_sweep_clears_old_suspended(state):
+    """挂起超过阈值的会话被清：状态回 idle，checkpoint 删。"""
+    sid = await state._sm.create_session("u1", "web")
+    await state.transition(sid, SessionStatus.RUNNING)
+    await state.suspend(sid, [], pending_tool="c1")
+    # 手动把 checkpoint 的 created_at 改成 1 小时前模拟挂起超时
+    old = datetime.now() - timedelta(hours=1)
+    async with AsyncSessionFactory() as s:
+        cp = (await s.execute(LoopCheckpoint.__table__.select())).first()
+        await s.execute(LoopCheckpoint.__table__.update().where(
+            LoopCheckpoint.id == cp.id).values(created_at=old))
+        await s.commit()
+    n = await state.sweep_stale_suspended(max_age_minutes=30)
+    assert n == 1
+    assert (await state.current_status(sid)) == SessionStatus.IDLE
+    assert not await state.is_suspended(sid)
+
+
+@pytest.mark.asyncio
+async def test_sweep_clears_orphan_checkpoint(state):
+    """会话已离开挂起态但 checkpoint 残留（异常残留）：清孤儿 checkpoint。
+    模拟：suspend 后正常 resume（会删当次 cp），但另留一条时间调旧的残留 cp。"""
+    sid = await state._sm.create_session("u1", "web")
+    await state.transition(sid, SessionStatus.RUNNING)
+    await state.suspend(sid, [], pending_tool="c1")
+    await state.resume(sid, "回复")  # 正常恢复，删当次 cp，状态回 running
+    assert (await state.current_status(sid)) == SessionStatus.RUNNING
+    # 再造一条时间调旧的残留 cp（模拟异常没删干净）
+    old = datetime.now() - timedelta(hours=1)
+    async with AsyncSessionFactory() as s:
+        s.add(LoopCheckpoint(id="orphan1", session_id=sid,
+                             messages_json="[]", pending_tool="c1",
+                             created_at=old))
+        await s.commit()
+    n = await state.sweep_stale_suspended(max_age_minutes=30)
+    assert n == 1
+    async with AsyncSessionFactory() as s:
+        row = await s.get(LoopCheckpoint, "orphan1")
+        assert row is None
 
 
 # ---- 端到端 ----

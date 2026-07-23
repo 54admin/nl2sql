@@ -37,6 +37,7 @@ from src.web.routes.admin_sql_templates import build_sql_templates_router
 from src.web.routes.ask import build_ask_router
 from src.web.routes.result import build_result_router
 from src.web.routes.session import build_session_router
+from src.web.routes.admin_audit import build_audit_router
 
 # 全局组件（lifespan 初始化，路由通过 _Lazy 延迟引用）
 _app_state: dict = {}
@@ -78,17 +79,49 @@ async def lifespan(app: FastAPI):
     datasource_mgr = DataSourceManager()
     reg = default_registry()
     sess_state = SessionState(sm)
-    loop = AgentLoop(llm, reg, sess_state)
+    from src.core.audit import AuditSink
+    audit = AuditSink()
+    loop = AgentLoop(llm, reg, sess_state, session_manager=sm, audit=audit)
     norm = Normalizer()
     orch = Orchestrator(norm, loop, sm, prompt_store=prompts)
 
     _app_state.update(
         orchestrator=orch, session_mgr=sm, llm_service=llm, prompts=prompts,
-        datasource_mgr=datasource_mgr)
+        datasource_mgr=datasource_mgr, sess_state=sess_state)
     log.info("nl2sql 启动完成 db=postgres(%s:%s/%s) redis=%s（模型配置走数据库 llm_config）",
              cfg.postgres.host, cfg.postgres.port, cfg.postgres.database,
              "可用" if redis.available else "降级内存")
+
+    # 挂起超时清扫：启动补清（上次崩溃/被 kill 遗留的孤儿 checkpoint）+ 周期后台扫。
+    # 服务挂了重启也能清滞留垃圾，不依赖常驻进程一直没死。
+    import asyncio
+    SWEEP_INTERVAL = 300      # 5 分钟扫一次
+    SWEEP_MAX_AGE = 30        # 挂起超 30 分钟没回答判过期
+    try:
+        cleared = await sess_state.sweep_stale_suspended(SWEEP_MAX_AGE)
+        if cleared:
+            log.info("启动补清挂起超时会话：%d 个", cleared)
+    except Exception as e:
+        log.warning("启动清扫挂起会话失败（忽略，不阻塞启动）: %s", e)
+
+    async def _sweep_loop():
+        while True:
+            await asyncio.sleep(SWEEP_INTERVAL)
+            try:
+                await sess_state.sweep_stale_suspended(SWEEP_MAX_AGE)
+            except Exception as e:
+                log.warning("周期清扫挂起会话失败: %s", e)
+
+    sweep_task = asyncio.create_task(_sweep_loop())
+
     yield
+
+    # 服务关闭：取消后台清扫任务 + 关连接池
+    sweep_task.cancel()
+    try:
+        await sweep_task
+    except (asyncio.CancelledError, Exception):
+        pass
     from src.storage import pg_client
     if pg_client._engine is not None:
         await pg_client._engine.dispose()
@@ -121,6 +154,7 @@ def create_app() -> FastAPI:
     app.include_router(build_business_rules_router())
     app.include_router(build_sql_templates_router())
     app.include_router(build_result_router())  # P1b：前端按 result_id 取全量结果
+    app.include_router(build_audit_router())   # 审计统计：trace 详情/会话级/全局统计
     return app
 
 

@@ -11,15 +11,19 @@ from src.storage.redis_client import RedisClient
 log = get_logger(__name__)
 
 SESSION_TTL = 3600  # 秒，需求 1.6 长时间无操作清空
-SESSION_KEY = "session:{sid}"
-MSGS_KEY = "session:{sid}:messages"
+# redis key 加项目根前缀 nl2sql: 树形工具按 : 分层显示成 nl2sql/ 根文件夹下分 session/result 多个域，
+# 且与同库其他项目隔离（防串库）。ROOT 常量集中改一处即可全量改 key 命名。
+REDIS_ROOT = "nl2sql"
+SESSION_KEY = f"{REDIS_ROOT}:session:{{sid}}"
+MSGS_KEY = f"{REDIS_ROOT}:session:{{sid}}:messages"
 
 
 class SessionManager:
     def __init__(self, redis: RedisClient):
         self._redis = redis
 
-    async def create_session(self, user_id: str, channel: str) -> str:
+    async def create_session(self, user_id: str, channel: str,
+                             title: str | None = None) -> str:
         sid = uuid.uuid4().hex
         # ponytail: naive datetime 匹配 PG TIMESTAMP WITHOUT TIME ZONE 列
         # （PG 严格区分 aware/naive；sqlite 不在乎所以 P0a 测试没暴露）
@@ -28,7 +32,7 @@ class SessionManager:
         # PG 持久
         async with AsyncSessionFactory() as s:
             s.add(SessionRow(id=sid, user_id=user_id, channel=channel,
-                             status="idle", ttl_at=ttl_at))
+                             status="idle", ttl_at=ttl_at, title=title))
             await s.commit()
         # Redis 热态
         await self._redis.set(SESSION_KEY.format(sid=sid),
@@ -44,15 +48,16 @@ class SessionManager:
         raw = await self._redis.get(SESSION_KEY.format(sid=sid))
         if raw:
             return json.loads(raw)
-        # Redis 未命中，回查 PG 并回填
+        # Redis 未命中，回查 PG 并回填（逻辑删除的不返回）
         async with AsyncSessionFactory() as s:
             row = (await s.execute(
-                SessionRow.__table__.select().where(SessionRow.id == sid)
+                SessionRow.__table__.select().where(
+                    SessionRow.id == sid, SessionRow.deleted_at.is_(None))
             )).first()
             if not row:
                 return None
             data = {"user_id": row.user_id, "channel": row.channel,
-                    "status": row.status}
+                    "status": row.status, "title": row.title}
         await self._redis.set(SESSION_KEY.format(sid=sid),
                               json.dumps(data), ttl=SESSION_TTL)
         return data
@@ -98,24 +103,52 @@ class SessionManager:
                               ttl=SESSION_TTL)
         return msgs
 
-    async def delete_session(self, sid: str):
+    async def delete_session(self, sid: str) -> bool:
+        """逻辑删除：清 Redis 热态 + PG 置 deleted_at。列表/读取自动过滤已删会话。
+        返回是否真的删了（已删/不存在返 False）。"""
         await self._redis.delete(SESSION_KEY.format(sid=sid))
         await self._redis.delete(MSGS_KEY.format(sid=sid))
+        from datetime import datetime as _dt
         async with AsyncSessionFactory() as s:
             row = await s.get(SessionRow, sid)
-            if row:
-                await s.delete(row)
-                await s.commit()
+            if row is None or row.deleted_at is not None:
+                return False
+            row.deleted_at = _dt.now()
+            await s.commit()
+        return True
+
+    async def rename_session(self, sid: str, title: str) -> bool:
+        """改会话标题（侧边栏改名）。不存在/已删返 False。"""
+        async with AsyncSessionFactory() as s:
+            row = await s.get(SessionRow, sid)
+            if row is None or row.deleted_at is not None:
+                return False
+            row.title = title[:128]   # 截断防超列长
+            await s.commit()
+        return True
+
+    async def fill_title_if_empty(self, sid: str, title: str) -> bool:
+        """首问填标题：仅当标题为空且未删时写，不覆盖已有标题。"""
+        async with AsyncSessionFactory() as s:
+            row = await s.get(SessionRow, sid)
+            if row is None or row.deleted_at is not None:
+                return False
+            if row.title:
+                return False   # 已有标题，不覆盖
+            row.title = title[:128]
+            await s.commit()
+        return True
 
     async def list_sessions(self, user_id: str) -> list[dict]:
-        """查某用户全部会话，按创建时间倒序。
+        """查某用户全部未删会话，按创建时间倒序。
         ponytail: 列表低频，直接查 PG 不走 Redis 缓存；超 1000 会话再加分页。"""
         async with AsyncSessionFactory() as s:
             rows = (await s.execute(
                 SessionRow.__table__.select()
-                .where(SessionRow.user_id == user_id)
+                .where(SessionRow.user_id == user_id,
+                       SessionRow.deleted_at.is_(None))
                 .order_by(SessionRow.created_at.desc())
             )).all()
         return [{"id": r.id, "channel": r.channel, "status": r.status,
-                 "created_at": r.created_at.isoformat() if r.created_at else None}
+                 "title": r.title, "created_at": r.created_at.isoformat() if r.created_at else None}
                 for r in rows]
