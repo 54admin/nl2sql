@@ -53,8 +53,18 @@ class Normalizer:
             if cor and cor.confidence >= 0.9:
                 out = out.replace(cor.raw, cor.standard)
                 corrections.append(cor)
-        # TODO(P2): fuzzy_fn 编辑距离+拼音索引，过阈值才替换
-        # TODO(P2): llm_fn 整句语义改写，给字典候选+上下文让 LLM 选
+        # 模糊层：字典没命中才试（编辑距离滑窗近似），confidence>=0.8 才替换
+        if self._fuzzy_fn and not corrections:
+            cor = await self._fuzzy_fn(out)
+            if cor and cor.confidence >= 0.8:
+                out = out.replace(cor.raw, cor.standard)
+                corrections.append(cor)
+        # LLM 层：前两层都没修正时整句语义改写兜底（给候选+上下文让 LLM 选）
+        if self._llm_fn and not corrections:
+            new_text, llm_corrections = await self._llm_fn(out)
+            if llm_corrections:
+                out = new_text
+                corrections.extend(llm_corrections)
         return out, corrections
 
 

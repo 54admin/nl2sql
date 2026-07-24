@@ -22,11 +22,16 @@ class Orchestrator:
     """编排入口。组合 normalizer + agent_loop + session_manager + prompt_store(可选)。"""
 
     def __init__(self, normalizer, loop, sessions: SessionManager,
-                 prompt_store=None):
+                 prompt_store=None, audit=None, rule_store=None):
         self._normalizer = normalizer
         self._loop = loop
         self._sessions = sessions
         self._prompts = prompt_store
+        # 可选审计落库器：correction 事件在 loop.run 之前发，loop 内 audit 收不到——
+        # 这里持有同一实例，发 correction 时直接落 audit_events（finalize 一并写库）。
+        self._audit = audit
+        # P2 业务规则：读 enabled 规则追加到 system_prompt，让 LLM 知晓人工口径
+        self._rule_store = rule_store
 
     async def handle_message(self, user_id: str, session_id: str, text: str,
                              mode: ViewerMode, trace_id: str,
@@ -42,16 +47,22 @@ class Orchestrator:
         else:
             user_msg, corrections = await self._normalizer.normalize(text)
             if corrections:
-                yield SSEEvent(
-                    SSEEventType.CORRECTION.value,
-                    {"original": text, "normalized": user_msg,
-                     "corrections": [asdict(c) for c in corrections]},
-                    trace_id)
+                cor_data = {"original": text, "normalized": user_msg,
+                            "corrections": [asdict(c) for c in corrections]}
+                yield SSEEvent(SSEEventType.CORRECTION.value, cor_data, trace_id)
+                # correction 事件在 loop.run 之前发，loop 内 audit 收不到——直接落 audit_events
+                if self._audit is not None:
+                    self._audit.event(trace_id, SSEEventType.CORRECTION.value, cor_data)
 
         # 3. 读 system prompt（Task 9 prompts 集成点；prompt_store 为空则 None）
         system_prompt = None
         if self._prompts is not None:
             system_prompt = await self._prompts.get("default")
+        # 业务规则段追加到 system_prompt（P2）：让 LLM 知晓人工录入口径
+        if system_prompt and self._rule_store is not None:
+            rules_text = await self._rule_store.all_text()
+            if rules_text:
+                system_prompt = system_prompt + "\n\n【业务规则】\n" + rules_text
 
         # 4. 迭代 loop，透传事件；异常转 ERROR 不中断流
         # cancel_token 由路由层注入（前端取消则置位，loop 在检查点响应）。

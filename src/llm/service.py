@@ -1,13 +1,17 @@
 """LLM 服务：openai 官方 AsyncOpenAI 直连（OpenAI 兼容协议，任意模型）。
 配置全走数据库 llm_config 表：PUT /api/admin/llm-config 配置，
 未配置时 _resolve_config 抛错提示先 PUT。"""
+import asyncio
 import json
+import random
+import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import AsyncIterator
 
 from src.config import LLMConfig
 from src.logging import get_logger
-from src.storage.models import LlmConfigRow
+from src.storage.models import EMBEDDING_DIM, LlmConfigRow
 from src.storage.pg_client import AsyncSessionFactory
 
 log = get_logger(__name__)
@@ -38,6 +42,11 @@ class LLMService:
     def __init__(self):
         self._clients: dict[str, object] = {}   # protocol → client，按协议各自缓存
         self._dynamic: dict | None = None  # 内存缓存（None=未加载）
+        # 限流（P2 主动节流，防撞网关限流）：配置加载后初始化；None=该维度不限
+        self._sem: asyncio.Semaphore | None = None        # 并发闸
+        self._req_times: deque = deque()                   # RPM 时间窗（最近请求的 monotonic 时间戳）
+        self._rpm_limit: int | None = None
+        self._concurrency: int | None = None
 
     async def _load_dynamic(self) -> dict | None:
         if self._dynamic is not None:
@@ -52,16 +61,24 @@ class LLMService:
                     "api_key": row.api_key, "temperature": row.temperature,
                     "timeout": row.timeout, "max_context": row.max_context,
                     "protocol": (row.protocol or "openai"),
+                    "rpm_limit": row.rpm_limit, "concurrency": row.concurrency,
+                    "embedding_model": row.embedding_model,
                 }
+                # 按 rpm_limit/concurrency 重建限流器（配置热更新联动）
+                self._apply_rate_limit(row.rpm_limit, row.concurrency)
         except Exception as e:
             log.warning("读 LLM 配置失败: %s", e)
             return None
         return self._dynamic
 
     def reset_dynamic(self) -> None:
-        """admin PUT 后调用：清缓存 + 置空所有 client，下次按最新配置重建。"""
+        """admin PUT 后调用：清缓存 + 置空所有 client + 清限流器，下次按最新配置重建。"""
         self._dynamic = None
         self._clients.clear()
+        self._sem = None
+        self._req_times.clear()
+        self._rpm_limit = None
+        self._concurrency = None
 
     async def _resolve_config(self) -> LLMConfig:
         dyn = await self._load_dynamic()
@@ -89,16 +106,58 @@ class LLMService:
     async def chat_stream(self, messages: list[dict], tools: list | None = None) -> AsyncIterator[_Chunk]:
         """流式生成，yield _Chunk（content 文本片段 + tool_call 增量）。
         loop 边收 content 发 answer_delta（打字机），流末 collect tool_calls。
-        建立 stream 阶段可恢复错误（限流/超时/网关抖动）指数退避重试；
+        入口先做主动限速（RPM 窗 + 并发闸，None=不限）；建立 stream 阶段可恢复错误
+        （限流/超时/网关抖动）指数退避 + jitter + 尊重 retry-after 重试；
         流中途断不重试（避免重复输出），交 loop 错误自愈。"""
         cfg = await self._resolve_config()
         proto = (cfg.protocol or "openai").lower()
+        await self._throttle()              # RPM 时间窗：满了先 sleep（并发闸在下方 async with）
+        # 并发闸：信号量在 async gen 里用 async with 包裹分发迭代；None 则不限
+        if self._sem is not None:
+            async with self._sem:
+                async for ch in self._dispatch(proto, cfg, messages, tools):
+                    yield ch
+        else:
+            async for ch in self._dispatch(proto, cfg, messages, tools):
+                yield ch
+
+    async def _dispatch(self, proto: str, cfg: LLMConfig, messages: list[dict],
+                        tools: list | None) -> AsyncIterator[_Chunk]:
+        """按协议分发流式（chat_stream 已做限速，这里只选 openai/anthropic）。"""
         if proto == "anthropic":
             async for ch in self._stream_anthropic(cfg, messages, tools):
                 yield ch
         else:
             async for ch in self._stream_openai(cfg, messages, tools):
                 yield ch
+
+    def _apply_rate_limit(self, rpm_limit: int | None, concurrency: int | None) -> None:
+        """按配置建/重建限流器。None=该维度不限。
+        并发闸用 Semaphore（chat_stream async with）；RPM 用时间窗 deque（_throttle 里查）。"""
+        self._rpm_limit = rpm_limit
+        self._concurrency = concurrency
+        self._sem = asyncio.Semaphore(concurrency) if concurrency else None
+        self._req_times.clear()
+
+    async def _throttle(self) -> None:
+        """RPM 时间窗限速：最近 60s 内请求数 >= rpm_limit 时，sleep 到最早的记录过期。
+        并发由 self._sem 信号量管（chat_stream 里 async with）。rpm_limit=None 不限。"""
+        if not self._rpm_limit:
+            return
+        now = time.monotonic()
+        # 清 60s 前的旧记录
+        while self._req_times and now - self._req_times[0] >= 60:
+            self._req_times.popleft()
+        if len(self._req_times) >= self._rpm_limit:
+            # 满了：等到最早那条记录满 60s 后过期才能放行
+            wait = 60 - (now - self._req_times[0])
+            if wait > 0:
+                log.info("RPM 限速：%d/%d 满，等待 %.1fs", len(self._req_times), self._rpm_limit, wait)
+                await asyncio.sleep(wait)
+                now = time.monotonic()
+                while self._req_times and now - self._req_times[0] >= 60:
+                    self._req_times.popleft()
+        self._req_times.append(time.monotonic())
 
     async def _stream_openai(self, cfg: LLMConfig, messages: list[dict],
                              tools: list | None) -> AsyncIterator[_Chunk]:
@@ -215,6 +274,41 @@ class LLMService:
                 args = {}
             tool_calls.append({"id": v["id"], "name": v["name"], "args": args})
         return _Resp(content=content, tool_calls=tool_calls)
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        """批量文本 → 向量（P3b 知识库）。走 openai /v1/embeddings 端点（即使 chat 走 anthropic），
+        用 cfg.embedding_model。复用 _call_with_retry 限流重试。维度不符抛清晰错误（防 pgvector 插入模糊报错）。"""
+        if not texts:
+            return []
+        cfg = await self._resolve_config()
+        if not cfg.embedding_model:
+            raise RuntimeError("embedding 模型未配置：PUT /api/admin/llm-config 设 embedding_model")
+        client = self._embed_client(cfg)
+
+        async def _create():
+            return await client.embeddings.create(model=cfg.embedding_model, input=texts)
+        resp = await _call_with_retry(_create)
+        vecs = [d.embedding for d in resp.data]
+        if vecs and len(vecs[0]) != EMBEDDING_DIM:
+            raise RuntimeError(
+                f"embedding 维度 {len(vecs[0])} ≠ 建表维度 {EMBEDDING_DIM}：改 src/storage/models.py "
+                "的 EMBEDDING_DIM 或换 embedding 模型，并重建 knowledge_chunks 表")
+        return vecs
+
+    def _embed_client(self, cfg: LLMConfig):
+        """embedding 固定走 openai 协议（/v1/embeddings 端点），与 chat protocol 无关。
+        复用同一 base_url/key，单独缓存 openai client（reset_dynamic 清 _clients 时一并清）。"""
+        if "embed_openai" in self._clients:
+            return self._clients["embed_openai"]
+        from openai import AsyncOpenAI
+        # openai SDK 的 base_url 要含 /v1：chat 走 anthropic 时 cfg.api_base 常不含 /v1
+        # （anthropic SDK 自己加），openai SDK 不加 → 会请求 /embeddings 而非 /v1/embeddings → 404。
+        base = cfg.api_base.rstrip("/")
+        if not base.endswith("/v1"):
+            base += "/v1"
+        client = AsyncOpenAI(api_key=cfg.api_key, base_url=base, timeout=cfg.timeout)
+        self._clients["embed_openai"] = client
+        return client
 
 
 @dataclass
@@ -342,9 +436,10 @@ def describe_llm_error(err: Exception) -> str:
 
 
 async def _call_with_retry(coro_fn, *, max_retries: int = 3, base_delay: float = 1.0):
-    """对协程工厂做指数退避重试。可恢复错误重试，不可恢复直接抛。
-    coro_fn: 无参返回 coroutine 的可调用。退避 = base_delay * 2^(attempt-1)，封顶 30s。"""
-    import asyncio
+    """对协程工厂做指数退避 + jitter 重试。可恢复错误重试，不可恢复直接抛。
+    coro_fn: 无参返回 coroutine 的可调用。
+    退避 = base_delay * 2^(attempt-1)，封顶 30s；±50% jitter 防高并发惊群；
+    若响应带 retry-after 头则取 max(退避, retry_after)——尊重网关给的精确等待。"""
     last_err = None
     for attempt in range(1, max_retries + 2):   # 1..max_retries+1，最后一次不重试直接抛
         try:
@@ -354,7 +449,35 @@ async def _call_with_retry(coro_fn, *, max_retries: int = 3, base_delay: float =
             if not _is_retryable(e) or attempt > max_retries:
                 raise
             delay = min(base_delay * (2 ** (attempt - 1)), 30.0)
+            delay *= 0.5 + random.random()      # ±50% jitter，防惊群（并发重试不同步撞限流）
+            ra = _retry_after_seconds(e)        # 尊重 retry-after 头
+            if ra is not None:
+                delay = max(delay, min(ra, 60.0))   # retry-after 也封顶 60s，避免等太久
             log.warning("LLM 调用可恢复错误，%.1fs 后重试(%d/%d): %s",
                         delay, attempt, max_retries, e)
             await asyncio.sleep(delay)
     raise last_err   # 兜底，逻辑走不到
+
+
+def _retry_after_seconds(err: Exception) -> float | None:
+    """从异常的 HTTP 响应里抠 retry-after 头（秒）。没有则 None。
+    retry-after 可能是秒数（"30"）或 HTTP 日期（RFC1123）——前者常见，后者兜底解析。
+    ponytail: openai/anthropic SDK 异常都带 .response（httpx Response），headers 大小写都试。"""
+    resp = getattr(err, "response", None)
+    if resp is None:
+        return None
+    headers = getattr(resp, "headers", None) or {}
+    ra = headers.get("retry-after") or headers.get("Retry-After")
+    if not ra:
+        return None
+    try:
+        return float(ra)     # 数字秒数（最常见）
+    except (ValueError, TypeError):
+        # HTTP 日期格式，兜底用 email.utils 解析成到现在的剩余秒
+        try:
+            from email.utils import parsedate_to_datetime
+            from datetime import datetime, timezone
+            dt = parsedate_to_datetime(ra)
+            return max(0.0, (dt - datetime.now(timezone.utc)).total_seconds())
+        except Exception:
+            return None

@@ -41,6 +41,11 @@ _PG_MIGRATIONS = [
     # LLM 配置加上下文窗口列 + 协议列（压缩阈值/多协议用）
     "ALTER TABLE llm_config ADD COLUMN IF NOT EXISTS max_context INTEGER DEFAULT 32000",
     "ALTER TABLE llm_config ADD COLUMN IF NOT EXISTS protocol VARCHAR(16) DEFAULT 'openai'",
+    # 限流列（P2 主动节流）：None=不限
+    "ALTER TABLE llm_config ADD COLUMN IF NOT EXISTS rpm_limit INTEGER",
+    "ALTER TABLE llm_config ADD COLUMN IF NOT EXISTS concurrency INTEGER",
+    "ALTER TABLE llm_config ADD COLUMN IF NOT EXISTS embedding_model VARCHAR(128)",
+    "UPDATE llm_config SET embedding_model = 'Qwen3-Embedding-4B' WHERE embedding_model IS NULL",
     # audit_traces 补成败标记+最终答案列（细粒度统计用）；audit_events 是新表 create_all 建。
     "ALTER TABLE audit_traces ADD COLUMN IF NOT EXISTS success BOOLEAN",
     "ALTER TABLE audit_traces ADD COLUMN IF NOT EXISTS final_answer TEXT",
@@ -60,6 +65,12 @@ async def init_db(url: str | None = None, config: PostgresConfig | None = None):
     _engine = create_async_engine(target, echo=False, **kwargs)
     _AsyncSessionFactory = async_sessionmaker(_engine, expire_on_commit=False)
     async with _engine.begin() as conn:
+        if not is_sqlite:
+            # pgvector 扩展（P3b）：必须在 create_all 前建（knowledge_chunks 用 Vector 类型）
+            try:
+                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            except Exception as e:
+                log.warning("pgvector 扩展创建失败（知识库不可用，联系DBA预装/授权）: %s", e)
         await conn.run_sync(Base.metadata.create_all)
         if not is_sqlite:
             for stmt in _PG_MIGRATIONS:

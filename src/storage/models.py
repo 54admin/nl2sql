@@ -4,8 +4,12 @@
 已存在的表靠 pg_client.apply_table_comments() 把模型注释刷进 PG，单一事实源=本文件，不维护第二份 SQL。"""
 from datetime import datetime
 
-from sqlalchemy import String, Text, DateTime, Integer, Boolean, ForeignKey, UniqueConstraint, func
+from sqlalchemy import (JSON, String, Text, DateTime, Integer, Boolean,
+                        ForeignKey, TypeDecorator, UniqueConstraint, func)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+# 注意：pgvector 的 Vector 不在顶层 import——pgvector 0.3 顶层 import 会注册 sqlite
+# event listener（load_extension('vector')），让 sqlite 测试连接卡死。延迟到 Embedding.load_dialect_impl
+# 的 PG 分支内 import（sqlite 测试根本不进那分支），sqlite 测试才不 hang。
 
 
 class Base(DeclarativeBase):
@@ -139,6 +143,14 @@ class LlmConfigRow(Base):
     # 同网关常按协议分额度桶，按需选有额度的协议。
     protocol: Mapped[str] = mapped_column(String(16), default="openai",
                                            comment="协议（openai/anthropic，按网关额度桶选）")
+    # 限流（P2）：主动节流防撞网关限流。None=该维度不限（只重试不限速）；admin 按集团实际填。
+    rpm_limit: Mapped[int | None] = mapped_column(default=None, nullable=True,
+                                                   comment="每分钟请求上限（None=不限）")
+    concurrency: Mapped[int | None] = mapped_column(default=None, nullable=True,
+                                                     comment="并发上限（None=不限）")
+    # embedding 模型（P3b 知识库）：走 openai /v1/embeddings 端点，与 chat 协议无关。默认 Qwen3-Embedding-4B
+    embedding_model: Mapped[str | None] = mapped_column(String(128), default="Qwen3-Embedding-4B",
+                                                         nullable=True, comment="embedding模型（知识库用，None=禁用）")
     enabled: Mapped[bool] = mapped_column(default=True, comment="是否启用")
     version: Mapped[int] = mapped_column(default=1, comment="版本号")
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
@@ -258,6 +270,22 @@ class BusinessRule(Base):
                                                  onupdate=func.now(), comment="更新时间")
 
 
+class NameDict(Base):
+    """名称纠错别名字典（P2）：alias→standard 映射，normalizer dict_fn/fuzzy_fn 消费。
+    alias 是用户可能的错写/别名，standard 是标准名（表/列/指标的业务名）。"""
+    __tablename__ = "name_dict"
+    __table_args__ = {"comment": "名称纠错别名字典（alias→standard，normalizer 消费）"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="ID")
+    alias: Mapped[str] = mapped_column(String(128), index=True, comment="别名/错写（用户输入可能出现的）")
+    standard: Mapped[str] = mapped_column(String(128), comment="标准名（纠错目标）")
+    category: Mapped[str] = mapped_column(String(32), default="table", comment="类别（table/column/metric）")
+    enabled: Mapped[bool] = mapped_column(default=True, comment="是否启用")
+    version: Mapped[int] = mapped_column(default=1, comment="版本号")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), comment="创建时间")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
+                                                 onupdate=func.now(), comment="更新时间")
+
+
 class SqlTemplate(Base):
     """SQL 模板（人工录入）。P1a 建口径，P1b 应用。"""
     __tablename__ = "sql_templates"
@@ -273,5 +301,59 @@ class SqlTemplate(Base):
     enabled: Mapped[bool] = mapped_column(default=True, comment="是否启用")
     version: Mapped[int] = mapped_column(default=1, comment="版本号")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), comment="创建时间")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
+                                                 onupdate=func.now(), comment="更新时间")
+
+
+# Qwen3-Embedding-4B 输出维度（建表固定；换 embedding 模型需同步改 + 重建 knowledge_chunks）
+EMBEDDING_DIM = 2560
+
+
+class Embedding(TypeDecorator):
+    """向量列：PG 用 pgvector Vector（cosine 距离检索）；sqlite 降级 JSON 存 list（测试兼容，
+    否则 create_all 因 pgvector sqlite 扩展缺失而 hang）。
+    检索走原生 SQL（PG: embedding <=> :q 余弦距离；sqlite: Python cosine），不依赖列 comparator。"""
+    impl = JSON
+    cache_ok = True
+
+    def __init__(self, dim: int = EMBEDDING_DIM):
+        self.dim = dim
+        super().__init__()
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "sqlite":
+            return dialect.type_descriptor(JSON())
+        # 延迟 import（见模块顶部注释）：PG 用真 pgvector Vector
+        from pgvector.sqlalchemy import Vector
+        return dialect.type_descriptor(Vector(self.dim))
+
+
+class KnowledgeDoc(Base):
+    """知识库文档（P3b）：上传的 TXT/MD，分段后逐 chunk embedding 入 knowledge_chunks。
+    admin CRUD + 启停；归因/答疑检索 enabled 文档的 chunks。"""
+    __tablename__ = "knowledge_docs"
+    __table_args__ = {"comment": "知识库文档（上传TXT/MD，分段embedding入库，归因/答疑检索）"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="文档ID")
+    name: Mapped[str] = mapped_column(String(256), comment="文档名（含扩展名）")
+    category: Mapped[str] = mapped_column(String(64), default="general", comment="分类（manual/policy/case/general）")
+    enabled: Mapped[bool] = mapped_column(default=True, comment="是否启用")
+    chunk_count: Mapped[int] = mapped_column(default=0, comment="分段数")
+    version: Mapped[int] = mapped_column(default=1, comment="版本号")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), comment="创建时间")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
+                                                 onupdate=func.now(), comment="更新时间")
+
+
+class KnowledgeChunk(Base):
+    """知识库分段（P3b）：chunk 文本 + embedding 向量。
+    embedding 列 PG 用 pgvector Vector(EMBEDDING_DIM)，sqlite 降级 JSON（测试）。
+    检索按 enabled doc 过滤 + 向量近邻（PG: embedding <=> :q；sqlite: Python cosine）。"""
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = {"comment": "知识库分段（embedding向量，PG用pgvector/sqlite降级JSON）"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="分段ID")
+    doc_id: Mapped[int] = mapped_column(ForeignKey("knowledge_docs.id"), index=True, comment="所属文档ID")
+    chunk_index: Mapped[int] = mapped_column(comment="段内序号")
+    content: Mapped[str] = mapped_column(Text, comment="分段文本")
+    embedding: Mapped[list[float]] = mapped_column(Embedding(EMBEDDING_DIM), comment="向量（cosine检索）")
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
                                                  onupdate=func.now(), comment="更新时间")

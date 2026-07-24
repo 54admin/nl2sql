@@ -8,7 +8,7 @@ from src.tools.sql_engine import execute_sql, validate_sql
 
 
 class FakeResult:
-    """模拟 sqlalchemy Result：keys() 返回列名，fetchall() 返回带 _mapping 的行。"""
+    """模拟 sqlalchemy Result：keys() 返回列名，fetchall/fetchmany 返回带 _mapping 的行。"""
     def __init__(self, cols, rows):
         self._cols, self._rows = cols, rows
 
@@ -17,6 +17,9 @@ class FakeResult:
 
     def fetchall(self):
         return [type("R", (), {"_mapping": r})() for r in self._rows]
+
+    def fetchmany(self, size=None):
+        return self.fetchall()
 
 
 class FakeConn:
@@ -103,9 +106,15 @@ async def test_execute_failure_returns_error_for_self_heal(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_validate_sql_passthrough():
-    """护栏本期推迟（spec 第 9 章），DROP 也不拦——这是当前预期行为。"""
-    assert validate_sql("DROP TABLE x") is None
+async def test_validate_sql_blocks_ddl_dml_and_allows_select():
+    """P1 SQL 护栏：sqlglot 解析，DDL/DML 拦截，只读 SELECT（含 CTE）放行。"""
+    assert validate_sql("DROP TABLE x") is not None
+    assert validate_sql("DELETE FROM t") is not None
+    assert validate_sql("UPDATE t SET a=1") is not None
+    assert validate_sql("CREATE TABLE t(a int)") is not None
+    assert validate_sql("INSERT INTO t VALUES(1)") is not None
+    assert validate_sql("SELECT 1") is None
+    assert validate_sql("WITH cte AS (SELECT 1) SELECT * FROM cte") is None
 
 
 @pytest.mark.asyncio

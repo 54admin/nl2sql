@@ -1,9 +1,10 @@
 """execute_sql 工具：在业务库执行 LLM 生成的 SQL → 全量结果旁路（result_id）→ 摘要回灌 LLM。
 
-SQL 护栏本期推迟（validate_sql 占位 pass-through），生产前补（见 spec 第 9 章）。
-执行失败不抛异常，返回 error 摘要让 LLM 自愈重试。"""
+SQL 安全护栏：validate_sql 用 sqlglot 解析，只放行 SELECT，拦 DDL/DML；
+_execute 加执行超时（30s）+ 行数上限（10000）。执行失败不抛异常，返回 error 摘要让 LLM 自愈重试。"""
 from __future__ import annotations
 
+import asyncio
 import json
 
 from sqlalchemy import text
@@ -15,19 +16,37 @@ from src.storage.query_results import save_result
 
 
 def validate_sql(sql: str) -> str | None:
-    """SQL 安全护栏。本期占位 pass-through（用户决定先不做）。
-    ponytail: 生产前补——sqlglot 解析拦 DDL/DML + 超时 + 行数限制。返回错误信息或 None。"""
+    """SQL 安全护栏：sqlglot 解析，只允许 SELECT（含 WITH...SELECT）；拦 DDL/DML。
+    返回错误信息（拦截）或 None（放行）。"""
+    import sqlglot
+    from sqlglot import exp
+    try:
+        parsed = sqlglot.parse(sql)
+    except Exception:
+        return "SQL 语法解析失败（sqlglot 无法解析），请检查语法"
+    for stmt in parsed:
+        if stmt is None:
+            continue
+        # 非 SELECT（CTE 顶层是 Select）一律拦：CREATE/DROP/UPDATE/DELETE/INSERT/ALTER 等
+        if not isinstance(stmt, exp.Select):
+            return f"仅允许只读 SELECT 查询，拦截 {type(stmt).__name__} 操作"
     return None
+
+
+MAX_ROWS = 10000   # 行数上限（防 LLM 生成无 LIMIT 大查询拖垮业务库）
+EXEC_TIMEOUT = 30  # 单次执行超时（秒）
 
 
 async def _execute(engine, sql: str) -> tuple[list, list]:
     """在业务库执行 SQL，返回 (columns, rows)。
-    ponytail: 用 result.keys() + row._mapping；若遇到奇怪行对象再换 result.mappings().all()。"""
-    async with engine.connect() as conn:
-        result = await conn.execute(text(sql))
-        columns = list(result.keys())
-        rows = [dict(r._mapping) for r in result.fetchall()]
-    return columns, rows
+    行数封顶 MAX_ROWS（fetchmany 避免大结果集打满内存）；执行超时 EXEC_TIMEOUT 秒。"""
+    async def _run():
+        async with engine.connect() as conn:
+            result = await conn.execute(text(sql))
+            columns = list(result.keys())
+            rows = [dict(r._mapping) for r in result.fetchmany(MAX_ROWS)]
+        return columns, rows
+    return await asyncio.wait_for(_run(), EXEC_TIMEOUT)
 
 
 def _preview(rows: list, n: int = 5) -> list:

@@ -143,3 +143,22 @@ async def test_handler_no_datasource(monkeypatch):
     class Ctx: pass
     res = await query_metadata({}, Ctx(), None)
     assert "无可用数据源" in res.summary
+
+
+@pytest.mark.asyncio
+async def test_metadata_includes_sql_templates(db):
+    """P2：已配 SQL 模板随 metadata 返回，供 LLM 套用。"""
+    from src.storage.models import SqlTemplate
+    async with AsyncSessionFactory() as s:
+        s.add(SqlTemplate(datasource_id=db, name="发电量排名",
+                          trigger_keywords="发电量,排名",
+                          trigger_semantics="按发电量排名",
+                          sql_template="SELECT * FROM fact_power ORDER BY kwh DESC LIMIT :n",
+                          params_json='{"n": "前N名"}', enabled=True))
+        await s.commit()
+    res = await query_metadata({"datasource_id": db}, type("C", (), {"session_id": "s"})(), None)
+    parsed = json.loads(res.summary)
+    assert parsed["templates"][0]["name"] == "发电量排名"
+    assert "发电量" in parsed["templates"][0]["trigger_keywords"]
+    assert "ORDER BY" in parsed["templates"][0]["sql_template"]
+    assert parsed["templates"][0]["params"]["n"] == "前N名"

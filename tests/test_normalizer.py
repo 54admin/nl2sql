@@ -77,3 +77,61 @@ async def test_dict_fn_low_confidence_no_replace():
     text, corrections = await n.normalize("新疆省发电量")
     assert text == "新疆省发电量"
     assert corrections == []
+
+
+# ===== P2 fuzzy / llm 层 + 短路 =====
+
+@pytest.mark.asyncio
+async def test_fuzzy_fn_fallback_when_dict_miss():
+    """dict 没命中时 fuzzy 兜底（confidence>=0.8 替换）。"""
+    async def fake_fuzzy(text):
+        return Correction(raw="新疆分公", standard="新疆分公司", confidence=0.85, source="fuzzy")
+
+    n = Normalizer(fuzzy_fn=fake_fuzzy)
+    text, corrections = await n.normalize("查新疆分公发电量")
+    assert "新疆分公司" in text
+    assert corrections[0].source == "fuzzy"
+
+
+@pytest.mark.asyncio
+async def test_fuzzy_low_confidence_no_replace():
+    async def fake_fuzzy(text):
+        return Correction(raw="x", standard="y", confidence=0.7, source="fuzzy")
+
+    n = Normalizer(fuzzy_fn=fake_fuzzy)
+    text, corrections = await n.normalize("原始文本")
+    assert corrections == []
+
+
+@pytest.mark.asyncio
+async def test_llm_fn_fallback_when_dict_fuzzy_miss():
+    """前两层都没修正时 llm 整句改写兜底。"""
+    async def fake_llm(text):
+        return "改写后文本", [Correction(raw=text, standard="改写后文本",
+                                       confidence=0.6, source="llm")]
+
+    n = Normalizer(llm_fn=fake_llm)
+    text, corrections = await n.normalize("原始文本")
+    assert text == "改写后文本"
+    assert corrections[0].source == "llm"
+
+
+@pytest.mark.asyncio
+async def test_dict_hit_skips_fuzzy_and_llm():
+    """dict 命中后不走 fuzzy/llm（避免过度改写）。"""
+    calls = {"fuzzy": 0, "llm": 0}
+
+    async def fake_dict(text):
+        return Correction(raw="A省", standard="A", confidence=0.99, source="dict")
+
+    async def fake_fuzzy(text):
+        calls["fuzzy"] += 1
+        return None
+
+    async def fake_llm(text):
+        calls["llm"] += 1
+        return text, []
+
+    n = Normalizer(dict_fn=fake_dict, fuzzy_fn=fake_fuzzy, llm_fn=fake_llm)
+    await n.normalize("A省发电量")
+    assert calls == {"fuzzy": 0, "llm": 0}

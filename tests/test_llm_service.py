@@ -133,3 +133,109 @@ def test_retry_exhausted_raises(monkeypatch):
     import pytest
     with pytest.raises(Exception):
         asyncio.run(_call_with_retry(always_fail, max_retries=2, base_delay=0))
+
+
+# ===== P2 限流：jitter / retry-after / RPM 窗 / 并发闸 =====
+
+def test_retry_after_seconds_numeric_and_none():
+    """retry-after 数字秒能抠出来；无响应/无头返回 None。"""
+    from src.llm.service import _retry_after_seconds
+
+    class Err(Exception):
+        pass
+    e = Err()
+    e.response = type("R", (), {"headers": {"retry-after": "30"}})()
+    assert _retry_after_seconds(e) == 30.0
+
+    e2 = Err()  # 无 response
+    assert _retry_after_seconds(e2) is None
+    e3 = Err()
+    e3.response = type("R", (), {"headers": {}})()
+    assert _retry_after_seconds(e3) is None
+
+
+def test_retry_respects_retry_after_header(monkeypatch):
+    """retry-after(10s) 大于退避(0.5s) 时，sleep 取 max → 10s。"""
+    import asyncio
+    import src.llm.service as svc
+
+    slept = []
+    async def rec(d): slept.append(d)
+    monkeypatch.setattr(asyncio, "sleep", rec)
+    monkeypatch.setattr(svc.random, "random", lambda: 0.0)   # jitter 固定 → delay*0.5
+
+    class Err(Exception):
+        pass
+    Err.__name__ = "RateLimitError"
+    e = Err()
+    e.response = type("R", (), {"headers": {"retry-after": "10"}})()
+
+    calls = {"n": 0}
+    async def flaky():
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise e
+        return "ok"
+
+    asyncio.run(svc._call_with_retry(flaky, base_delay=1.0))
+    # 退避 1*2^0=1，jitter*0.5=0.5，retry-after=10 → max=10
+    assert slept == [10.0]
+
+
+def test_retry_jitter_applied(monkeypatch):
+    """退避乘 (0.5+random)；random=1.0 时 delay=退避*1.5。"""
+    import asyncio
+    import src.llm.service as svc
+
+    slept = []
+    async def rec(d): slept.append(d)
+    monkeypatch.setattr(asyncio, "sleep", rec)
+    monkeypatch.setattr(svc.random, "random", lambda: 1.0)   # delay*1.5
+
+    class Err(Exception):
+        pass
+    Err.__name__ = "RateLimitError"
+    calls = {"n": 0}
+    async def flaky():
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise Err()
+        return "ok"
+
+    asyncio.run(svc._call_with_retry(flaky, base_delay=2.0))
+    # 退避 2*1=2，jitter*1.5=3.0，无 retry-after
+    assert slept == [3.0]
+
+
+def test_throttle_rpm_limit_sleeps_when_full(monkeypatch):
+    """rpm_limit=2：前两次不 sleep，第三次窗口满应 sleep。"""
+    import asyncio
+    import src.llm.service as svc
+
+    svc_inst = svc.LLMService()
+    svc_inst._apply_rate_limit(rpm_limit=2, concurrency=None)
+
+    slept = []
+    async def rec(d): slept.append(d)
+    monkeypatch.setattr(asyncio, "sleep", rec)
+
+    asyncio.run(svc_inst._throttle())   # 1/2
+    asyncio.run(svc_inst._throttle())   # 2/2
+    assert slept == []
+    asyncio.run(svc_inst._throttle())   # 满 → sleep
+    assert len(slept) == 1 and slept[0] > 0
+
+
+def test_apply_rate_limit_builds_semaphore():
+    """concurrency=N 建 Semaphore；None 不建；rpm_limit 记下供 _throttle 用。"""
+    import asyncio
+    from src.llm.service import LLMService
+
+    s = LLMService()
+    s._apply_rate_limit(rpm_limit=None, concurrency=3)
+    assert isinstance(s._sem, asyncio.Semaphore)
+
+    s2 = LLMService()
+    s2._apply_rate_limit(rpm_limit=10, concurrency=None)
+    assert s2._sem is None
+    assert s2._rpm_limit == 10

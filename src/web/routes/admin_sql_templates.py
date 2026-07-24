@@ -34,10 +34,12 @@ def build_sql_templates_router() -> APIRouter:
     router = APIRouter()
 
     @router.get("/api/admin/sql-templates")
-    async def list_templates(datasource_id: int) -> dict:
+    async def list_templates(datasource_id: int | None = None) -> dict:
         async with AsyncSessionFactory() as s:
-            rows = (await s.execute(SqlTemplate.__table__.select().where(
-                SqlTemplate.datasource_id == datasource_id))).all()
+            stmt = SqlTemplate.__table__.select()
+            if datasource_id is not None:
+                stmt = stmt.where(SqlTemplate.datasource_id == datasource_id)
+            rows = (await s.execute(stmt)).all()
         return {"templates": [{"id": r.id, "datasource_id": r.datasource_id,
                                "name": r.name, "trigger_keywords": r.trigger_keywords,
                                "trigger_semantics": r.trigger_semantics,

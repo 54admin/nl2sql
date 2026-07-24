@@ -51,6 +51,14 @@ class FakePromptStore:
         return self._prompts.get(scene)
 
 
+class FakeRuleStore:
+    def __init__(self, text=""):
+        self._text = text
+
+    async def all_text(self):
+        return self._text
+
+
 @pytest.fixture
 async def session_mgr():
     await init_db("sqlite+aiosqlite:///:memory:")
@@ -179,3 +187,34 @@ async def test_no_prompt_store_passes_none(session_mgr):
     await _collect(orch.handle_message("u1", sid, "你好",
                                        ViewerMode.USER, "t1"))
     assert loop.calls[0]["system_prompt"] is None
+
+
+@pytest.mark.asyncio
+async def test_rule_store_appends_to_system_prompt(session_mgr):
+    """P2 业务规则段追加到 system_prompt 末尾。"""
+    norm = FakeNormalizer()
+    loop = FakeLoop([SSEEvent("done", {"answer": "ok"}, "t1")])
+    prompts = FakePromptStore(prompts={"default": "你是问数助手"})
+    rules = FakeRuleStore("- 发电量单位: 万kWh")
+    orch = Orchestrator(norm, loop, session_mgr, prompt_store=prompts,
+                        rule_store=rules)
+    sid = await session_mgr.create_session("u1", "web")
+    await _collect(orch.handle_message("u1", sid, "你好",
+                                       ViewerMode.USER, "t1"))
+    sp = loop.calls[0]["system_prompt"]
+    assert sp.startswith("你是问数助手")
+    assert "【业务规则】" in sp
+    assert "发电量单位" in sp
+
+
+@pytest.mark.asyncio
+async def test_no_rule_store_keeps_prompt_untouched(session_mgr):
+    """rule_store=None 时不追加（system_prompt 原样）。"""
+    norm = FakeNormalizer()
+    loop = FakeLoop([SSEEvent("done", {"answer": "ok"}, "t1")])
+    prompts = FakePromptStore(prompts={"default": "你是问数助手"})
+    orch = Orchestrator(norm, loop, session_mgr, prompt_store=prompts)
+    sid = await session_mgr.create_session("u1", "web")
+    await _collect(orch.handle_message("u1", sid, "你好",
+                                       ViewerMode.USER, "t1"))
+    assert loop.calls[0]["system_prompt"] == "你是问数助手"

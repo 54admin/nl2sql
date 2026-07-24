@@ -31,8 +31,10 @@ from src.tools.builtins import default_registry
 from src.web.routes.admin_llm import build_admin_llm_router
 from src.web.routes.admin_prompts import build_admin_prompts_router
 from src.web.routes.admin_datasource import build_datasource_router
+from src.web.routes.admin_knowledge import build_knowledge_router
 from src.web.routes.admin_metadata import build_metadata_router
 from src.web.routes.admin_business_rules import build_business_rules_router
+from src.web.routes.admin_name_dict import build_name_dict_router
 from src.web.routes.admin_sql_templates import build_sql_templates_router
 from src.web.routes.ask import build_ask_router
 from src.web.routes.result import build_result_router
@@ -82,8 +84,15 @@ async def lifespan(app: FastAPI):
     from src.core.audit import AuditSink
     audit = AuditSink()
     loop = AgentLoop(llm, reg, sess_state, session_manager=sm, audit=audit)
-    norm = Normalizer()
-    orch = Orchestrator(norm, loop, sm, prompt_store=prompts)
+    from src.core.name_store import NameStore, build_llm_corrector
+    from src.core.rule_store import RuleStore
+    name_store = NameStore()
+    norm = Normalizer(
+        dict_fn=name_store.lookup_exact,
+        fuzzy_fn=name_store.lookup_fuzzy,
+        llm_fn=build_llm_corrector(name_store, llm))
+    orch = Orchestrator(norm, loop, sm, prompt_store=prompts, audit=audit,
+                        rule_store=RuleStore())
 
     _app_state.update(
         orchestrator=orch, session_mgr=sm, llm_service=llm, prompts=prompts,
@@ -150,8 +159,10 @@ def create_app() -> FastAPI:
     app.include_router(build_admin_prompts_router(_Lazy("prompts")))
     # P1a 新增 4 个 admin 路由：datasource 要 manager（_Lazy 延迟解析），其余 3 个纯 PG 无参
     app.include_router(build_datasource_router(_Lazy("datasource_mgr")))
+    app.include_router(build_knowledge_router())   # P3b 知识库上传/检索管理
     app.include_router(build_metadata_router())
     app.include_router(build_business_rules_router())
+    app.include_router(build_name_dict_router())   # P2 名称纠错别名字典 CRUD
     app.include_router(build_sql_templates_router())
     app.include_router(build_result_router())  # P1b：前端按 result_id 取全量结果
     app.include_router(build_audit_router())   # 审计统计：trace 详情/会话级/全局统计

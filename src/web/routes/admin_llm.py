@@ -21,6 +21,9 @@ class LlmConfigPayload(BaseModel):
     timeout: int = 60
     max_context: int = 32000   # 模型上下文窗口（token），压缩按占比触发用
     protocol: str = "openai"   # openai / anthropic（按网关额度桶选）
+    rpm_limit: int | None = None   # P2 限流：每分钟请求上限，None=不限
+    concurrency: int | None = None  # P2 限流：并发上限，None=不限
+    embedding_model: str | None = "Qwen3-Embedding-4B"  # P3b 知识库 embedding（None=禁用）
     enabled: bool = True
 
 
@@ -42,6 +45,9 @@ def build_admin_llm_router(llm_service=None) -> APIRouter:
                 "api_key": row.api_key, "temperature": row.temperature,
                 "timeout": row.timeout, "max_context": row.max_context,
                 "protocol": row.protocol or "openai",
+                "rpm_limit": row.rpm_limit,
+                "concurrency": row.concurrency,
+                "embedding_model": row.embedding_model,
                 "enabled": row.enabled,
                 "version": row.version,
             },
@@ -59,7 +65,9 @@ def build_admin_llm_router(llm_service=None) -> APIRouter:
                     id=DEFAULT_ID, model=payload.model, base_url=payload.base_url,
                     api_key=payload.api_key, temperature=payload.temperature,
                     timeout=payload.timeout, max_context=payload.max_context,
-                    protocol=proto, enabled=payload.enabled, version=1))
+                    protocol=proto, rpm_limit=payload.rpm_limit,
+                    concurrency=payload.concurrency, embedding_model=payload.embedding_model,
+                    enabled=payload.enabled, version=1))
                 version = 1
             else:
                 row.model = payload.model
@@ -69,6 +77,9 @@ def build_admin_llm_router(llm_service=None) -> APIRouter:
                 row.timeout = payload.timeout
                 row.max_context = payload.max_context
                 row.protocol = proto
+                row.rpm_limit = payload.rpm_limit
+                row.concurrency = payload.concurrency
+                row.embedding_model = payload.embedding_model
                 row.enabled = payload.enabled
                 row.version += 1
                 version = row.version

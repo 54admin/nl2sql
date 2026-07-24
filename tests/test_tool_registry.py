@@ -187,9 +187,10 @@ async def test_ask_user_handler(ctx, cancel_token):
 def test_default_registry_three_tools():
     reg = default_registry()
     names = {td.name for td in reg.available_defs()}
-    assert names == {"echo", "finish", "ask_user", "query_metadata", "execute_sql"}
+    assert names == {"echo", "finish", "ask_user", "query_metadata",
+                     "execute_sql", "knowledge_search", "do_attribution"}
     tools = reg.openai_tools()
-    assert len(tools) == 5
+    assert len(tools) == 7
     for t in tools:
         assert t["type"] == "function"
         assert "name" in t["function"]

@@ -23,6 +23,11 @@ class LLMConfig:
     # 协议：openai（/v1/chat/completions + Bearer）或 anthropic（/v1/messages + x-api-key）。
     # 同一网关常按协议分额度桶——anthropic 路径往往有额度，openai 路径易配额超限。
     protocol: str = "openai"
+    # 限流（P2 主动节流，防撞网关限流）。None=该维度不限（只重试不限速）。
+    rpm_limit: int | None = None
+    concurrency: int | None = None
+    # embedding 模型（P3b 知识库）：走 openai /v1/embeddings 端点，与 chat 协议无关。
+    embedding_model: str | None = "Qwen3-Embedding-4B"
 
 
 @dataclass

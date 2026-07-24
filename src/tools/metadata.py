@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
 from src.datasource.metadata_sync import fetch_table_columns
-from src.storage.models import MetadataTable, TableRelation
+from src.storage.models import MetadataTable, SqlTemplate, TableRelation
 from src.storage.pg_client import AsyncSessionFactory
 
 
@@ -52,6 +52,22 @@ async def _list_relations(datasource_id: int) -> list[dict]:
         } for r in rels]
 
 
+async def _list_sql_templates(datasource_id: int) -> list[dict]:
+    """读已配 SQL 模板（sql_templates，enabled=True）。供 LLM 套用/参考。
+    ponytail: 只把模板喂给 LLM，:param 占位由 LLM 填值；自动命中即用留 P2+。"""
+    async with AsyncSessionFactory() as s:
+        tpls = (await s.execute(SqlTemplate.__table__.select().where(
+            SqlTemplate.datasource_id == datasource_id,
+            SqlTemplate.enabled.is_(True)))).all()
+    return [{
+        "name": t.name,
+        "trigger_keywords": [k for k in (t.trigger_keywords or "").split(",") if k],
+        "trigger_semantics": t.trigger_semantics or "",
+        "sql_template": t.sql_template,
+        "params": json.loads(t.params_json) if t.params_json else None,
+    } for t in tpls]
+
+
 async def query_metadata(args: dict, ctx: LoopContext,
                          cancel_token: CancelToken) -> ToolResult:
     """工具 handler。args 可带 datasource_id；缺省取第一个数据源（单源场景，多源绑源留 P1c）。
@@ -69,14 +85,16 @@ async def query_metadata(args: dict, ctx: LoopContext,
     if not tables:
         return ToolResult(summary="该数据源没有勾选参与问数的表，请在配置页勾选表后再问。")
     relations = await _list_relations(int(ds_id))
-    return ToolResult(summary=json.dumps({"tables": tables, "relations": relations},
+    templates = await _list_sql_templates(int(ds_id))
+    return ToolResult(summary=json.dumps({"tables": tables, "relations": relations,
+                                          "templates": templates},
                                          ensure_ascii=False, default=str))
 
 
 QUERY_METADATA = ToolDefinition(
     name="query_metadata",
-    description=("查看当前数据源里可以查询的表清单（表名/中文注释/字段）。"
-                 "先调它了解有哪些表，再决定查哪张表。无需参数。"),
+    description=("查看当前数据源里可以查询的表清单（表名/中文注释/字段）、已配表间关联、已配 SQL 模板。"
+                 "先调它了解有哪些表，再决定查哪张表；若问题命中已配 SQL 模板可直接套用。无需参数。"),
     parameters={"type": "object", "properties": {}, "required": []},
     handler=query_metadata,
 )
