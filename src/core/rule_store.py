@@ -25,7 +25,9 @@ class RuleStore:
         if self._cache and time.monotonic() - self._loaded_at < _TTL:
             return
         async with AsyncSessionFactory() as s:
-            stmt = BusinessRule.__table__.select().where(BusinessRule.enabled.is_(True))
+            # 只读通用规则（scope=global）注入 system_prompt；表级规则走 query_metadata 附表
+            stmt = BusinessRule.__table__.select().where(
+                BusinessRule.enabled.is_(True), BusinessRule.scope == "global")
             rows = (await s.execute(stmt)).all()
         self._cache = [(r.key, r.value_json) for r in rows]
         self._loaded_at = time.monotonic()

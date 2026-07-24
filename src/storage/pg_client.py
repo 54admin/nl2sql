@@ -46,9 +46,23 @@ _PG_MIGRATIONS = [
     "ALTER TABLE llm_config ADD COLUMN IF NOT EXISTS concurrency INTEGER",
     "ALTER TABLE llm_config ADD COLUMN IF NOT EXISTS embedding_model VARCHAR(128)",
     "UPDATE llm_config SET embedding_model = 'Qwen3-Embedding-4B' WHERE embedding_model IS NULL",
+    # 多用途重构（analysis/embedding/attribution 多行 + 启停）：embedding 从 default.embedding_model 拆独立行
+    "INSERT INTO llm_config (id, model, base_url, api_key, temperature, timeout, max_context, protocol, rpm_limit, concurrency, enabled, version) SELECT 'embedding', embedding_model, base_url, api_key, temperature, timeout, max_context, protocol, rpm_limit, concurrency, true, 1 FROM llm_config WHERE id='default' AND embedding_model IS NOT NULL ON CONFLICT (id) DO NOTHING",
+    "INSERT INTO llm_config (id, model, base_url, api_key, temperature, timeout, max_context, protocol, rpm_limit, concurrency, enabled, version) SELECT 'attribution', model, base_url, api_key, temperature, timeout, max_context, protocol, rpm_limit, concurrency, true, 1 FROM llm_config WHERE id='default' ON CONFLICT (id) DO NOTHING",
+    "UPDATE llm_config SET id='analysis' WHERE id='default'",
+    "ALTER TABLE llm_config DROP COLUMN IF EXISTS embedding_model",
+    "ALTER TABLE llm_config ADD COLUMN IF NOT EXISTS purpose VARCHAR(32)",
+    "UPDATE llm_config SET purpose=id WHERE purpose IS NULL",
+    "CREATE INDEX IF NOT EXISTS ix_llm_config_purpose ON llm_config(purpose)",
     # audit_traces 补成败标记+最终答案列（细粒度统计用）；audit_events 是新表 create_all 建。
     "ALTER TABLE audit_traces ADD COLUMN IF NOT EXISTS success BOOLEAN",
     "ALTER TABLE audit_traces ADD COLUMN IF NOT EXISTS final_answer TEXT",
+    # 业务规则分层（scope 通用/表级 + table_name 关联）
+    "ALTER TABLE business_rules ADD COLUMN IF NOT EXISTS scope VARCHAR(16) DEFAULT 'global'",
+    "ALTER TABLE business_rules ADD COLUMN IF NOT EXISTS table_name VARCHAR(128)",
+    "CREATE INDEX IF NOT EXISTS ix_business_rules_scope ON business_rules(scope)",
+    # SQL 模板 datasource_id 可空（通用样板，SQL模板进 system prompt 不分数据源）
+    "ALTER TABLE sql_templates ALTER COLUMN datasource_id DROP NOT NULL",
 ]
 
 

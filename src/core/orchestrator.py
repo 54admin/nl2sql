@@ -63,6 +63,16 @@ class Orchestrator:
             rules_text = await self._rule_store.all_text()
             if rules_text:
                 system_prompt = system_prompt + "\n\n【业务规则】\n" + rules_text
+        # SQL 样板段追加（通用复杂 SQL 样板，和表结构无关，进 prompt 让 LLM 写复杂查询参考）
+        if system_prompt:
+            from src.storage.models import SqlTemplate
+            from src.storage.pg_client import AsyncSessionFactory
+            async with AsyncSessionFactory() as _s:
+                _tpls = (await _s.execute(SqlTemplate.__table__.select().where(
+                    SqlTemplate.enabled.is_(True)))).all()
+            if _tpls:
+                _tpl_text = "\n".join(f"- {t.name}：\n{t.sql_template}" for t in _tpls)
+                system_prompt = system_prompt + "\n\n【SQL 样板（复杂查询如同比/环比/行转列参考，按需改表名/参数）】\n" + _tpl_text
 
         # 4. 迭代 loop，透传事件；异常转 ERROR 不中断流
         # cancel_token 由路由层注入（前端取消则置位，loop 在检查点响应）。

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
+from src.knowledge.parsing import parse_to_text
 from src.knowledge.store import get_knowledge_store
 
 
@@ -21,7 +22,7 @@ def build_knowledge_router() -> APIRouter:
         if not file.filename:
             raise HTTPException(400, "缺少文件名")
         raw = await file.read()
-        content = raw.decode("utf-8", errors="ignore") if raw else ""
+        content = parse_to_text(file.filename, raw) if raw else ""
         try:
             doc_id = await get_knowledge_store().add_document(
                 file.filename, content, category)

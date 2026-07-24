@@ -127,11 +127,15 @@ class AppConfigRow(Base):
 
 
 class LlmConfigRow(Base):
-    """动态 LLM 配置（admin 后台可改，热更新）。单行表 id='default'。
-    LLMService 调用时优先读此表（enabled=True），无则 fallback yml。"""
+    """动态 LLM 配置（admin 后台可改，热更新）。按用途 id 多行 + 启停：
+    analysis（对话查询 chat）/ embedding（知识库向量）/ attribution（归因推理）。
+    LLMService 按 id=用途 取 enabled 配置。"""
     __tablename__ = "llm_config"
-    __table_args__ = {"comment": "动态LLM配置（admin后台热更新，单行id=default）"}
-    id: Mapped[str] = mapped_column(String(32), primary_key=True, default="default", comment="配置ID（默认default）")
+    __table_args__ = {"comment": "动态LLM配置（按用途多行analysis/embedding/attribution+启停）"}
+    id: Mapped[str] = mapped_column(String(64), primary_key=True,
+                                     comment="配置ID（自定义名，如 qwen-chat）")
+    purpose: Mapped[str] = mapped_column(String(32), default="analysis", index=True,
+                                          comment="用途（analysis对话/embedding向量/attribution归因）")
     model: Mapped[str] = mapped_column(String(128), comment="模型名")
     base_url: Mapped[str] = mapped_column(String(256), comment="API地址")
     api_key: Mapped[str] = mapped_column(String(256), comment="密钥")
@@ -148,9 +152,6 @@ class LlmConfigRow(Base):
                                                    comment="每分钟请求上限（None=不限）")
     concurrency: Mapped[int | None] = mapped_column(default=None, nullable=True,
                                                      comment="并发上限（None=不限）")
-    # embedding 模型（P3b 知识库）：走 openai /v1/embeddings 端点，与 chat 协议无关。默认 Qwen3-Embedding-4B
-    embedding_model: Mapped[str | None] = mapped_column(String(128), default="Qwen3-Embedding-4B",
-                                                         nullable=True, comment="embedding模型（知识库用，None=禁用）")
     enabled: Mapped[bool] = mapped_column(default=True, comment="是否启用")
     version: Mapped[int] = mapped_column(default=1, comment="版本号")
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
@@ -260,7 +261,11 @@ class BusinessRule(Base):
     __tablename__ = "business_rules"
     __table_args__ = {"comment": "业务规则（人工录入口径，后续阶段消费）"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="规则ID")
-    category: Mapped[str] = mapped_column(String(32), index=True, comment="分类（metric/constraint/interaction/attribution）")
+    category: Mapped[str] = mapped_column(String(32), default="general", index=True, comment="分类（旧字段，主分层看 scope）")
+    scope: Mapped[str] = mapped_column(String(16), default="global", index=True,
+                                        comment="作用域（global通用 / table表级，表级时填 table_name）")
+    table_name: Mapped[str | None] = mapped_column(String(128), nullable=True,
+                                                    comment="表级规则关联的表全限定名（scope=table 时填）")
     key: Mapped[str] = mapped_column(String(128), comment="键名")
     value_json: Mapped[str] = mapped_column(Text, comment="规则值（JSON）")
     enabled: Mapped[bool] = mapped_column(default=True, comment="是否启用")
@@ -291,7 +296,8 @@ class SqlTemplate(Base):
     __tablename__ = "sql_templates"
     __table_args__ = {"comment": "SQL模板（人工录入，P1b按关键词/语义命中应用）"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="模板ID")
-    datasource_id: Mapped[int] = mapped_column(ForeignKey("datasources.id"), index=True, comment="数据源ID")
+    datasource_id: Mapped[int | None] = mapped_column(ForeignKey("datasources.id"), index=True, nullable=True,
+                                                       comment="数据源ID（通用样板可空，SQL模板进system prompt不分数据源）")
     name: Mapped[str] = mapped_column(String(128), comment="模板名")
     trigger_keywords: Mapped[str | None] = mapped_column(Text, nullable=True, comment="触发关键词（逗号分隔）")
     trigger_semantics: Mapped[str | None] = mapped_column(Text, nullable=True, comment="触发语义（自然语言描述）")

@@ -10,7 +10,7 @@ from src.storage.pg_client import AsyncSessionFactory
 
 
 class SqlTemplateIn(BaseModel):
-    datasource_id: int
+    datasource_id: int | None = None
     name: str
     trigger_keywords: str | None = None
     trigger_semantics: str | None = None

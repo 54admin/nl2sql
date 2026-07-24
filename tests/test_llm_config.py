@@ -22,7 +22,7 @@ async def test_no_config_raises(svc):
 async def test_disabled_config_raises(svc):
     """enabled=False 视同未配置 → 抛错。"""
     async with AsyncSessionFactory() as s:
-        s.add(LlmConfigRow(id="default", model="m", base_url="u", api_key="k",
+        s.add(LlmConfigRow(id="analysis", model="m", base_url="u", api_key="k",
                            temperature=0.0, timeout=60, enabled=False, version=1))
         await s.commit()
     with pytest.raises(RuntimeError):
@@ -33,7 +33,7 @@ async def test_disabled_config_raises(svc):
 async def test_dynamic_config_used(svc):
     """数据库 enabled 配置 → _resolve_config 返回该配置。"""
     async with AsyncSessionFactory() as s:
-        s.add(LlmConfigRow(id="default", model="dyn-model", base_url="dyn-url",
+        s.add(LlmConfigRow(id="analysis", model="dyn-model", base_url="dyn-url",
                            api_key="dyn-key", temperature=0.7, timeout=120,
                            enabled=True, version=1))
         await s.commit()
@@ -49,13 +49,13 @@ async def test_dynamic_config_used(svc):
 async def test_reset_dynamic_reloads(svc):
     """reset_dynamic 后下次读最新 PG。"""
     async with AsyncSessionFactory() as s:
-        s.add(LlmConfigRow(id="default", model="v1", base_url="u1", api_key="k",
+        s.add(LlmConfigRow(id="analysis", model="v1", base_url="u1", api_key="k",
                            temperature=0.0, timeout=60, enabled=True, version=1))
         await s.commit()
     cfg = await svc._resolve_config()
     assert cfg.model == "v1"
     async with AsyncSessionFactory() as s:
-        row = await s.get(LlmConfigRow, "default")
+        row = await s.get(LlmConfigRow, "analysis")
         row.model = "v2"
         await s.commit()
     cfg = await svc._resolve_config()

@@ -1,91 +1,100 @@
-"""admin LLM 配置路由：GET/PUT /api/admin/llm-config。
-ponytail: 鉴权层 P5 管理后台再补；P0b 暴露路由供页面调试。
-支持双协议：openai（/v1/chat/completions+Bearer）/anthropic（/v1/messages+x-api-key），
-按 protocol 字段选——同网关常按协议分额度桶，配哪个走哪个。"""
+"""admin LLM 配置路由：模型 CRUD（列表/新建/改/删/启停）。
+每个模型有 purpose（analysis/embedding/attribution）+ 自定义 id；同 purpose 可多个（备用切换），
+LLMService 按 purpose 取 enabled 的（version 最新）。
+ponytail: 鉴权层 P5 管理后台再补。"""
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from src.storage.models import LlmConfigRow
 from src.storage.pg_client import AsyncSessionFactory
 
-DEFAULT_ID = "default"
+PURPOSES = ("analysis", "embedding", "attribution")
 
 
 class LlmConfigPayload(BaseModel):
+    purpose: str
     model: str
     base_url: str
     api_key: str = ""
     temperature: float = 0.0
     timeout: int = 60
-    max_context: int = 32000   # 模型上下文窗口（token），压缩按占比触发用
-    protocol: str = "openai"   # openai / anthropic（按网关额度桶选）
-    rpm_limit: int | None = None   # P2 限流：每分钟请求上限，None=不限
-    concurrency: int | None = None  # P2 限流：并发上限，None=不限
-    embedding_model: str | None = "Qwen3-Embedding-4B"  # P3b 知识库 embedding（None=禁用）
+    max_context: int = 32000
+    protocol: str = "openai"
+    rpm_limit: int | None = None
+    concurrency: int | None = None
     enabled: bool = True
 
 
+def _row_to_dict(r) -> dict:
+    return {"id": r.id, "purpose": r.purpose, "model": r.model, "base_url": r.base_url,
+            "api_key": r.api_key, "temperature": r.temperature,
+            "timeout": r.timeout, "max_context": r.max_context,
+            "protocol": r.protocol or "openai",
+            "rpm_limit": r.rpm_limit, "concurrency": r.concurrency,
+            "enabled": r.enabled, "version": r.version}
+
+
+def _apply_payload(row, payload: LlmConfigPayload) -> None:
+    proto = (payload.protocol or "openai").lower()
+    if proto not in ("openai", "anthropic"):
+        proto = "openai"
+    row.purpose = payload.purpose
+    row.model = payload.model
+    row.base_url = payload.base_url
+    row.api_key = payload.api_key
+    row.temperature = payload.temperature
+    row.timeout = payload.timeout
+    row.max_context = payload.max_context
+    row.protocol = proto
+    row.rpm_limit = payload.rpm_limit
+    row.concurrency = payload.concurrency
+    row.enabled = payload.enabled
+
+
 def build_admin_llm_router(llm_service=None) -> APIRouter:
-    """构造 admin LLM 配置路由。
-    llm_service: 可选 LLMService 实例，PUT 成功后调其 reset_dynamic 触发热更新。"""
+    """构造 admin LLM 配置路由。llm_service: 改完调 reset_dynamic 热更新。"""
     router = APIRouter()
 
     @router.get("/api/admin/llm-config")
-    async def get_llm_config() -> dict:
+    async def list_configs() -> dict:
         async with AsyncSessionFactory() as s:
-            row = await s.get(LlmConfigRow, DEFAULT_ID)
-        if row is None:
-            return {"source": "yaml", "dynamic": None}
-        return {
-            "source": "dynamic",
-            "dynamic": {
-                "model": row.model, "base_url": row.base_url,
-                "api_key": row.api_key, "temperature": row.temperature,
-                "timeout": row.timeout, "max_context": row.max_context,
-                "protocol": row.protocol or "openai",
-                "rpm_limit": row.rpm_limit,
-                "concurrency": row.concurrency,
-                "embedding_model": row.embedding_model,
-                "enabled": row.enabled,
-                "version": row.version,
-            },
-        }
+            rows = (await s.execute(LlmConfigRow.__table__.select())).all()
+        return {"configs": [_row_to_dict(r) for r in rows]}
 
-    @router.put("/api/admin/llm-config")
-    async def put_llm_config(payload: LlmConfigPayload) -> dict:
-        proto = (payload.protocol or "openai").lower()
-        if proto not in ("openai", "anthropic"):
-            proto = "openai"
+    @router.put("/api/admin/llm-config/{cfg_id}")
+    async def upsert_config(cfg_id: str, payload: LlmConfigPayload) -> dict:
+        """新建/更新（upsert by id）。同 purpose 多个时取 version 最新的 enabled 生效。"""
+        if payload.purpose not in PURPOSES:
+            raise HTTPException(400, f"purpose 必须是 {PURPOSES} 之一")
         async with AsyncSessionFactory() as s:
-            row = await s.get(LlmConfigRow, DEFAULT_ID)
+            row = await s.get(LlmConfigRow, cfg_id)
             if row is None:
-                s.add(LlmConfigRow(
-                    id=DEFAULT_ID, model=payload.model, base_url=payload.base_url,
-                    api_key=payload.api_key, temperature=payload.temperature,
-                    timeout=payload.timeout, max_context=payload.max_context,
-                    protocol=proto, rpm_limit=payload.rpm_limit,
-                    concurrency=payload.concurrency, embedding_model=payload.embedding_model,
-                    enabled=payload.enabled, version=1))
+                row = LlmConfigRow(id=cfg_id, version=0)
+                _apply_payload(row, payload)
+                row.version = 1
+                s.add(row)
                 version = 1
             else:
-                row.model = payload.model
-                row.base_url = payload.base_url
-                row.api_key = payload.api_key
-                row.temperature = payload.temperature
-                row.timeout = payload.timeout
-                row.max_context = payload.max_context
-                row.protocol = proto
-                row.rpm_limit = payload.rpm_limit
-                row.concurrency = payload.concurrency
-                row.embedding_model = payload.embedding_model
-                row.enabled = payload.enabled
+                _apply_payload(row, payload)
                 row.version += 1
                 version = row.version
             await s.commit()
         if llm_service is not None:
             llm_service.reset_dynamic()
-        return {"ok": True, "version": version}
+        return {"ok": True, "id": cfg_id, "version": version}
+
+    @router.delete("/api/admin/llm-config/{cfg_id}")
+    async def delete_config(cfg_id: str) -> dict:
+        async with AsyncSessionFactory() as s:
+            row = await s.get(LlmConfigRow, cfg_id)
+            if row is None:
+                raise HTTPException(404, "配置不存在")
+            await s.delete(row)
+            await s.commit()
+        if llm_service is not None:
+            llm_service.reset_dynamic()
+        return {"ok": True}
 
     return router

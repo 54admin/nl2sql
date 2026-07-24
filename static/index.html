@@ -43,7 +43,7 @@
   .sess-item:hover .s-del { display: inline; }
   .sess-item .s-edit { display: none; background: none; border: none; color: #888; cursor: pointer; font-size: 12px; padding: 0 2px; }
   .sess-item:hover .s-edit { display: inline; }
-  #chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  #chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; max-width: 760px; margin: 0 auto; }
   #chat-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   #config-panel { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
 
@@ -108,6 +108,16 @@
   /* ===== 管理后台（name-dict/规则/模板/知识库/模型限流） ===== */
   #admin-panel { padding: 12px; overflow: auto; flex: 1; }
   .admin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; }
+  /* ===== 设置页子标签切换 ===== */
+  .settings-pane { flex: 1; min-height: 0; }
+  .settings-panels { padding: 12px; overflow: auto; flex: 1; }
+  .stab-panel { display: none; }
+  .stab-panel.active { display: block; }
+  #chat-nav .gear { padding: 5px 14px; background: #1976d2; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  #settings-nav { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+  #settings-nav .stab { padding: 5px 14px; background: #eee; color: #333; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  #settings-nav .stab.active { background: #1976d2; color: #fff; }
+  #settings-nav .back { margin-left: auto; padding: 5px 12px; background: #fff; color: #1976d2; border: 1px solid #1976d2; border-radius: 6px; cursor: pointer; font-size: 13px; }
   .admin-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; }
   .admin-card h3 { margin: 0 0 10px; font-size: 14px; color: #333; }
   .admin-form { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
@@ -115,9 +125,23 @@
   .admin-form button { padding: 5px 14px; background: #4caf50; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
   .admin-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
   .admin-list li { display: flex; align-items: center; gap: 6px; padding: 6px 2px; border-bottom: 1px solid #f0f0f0; font-size: 12px; }
-  .admin-list li .li-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .admin-list li .li-text { flex: 1; word-break: break-all; line-height: 1.4; }
   .admin-list li .li-del { background: none; border: none; color: #c62828; cursor: pointer; font-size: 15px; padding: 0 4px; }
   .admin-list li .li-toggle { background: #fafafa; border: 1px solid #ccc; border-radius: 3px; cursor: pointer; font-size: 11px; padding: 2px 8px; }
+  .llm-sub { border: 1px solid #e8e8e8; border-radius: 6px; padding: 10px; margin-bottom: 10px; }
+  .llm-sub-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; }
+  .llm-sub input, .llm-sub select { width: 100%; padding: 5px 8px; border: 1px solid #d0d0d0; border-radius: 4px; font-size: 12px; margin-bottom: 6px; }
+  .llm-sub button { padding: 5px 14px; background: #4caf50; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  .llm-row { display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-bottom: 1px solid #f0f0f0; font-size: 12px; flex-wrap: wrap; }
+  .llm-row .llm-info { flex: 1; color: #555; min-width: 150px; word-break: break-all; }
+  .llm-tag { font-size: 10px; padding: 2px 8px; border-radius: 10px; color: #fff; }
+  .llm-tag-analysis { background: #1976d2; }
+  .llm-tag-embedding { background: #7b1fa2; }
+  .llm-tag-attribution { background: #e65100; }
+  .llm-edit-btn { background: #fafafa; border: 1px solid #ccc; border-radius: 3px; cursor: pointer; font-size: 11px; padding: 2px 8px; }
+  .llm-new { margin-top: 8px; padding: 6px 14px; background: #1976d2; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  #llm-editor input, #llm-editor select { width: 100%; padding: 5px 8px; border: 1px solid #d0d0d0; border-radius: 4px; font-size: 12px; margin-bottom: 6px; }
+  #llm-editor button { padding: 5px 14px; background: #4caf50; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; margin-right: 6px; }
   #btn-dashboard { padding: 4px 10px; font-size: 12px; border: 1px solid #1976d2; background: #fff; color: #1976d2; border-radius: 4px; cursor: pointer; white-space: nowrap; }
   #btn-dashboard:hover { background: #e3f2fd; }
   #table-search { width: 100%; padding: 5px 8px; border: 1px solid #d0d0d0; border-radius: 4px; font-size: 12px; }
@@ -221,12 +245,17 @@
 <div id="app">
   <header>
     <h1>AI 问数</h1>
-    <nav>
-      <button id="tab-chat" class="tab active">对话</button>
-      <button id="tab-config" class="tab">配置</button>
-      <button id="tab-admin" class="tab">管理</button>
+    <nav id="chat-nav"><button class="gear" onclick="showSettings(true)">⚙ 设置</button></nav>
+    <nav id="settings-nav" style="display:none">
+      <button class="stab active" data-tab="datasource" onclick="showSettingsTab('datasource')">数据源</button>
+      <button class="stab" data-tab="prompt" onclick="showSettingsTab('prompt')">提示词</button>
+      <button class="stab" data-tab="namedict" onclick="showSettingsTab('namedict')">名称字典</button>
+      <button class="stab" data-tab="rules" onclick="showSettingsTab('rules')">业务规则</button>
+      <button class="stab" data-tab="templates" onclick="showSettingsTab('templates')">SQL模板</button>
+      <button class="stab" data-tab="knowledge" onclick="showSettingsTab('knowledge')">知识库</button>
+      <button class="stab" data-tab="models" onclick="showSettingsTab('models')">模型</button>
+      <button class="back" onclick="showSettings(false)">← 返回</button>
     </nav>
-    <select id="mode"><option value="user">用户模式</option><option value="admin">管理员模式</option></select>
   </header>
   <div id="chat-panel" style="display:flex">
     <aside id="session-sidebar">
@@ -245,7 +274,7 @@
       </footer>
     </div>
   </div>
-  <div id="config-panel" style="display:none">
+  <div id="stab-datasource" class="stab-panel">
     <div class="cfg-layout">
       <!-- 左栏：数据源 > 库 折叠树（刷新/总览在数据源顶层，不属具体库） -->
       <div class="cfg-col cfg-left">
@@ -283,9 +312,15 @@
       </div>
     </div>
   </div>
-  <div id="admin-panel" style="display:none">
-    <div class="admin-grid">
-      <section class="admin-card">
+  <div id="admin-panel" class="settings-pane" style="display:none">
+    <div class="settings-panels">
+      <section class="admin-card stab-panel" id="stab-prompt">
+        <h3>系统提示词（prompt）</h3>
+        <textarea id="prompt-content" placeholder="加载中…" style="width:100%;height:70vh;font-family:monospace;font-size:13px;border:1px solid #d0d0d0;border-radius:4px;padding:8px"></textarea>
+        <button onclick="savePrompt()" style="margin-top:8px">保存</button>
+        <p class="placeholder" style="font-size:11px;color:#999;margin-top:6px">default 场景的 system prompt；空保存=恢复内置兜底（清空 default 记录）。</p>
+      </section>
+      <section class="admin-card stab-panel" id="stab-namedict">
         <h3>名称纠错字典</h3>
         <div class="admin-form">
           <input id="nd-alias" placeholder="别名/错写">
@@ -295,43 +330,52 @@
         </div>
         <ul id="nd-list" class="admin-list"></ul>
       </section>
-      <section class="admin-card">
+      <section class="admin-card stab-panel" id="stab-rules">
         <h3>业务规则</h3>
         <div class="admin-form">
-          <input id="br-category" placeholder="分类(metric/constraint/...)">
+          <select id="br-scope"><option value="global">通用</option><option value="table">表级</option></select>
+          <input id="br-table" placeholder="表名(表级填，如 fact_power)">
           <input id="br-key" placeholder="键名">
-          <input id="br-value" placeholder='值(JSON, 如 "万kWh")'>
+          <input id="br-value" placeholder='值(如 万kWh)'>
           <button onclick="addRule()">添加</button>
         </div>
         <ul id="br-list" class="admin-list"></ul>
       </section>
-      <section class="admin-card">
-        <h3>SQL 模板</h3>
+      <section class="admin-card stab-panel" id="stab-templates">
+        <h3>SQL 模板（复杂查询样板，进 system prompt 给 LLM 参考）</h3>
+        <input id="tpl-id" type="hidden">
+        <input id="tpl-name" placeholder="标题（如 同比环比 / 行转列排名）" style="width:100%;padding:6px 8px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px;margin-bottom:6px">
+        <textarea id="tpl-sql" placeholder="SQL 样板（同比/环比/行转列等复杂 SQL，含 :param 占位）" rows="8" style="width:100%;font-family:monospace;font-size:12px;border:1px solid #d0d0d0;border-radius:4px;padding:8px;margin-bottom:6px"></textarea>
+        <button onclick="saveTpl()">保存</button>
+        <button onclick="cancelTplEdit()" style="background:#999">取消</button>
         <ul id="st-list" class="admin-list"></ul>
-        <p class="placeholder" style="font-size:11px;color:#999;margin-top:6px">模板含触发关键词/参数定义，结构复杂，暂仅列表+删除（新增可用 curl）</p>
       </section>
-      <section class="admin-card">
+      <section class="admin-card stab-panel" id="stab-knowledge">
         <h3>知识库</h3>
         <div class="admin-form">
-          <input id="kb-file" type="file" accept=".txt,.md">
-          <select id="kb-category"><option value="manual">手册</option><option value="policy">政策</option><option value="case">案例</option><option value="general">通用</option></select>
+          <input id="kb-file" type="file" accept=".txt,.md,.csv,.docx,.xlsx">
           <button onclick="uploadKb()">上传</button>
         </div>
+        <p class="placeholder" style="font-size:11px;color:#999;margin-bottom:8px">支持 txt/md/csv(会议洞察)/docx/xlsx，后端自动解析分段</p>
         <ul id="kb-list" class="admin-list"></ul>
       </section>
-      <section class="admin-card">
-        <h3>模型 &amp; 限流</h3>
-        <div class="admin-form">
-          <input id="llm-model" placeholder="模型名">
-          <input id="llm-base" placeholder="base_url">
-          <input id="llm-key" placeholder="api_key">
-          <select id="llm-protocol"><option value="openai">openai</option><option value="anthropic">anthropic</option></select>
-          <input id="llm-rpm" type="number" placeholder="RPM上限(空=不限)">
-          <input id="llm-conc" type="number" placeholder="并发上限(空=不限)">
-          <input id="llm-embed" placeholder="embedding模型">
-          <button onclick="saveLlm()">保存</button>
+      <section class="admin-card stab-panel" id="stab-models">
+        <h3>模型 &amp; 限流（按用途，可新建多个备用）</h3>
+        <div id="llm-cards"></div>
+        <button class="llm-new" onclick="newLlm()">+ 新建模型</button>
+        <div id="llm-editor" style="display:none;margin-top:10px;border-top:1px solid #eee;padding-top:10px">
+          <input id="llm-edit-id" placeholder="配置ID（如 qwen-chat）">
+          <select id="llm-edit-purpose"><option value="analysis">analysis 分析</option><option value="embedding">embedding 向量</option><option value="attribution">attribution 归因</option></select>
+          <input id="llm-edit-model" placeholder="模型名">
+          <input id="llm-edit-base" placeholder="base_url">
+          <input id="llm-edit-key" placeholder="api_key">
+          <select id="llm-edit-protocol"><option value="openai">openai</option><option value="anthropic">anthropic</option></select>
+          <input id="llm-edit-rpm" type="number" placeholder="RPM(空=不限)">
+          <input id="llm-edit-conc" type="number" placeholder="并发(空=不限)">
+          <button onclick="saveLlmEdit()">保存</button>
+          <button onclick="closeLlmEditor()" style="background:#999">取消</button>
         </div>
-        <p class="placeholder" style="font-size:11px;color:#999">限流：None=只重试不限速；配实际值才主动节流。</p>
+        <p class="placeholder" style="font-size:11px;color:#999;margin-top:8px">同用途多个时取启用的最新版；限流 None=不限。</p>
       </section>
     </div>
   </div>
@@ -367,7 +411,6 @@ const msgs = document.getElementById("messages");
 const input = document.getElementById("input");
 const sendBtn = document.getElementById("send");
 const stopBtn = document.getElementById("stop");
-const modeSel = document.getElementById("mode");
 const sessionList = document.getElementById("session-list");
 const newSessionBtn = document.getElementById("new-session");
 
@@ -543,7 +586,7 @@ async function ask(text) {
     const resp = await fetch("/api/ask/sse", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({user_id: USER_ID, session_id: sid, text, mode: modeSel.value}),
+      body: JSON.stringify({user_id: USER_ID, session_id: sid, text}),
       signal: ac.signal   // 取消时 abort() 立即断流
     });
     const reader = resp.body.getReader();
@@ -705,23 +748,39 @@ input.addEventListener("keydown", e => {
 });
 
 // ===== 配置页：DBeaver 层级导航（数据源 > 库 > 表/视图 > 字段）=====
-function showTab(which) {
-  document.getElementById("chat-panel").style.display = which === "chat" ? "flex" : "none";
-  document.getElementById("config-panel").style.display = which === "config" ? "block" : "none";
-  document.getElementById("admin-panel").style.display = which === "admin" ? "block" : "none";
-  document.getElementById("tab-chat").classList.toggle("active", which === "chat");
-  document.getElementById("tab-config").classList.toggle("active", which === "config");
-  document.getElementById("tab-admin").classList.toggle("active", which === "admin");
-  if (which === "config") loadDatasources();
-  if (which === "admin") loadAdmin();
+function showSettings(enter) {
+  document.getElementById("chat-panel").style.display = enter ? "none" : "flex";
+  document.getElementById("chat-nav").style.display = enter ? "none" : "block";
+  document.getElementById("settings-nav").style.display = enter ? "flex" : "none";
+  document.getElementById("admin-panel").style.display = enter ? "block" : "none";
+  if (enter) showSettingsTab("datasource");
 }
-document.getElementById("tab-chat").onclick = () => showTab("chat");
-document.getElementById("tab-config").onclick = () => showTab("config");
-document.getElementById("tab-admin").onclick = () => showTab("admin");
+function showSettingsTab(tab) {
+  document.querySelectorAll(".stab-panel").forEach(p => p.classList.toggle("active", p.id === "stab-" + tab));
+  document.querySelectorAll("#settings-nav .stab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  if (tab === "datasource") loadDatasources();
+  else if (tab === "prompt") loadPrompt();
+  else if (tab === "namedict") loadNameDict();
+  else if (tab === "rules") loadRules();
+  else if (tab === "templates") loadSqlTemplates();
+  else if (tab === "knowledge") loadKbDocs();
+  else if (tab === "models") loadLlm();
+}
 
 // ===== 管理后台：name-dict / 业务规则 / SQL模板 / 知识库 / 模型限流 =====
 async function loadAdmin() {
-  await Promise.all([loadNameDict(), loadRules(), loadSqlTemplates(), loadKbDocs(), loadLlm()]);
+  await Promise.all([loadPrompt(), loadNameDict(), loadRules(), loadSqlTemplates(), loadKbDocs(), loadLlm()]);
+}
+async function loadPrompt() {
+  const r = await fetch("/api/admin/prompts/default");
+  const {content} = await r.json().catch(() => ({}));
+  document.getElementById("prompt-content").value = content || "";
+}
+async function savePrompt() {
+  const content = document.getElementById("prompt-content").value;
+  const r = await fetch("/api/admin/prompts/default", {method: "PUT", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({scene: "default", content, enabled: true})});
+  if (r.ok) alert("prompt 已保存"); else alert("保存失败");
 }
 function _renderList(elId, items, rowHtml, empty = "暂无") {
   const el = document.getElementById(elId);
@@ -746,31 +805,68 @@ async function delNameDict(id) { await fetch(`/api/admin/name-dict/${id}`, {meth
 // 业务规则
 async function loadRules() {
   const {rules = []} = await (await fetch("/api/admin/business-rules")).json().catch(() => ({}));
-  _renderList("br-list", rules, d =>
-    `<li><span class="li-text">${escapeHtml(d.category)} / ${escapeHtml(d.key)} = ${escapeHtml(d.value_json || "")}</span><button class="li-del" onclick="delRule(${d.id})">×</button></li>`);
+  _renderList("br-list", rules, d => {
+    const tag = d.scope === "table" ? `[表级:${escapeHtml(d.table_name || "")}]` : "[通用]";
+    return `<li><span class="li-text">${tag} ${escapeHtml(d.key)} = ${escapeHtml(d.value_json || "")}</span><button class="li-del" onclick="delRule(${d.id})">×</button></li>`;
+  });
 }
 async function addRule() {
-  const category = document.getElementById("br-category").value.trim();
+  const scope = document.getElementById("br-scope").value;
+  const table_name = scope === "table" ? document.getElementById("br-table").value.trim() : null;
   const key = document.getElementById("br-key").value.trim();
-  if (!category || !key) return alert("分类和键名必填");
+  if (!key) return alert("键名必填");
+  if (scope === "table" && !table_name) return alert("表级规则要填表名");
   await fetch("/api/admin/business-rules", {method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({category, key, value_json: document.getElementById("br-value").value.trim() || "{}"})});
+    body: JSON.stringify({scope, table_name, key, value_json: document.getElementById("br-value").value.trim() || "{}"})});
   await loadRules();
 }
 async function delRule(id) { await fetch(`/api/admin/business-rules/${id}`, {method: "DELETE"}); await loadRules(); }
-// SQL 模板（仅列表+删除）
-async function loadSqlTemplates() {
-  const data = await (await fetch("/api/admin/sql-templates")).json().catch(() => ({}));
-  const items = data.templates || data.items || [];
-  _renderList("st-list", items, d =>
-    `<li><span class="li-text">${escapeHtml(d.name || "")} <small>[ds=${d.datasource_id}]</small></span><button class="li-del" onclick="delTemplate(${d.id})">×</button></li>`);
+// SQL 模板（新建/编辑/删除，datasource 下拉）
+async function loadDsOptions() {
+  const {datasources = []} = await (await fetch("/api/admin/datasources")).json().catch(() => ({}));
+  const sel = document.getElementById("tpl-ds");
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">选数据源</option>' + datasources.map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join("");
+  if (cur) sel.value = cur;
 }
-async function delTemplate(id) { await fetch(`/api/admin/sql-templates/${id}`, {method: "DELETE"}); await loadSqlTemplates(); }
+async function loadSqlTemplates() {
+  const {templates = []} = await (await fetch("/api/admin/sql-templates")).json().catch(() => ({}));
+  _renderList("st-list", templates, d =>
+    `<li><span class="li-text"><b>${escapeHtml(d.name || "")}</b>${d.enabled === false ? " (停用)" : ""}</span>
+       <button class="llm-edit-btn" onclick="editTpl(${d.id})">编辑</button>
+       <button class="li-del" onclick="delTpl(${d.id})">×</button></li>`);
+}
+async function saveTpl() {
+  const id = document.getElementById("tpl-id").value;
+  const name = document.getElementById("tpl-name").value.trim();
+  const sql_template = document.getElementById("tpl-sql").value.trim();
+  if (!name || !sql_template) return alert("标题和 SQL 必填");
+  const body = {name, sql_template, enabled: true};
+  const url = "/api/admin/sql-templates" + (id ? `/${id}` : "");
+  const r = await fetch(url, {method: id ? "PUT" : "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  if (r.ok) { cancelTplEdit(); await loadSqlTemplates(); } else alert("保存失败");
+}
+async function editTpl(id) {
+  const {templates = []} = await (await fetch("/api/admin/sql-templates")).json().catch(() => ({}));
+  const t = templates.find(x => x.id === id);
+  if (!t) return;
+  document.getElementById("tpl-id").value = t.id;
+  document.getElementById("tpl-name").value = t.name || "";
+  document.getElementById("tpl-sql").value = t.sql_template || "";
+}
+function cancelTplEdit() {
+  ["tpl-id", "tpl-name", "tpl-sql"].forEach(i => document.getElementById(i).value = "");
+}
+async function delTpl(id) {
+  if (!confirm("删除该模板？")) return;
+  await fetch(`/api/admin/sql-templates/${id}`, {method: "DELETE"});
+  await loadSqlTemplates();
+}
 // 知识库
 async function loadKbDocs() {
   const {docs = []} = await (await fetch("/api/admin/knowledge/docs")).json().catch(() => ({}));
   _renderList("kb-list", docs, d =>
-    `<li><span class="li-text">${escapeHtml(d.name)} <small>[${d.category}·${d.chunk_count}段·${d.enabled ? "启用" : "停用"}]</small></span>
+    `<li><span class="li-text">${escapeHtml(d.name)} <small>[${d.chunk_count}段·${d.enabled ? "启用" : "停用"}]</small></span>
        <button class="li-toggle" onclick="toggleKb(${d.id}, ${!d.enabled})">${d.enabled ? "停用" : "启用"}</button>
        <button class="li-del" onclick="delKb(${d.id})">×</button></li>`);
 }
@@ -779,7 +875,6 @@ async function uploadKb() {
   if (!f) return alert("选文件");
   const fd = new FormData();
   fd.append("file", f);
-  fd.append("category", document.getElementById("kb-category").value);
   const r = await fetch("/api/admin/knowledge/upload", {method: "POST", body: fd});
   if (!r.ok) { const e = await r.json().catch(() => ({})); return alert("上传失败: " + (e.detail || r.status)); }
   await loadKbDocs();
@@ -788,34 +883,73 @@ async function delKb(id) { await fetch(`/api/admin/knowledge/docs/${id}`, {metho
 async function toggleKb(id, enabled) {
   await fetch(`/api/admin/knowledge/docs/${id}?enabled=${enabled}`, {method: "PUT"}); await loadKbDocs();
 }
-// 模型 & 限流
+// 模型 & 限流（列表 + 新建/编辑/删除/启停，同 purpose 可多个备用）
 async function loadLlm() {
-  const d = (await (await fetch("/api/admin/llm-config")).json().catch(() => ({}))).dynamic;
-  if (!d) return;
-  document.getElementById("llm-model").value = d.model || "";
-  document.getElementById("llm-base").value = d.base_url || "";
-  document.getElementById("llm-key").value = d.api_key || "";
-  document.getElementById("llm-protocol").value = d.protocol || "openai";
-  document.getElementById("llm-rpm").value = d.rpm_limit || "";
-  document.getElementById("llm-conc").value = d.concurrency || "";
-  document.getElementById("llm-embed").value = d.embedding_model || "";
+  const {configs = []} = await (await fetch("/api/admin/llm-config")).json().catch(() => ({}));
+  document.getElementById("llm-cards").innerHTML = configs.length ? configs.map(c => `
+    <div class="llm-row">
+      <span class="llm-tag llm-tag-${c.purpose}">${c.purpose}</span>
+      <b>${escapeHtml(c.id)}</b>
+      <span class="llm-info">${escapeHtml(c.model)} · ${escapeHtml(c.base_url)} ${c.enabled ? "" : "(停用)"}</span>
+      <button class="li-toggle" onclick="toggleLlm('${escapeHtml(c.id)}', ${c.enabled})">${c.enabled ? "停用" : "启用"}</button>
+      <button class="llm-edit-btn" onclick="editLlm('${escapeHtml(c.id)}')">编辑</button>
+      <button class="li-del" onclick="deleteLlm('${escapeHtml(c.id)}')">×</button>
+    </div>`).join("") : "<div class='placeholder'>暂无模型，点下方新建</div>";
 }
-async function saveLlm() {
+function _fillEditor(c) {
+  document.getElementById("llm-edit-id").value = c.id || "";
+  document.getElementById("llm-edit-purpose").value = c.purpose || "analysis";
+  document.getElementById("llm-edit-model").value = c.model || "";
+  document.getElementById("llm-edit-base").value = c.base_url || "";
+  document.getElementById("llm-edit-key").value = c.api_key || "";
+  document.getElementById("llm-edit-protocol").value = c.protocol || "openai";
+  document.getElementById("llm-edit-rpm").value = c.rpm_limit || "";
+  document.getElementById("llm-edit-conc").value = c.concurrency || "";
+  document.getElementById("llm-editor").style.display = "block";
+}
+function newLlm() {
+  _fillEditor({id: "", purpose: "analysis"});
+  document.getElementById("llm-edit-id").focus();
+}
+async function editLlm(id) {
+  const {configs = []} = await (await fetch("/api/admin/llm-config")).json().catch(() => ({}));
+  const c = configs.find(x => x.id === id);
+  if (c) _fillEditor(c);
+}
+function closeLlmEditor() { document.getElementById("llm-editor").style.display = "none"; }
+async function saveLlmEdit() {
+  const id = document.getElementById("llm-edit-id").value.trim();
+  if (!id) return alert("填配置ID（如 qwen-chat）");
   const num = v => { const n = parseInt(v); return isNaN(n) ? null : n; };
   const body = {
-    model: document.getElementById("llm-model").value.trim(),
-    base_url: document.getElementById("llm-base").value.trim(),
-    api_key: document.getElementById("llm-key").value.trim(),
-    protocol: document.getElementById("llm-protocol").value,
+    purpose: document.getElementById("llm-edit-purpose").value,
+    model: document.getElementById("llm-edit-model").value.trim(),
+    base_url: document.getElementById("llm-edit-base").value.trim(),
+    api_key: document.getElementById("llm-edit-key").value.trim(),
+    protocol: document.getElementById("llm-edit-protocol").value,
     temperature: 0.0, timeout: 60, max_context: 32000,
-    rpm_limit: num(document.getElementById("llm-rpm").value),
-    concurrency: num(document.getElementById("llm-conc").value),
-    embedding_model: document.getElementById("llm-embed").value.trim() || null,
+    rpm_limit: num(document.getElementById("llm-edit-rpm").value),
+    concurrency: num(document.getElementById("llm-edit-conc").value),
     enabled: true,
   };
   if (!body.model || !body.base_url) return alert("模型名和 base_url 必填");
-  const r = await fetch("/api/admin/llm-config", {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-  if (r.ok) alert("已保存（version " + (await r.json()).version + "）"); else alert("保存失败");
+  const r = await fetch(`/api/admin/llm-config/${encodeURIComponent(id)}`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  if (r.ok) { closeLlmEditor(); await loadLlm(); } else alert("保存失败");
+}
+async function toggleLlm(id, enabled) {
+  const {configs = []} = await (await fetch("/api/admin/llm-config")).json().catch(() => ({}));
+  const c = configs.find(x => x.id === id);
+  if (!c) return;
+  const body = {purpose: c.purpose, model: c.model, base_url: c.base_url, api_key: c.api_key,
+                protocol: c.protocol, temperature: c.temperature, timeout: c.timeout, max_context: c.max_context,
+                rpm_limit: c.rpm_limit, concurrency: c.concurrency, enabled: !enabled};
+  await fetch(`/api/admin/llm-config/${encodeURIComponent(id)}`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  await loadLlm();
+}
+async function deleteLlm(id) {
+  if (!confirm("删除该模型配置？")) return;
+  await fetch(`/api/admin/llm-config/${encodeURIComponent(id)}`, {method: "DELETE"});
+  await loadLlm();
 }
 
 let selectedDsId = null;
@@ -1130,7 +1264,7 @@ async function locateTable(dsId, schema, tableName) {
   selectedDsId = dsId;
   selectedSchema = schema;
   selectedTableName = tableName;
-  showTab("config");                                              // 切 tab（会 loadDatasources）
+  showSettings(true);                                             // 进设置页（默认数据源 tab + loadDatasources）
   // 等 ds 树渲染完（showTab 内 loadDatasources 是异步的，但它只渲染树，不展开目标源）
   // 用 requestAnimationFrame + 轮询等 ds-list 出现目标 ds 的节点
   const div = await waitForDsRow(dsId);

@@ -40,51 +40,57 @@ class LLMService:
     未配置时 _resolve_config 抛 RuntimeError。admin PUT 后调 reset_dynamic() 热更新。"""
 
     def __init__(self):
-        self._clients: dict[str, object] = {}   # protocol → client，按协议各自缓存
-        self._dynamic: dict | None = None  # 内存缓存（None=未加载）
-        # 限流（P2 主动节流，防撞网关限流）：配置加载后初始化；None=该维度不限
-        self._sem: asyncio.Semaphore | None = None        # 并发闸
-        self._req_times: deque = deque()                   # RPM 时间窗（最近请求的 monotonic 时间戳）
+        self._clients: dict[str, object] = {}   # purpose|protocol → client，按用途/协议各自缓存
+        self._dynamic: dict[str, dict] = {}      # 用途 → 配置缓存（analysis/embedding/attribution）
+        # 限流（P2 主动节流，防撞网关限流）：全局闸，按 analysis 用途的 rpm/concurrency 配置
+        self._sem: asyncio.Semaphore | None = None
+        self._req_times: deque = deque()
         self._rpm_limit: int | None = None
         self._concurrency: int | None = None
 
-    async def _load_dynamic(self) -> dict | None:
-        if self._dynamic is not None:
-            return self._dynamic
+    async def _load_dynamic(self, purpose: str = "analysis") -> dict | None:
+        if purpose in self._dynamic:
+            return self._dynamic[purpose]
         try:
             async with AsyncSessionFactory() as s:
-                row = await s.get(LlmConfigRow, "default")
-                if row is None or not row.enabled:
+                from sqlalchemy import select
+                # 按 purpose 取 enabled 的（同用途多个时取 version 最新），id 不再=用途
+                stmt = (select(LlmConfigRow).where(
+                            LlmConfigRow.purpose == purpose,
+                            LlmConfigRow.enabled.is_(True))
+                        .order_by(LlmConfigRow.version.desc()).limit(1))
+                row = (await s.execute(stmt)).scalar_one_or_none()
+                if row is None:
                     return None
-                self._dynamic = {
+                self._dynamic[purpose] = {
                     "model": row.model, "api_base": row.base_url,
                     "api_key": row.api_key, "temperature": row.temperature,
                     "timeout": row.timeout, "max_context": row.max_context,
                     "protocol": (row.protocol or "openai"),
                     "rpm_limit": row.rpm_limit, "concurrency": row.concurrency,
-                    "embedding_model": row.embedding_model,
                 }
-                # 按 rpm_limit/concurrency 重建限流器（配置热更新联动）
-                self._apply_rate_limit(row.rpm_limit, row.concurrency)
+                # 限流器全局：按 analysis 用途的 rpm/concurrency 建（主 chat 流量）
+                if purpose == "analysis":
+                    self._apply_rate_limit(row.rpm_limit, row.concurrency)
         except Exception as e:
-            log.warning("读 LLM 配置失败: %s", e)
+            log.warning("读 LLM 配置失败(%s): %s", purpose, e)
             return None
-        return self._dynamic
+        return self._dynamic[purpose]
 
     def reset_dynamic(self) -> None:
-        """admin PUT 后调用：清缓存 + 置空所有 client + 清限流器，下次按最新配置重建。"""
-        self._dynamic = None
+        """admin PUT 后调用：清所有用途缓存 + client + 限流器，下次按最新配置重建。"""
+        self._dynamic.clear()
         self._clients.clear()
         self._sem = None
         self._req_times.clear()
         self._rpm_limit = None
         self._concurrency = None
 
-    async def _resolve_config(self) -> LLMConfig:
-        dyn = await self._load_dynamic()
+    async def _resolve_config(self, purpose: str = "analysis") -> LLMConfig:
+        dyn = await self._load_dynamic(purpose)
         if not dyn:
             raise RuntimeError(
-                "LLM 未配置：请先 PUT /api/admin/llm-config 存 model/base_url/api_key")
+                f"LLM 未配置[{purpose}]：请在管理后台配 {purpose} 用途的 model/base_url/api_key")
         return LLMConfig(**dyn)
 
     def _get_client(self, cfg: LLMConfig):
@@ -103,13 +109,12 @@ class LLMService:
         self._clients[proto] = client
         return client
 
-    async def chat_stream(self, messages: list[dict], tools: list | None = None) -> AsyncIterator[_Chunk]:
-        """流式生成，yield _Chunk（content 文本片段 + tool_call 增量）。
-        loop 边收 content 发 answer_delta（打字机），流末 collect tool_calls。
-        入口先做主动限速（RPM 窗 + 并发闸，None=不限）；建立 stream 阶段可恢复错误
-        （限流/超时/网关抖动）指数退避 + jitter + 尊重 retry-after 重试；
+    async def chat_stream(self, messages: list[dict], tools: list | None = None,
+                          purpose: str = "analysis") -> AsyncIterator[_Chunk]:
+        """流式生成，yield _Chunk。purpose=用途（analysis 对话查询/embedding 向量/attribution 归因），
+        按用途取配置。入口主动限速（RPM 窗+并发闸）；建立 stream 阶段可恢复错误指数退避+jitter+retry-after；
         流中途断不重试（避免重复输出），交 loop 错误自愈。"""
-        cfg = await self._resolve_config()
+        cfg = await self._resolve_config(purpose)
         proto = (cfg.protocol or "openai").lower()
         await self._throttle()              # RPM 时间窗：满了先 sleep（并发闸在下方 async with）
         # 并发闸：信号量在 async gen 里用 async with 包裹分发迭代；None 则不限
@@ -242,11 +247,12 @@ class LLMService:
         async for ch in _gen():
             yield ch
 
-    async def chat(self, messages: list[dict], tools: list | None = None):
-        """非流式一次调用（收集 chat_stream 成 _Resp）。备用/测试用。"""
+    async def chat(self, messages: list[dict], tools: list | None = None,
+                   purpose: str = "analysis"):
+        """非流式一次调用（收集 chat_stream 成 _Resp）。备用/测试用；do_attribution 归因整合调 purpose='attribution'。"""
         content = ""
         tc_acc: dict = {}
-        async for chunk in self.chat_stream(messages, tools):
+        async for chunk in self.chat_stream(messages, tools, purpose):
             if chunk.content:
                 content += chunk.content
             for tc in chunk.tool_call_delta:
@@ -280,13 +286,11 @@ class LLMService:
         用 cfg.embedding_model。复用 _call_with_retry 限流重试。维度不符抛清晰错误（防 pgvector 插入模糊报错）。"""
         if not texts:
             return []
-        cfg = await self._resolve_config()
-        if not cfg.embedding_model:
-            raise RuntimeError("embedding 模型未配置：PUT /api/admin/llm-config 设 embedding_model")
+        cfg = await self._resolve_config("embedding")
         client = self._embed_client(cfg)
 
         async def _create():
-            return await client.embeddings.create(model=cfg.embedding_model, input=texts)
+            return await client.embeddings.create(model=cfg.model, input=texts)
         resp = await _call_with_retry(_create)
         vecs = [d.embedding for d in resp.data]
         if vecs and len(vecs[0]) != EMBEDDING_DIM:

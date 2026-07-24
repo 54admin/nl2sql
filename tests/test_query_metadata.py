@@ -146,19 +146,15 @@ async def test_handler_no_datasource(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_metadata_includes_sql_templates(db):
-    """P2：已配 SQL 模板随 metadata 返回，供 LLM 套用。"""
+async def test_query_metadata_excludes_templates(db):
+    """SQL 模板进 system_prompt（orchestrator 注入），query_metadata 不再带 templates 字段。"""
     from src.storage.models import SqlTemplate
     async with AsyncSessionFactory() as s:
         s.add(SqlTemplate(datasource_id=db, name="发电量排名",
                           trigger_keywords="发电量,排名",
-                          trigger_semantics="按发电量排名",
                           sql_template="SELECT * FROM fact_power ORDER BY kwh DESC LIMIT :n",
-                          params_json='{"n": "前N名"}', enabled=True))
+                          enabled=True))
         await s.commit()
     res = await query_metadata({"datasource_id": db}, type("C", (), {"session_id": "s"})(), None)
     parsed = json.loads(res.summary)
-    assert parsed["templates"][0]["name"] == "发电量排名"
-    assert "发电量" in parsed["templates"][0]["trigger_keywords"]
-    assert "ORDER BY" in parsed["templates"][0]["sql_template"]
-    assert parsed["templates"][0]["params"]["n"] == "前N名"
+    assert "templates" not in parsed   # SQL 模板走 system prompt，不附 query_metadata
