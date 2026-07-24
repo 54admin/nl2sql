@@ -113,19 +113,6 @@ class QueryResult(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), comment="创建时间")
 
 
-class AppConfigRow(Base):
-    """通用动态配置 KV（页面配置模型基础）。
-    llm_config / prompts 本 plan 选独立结构化表，此表作为通用 escape hatch：
-    未来任意 key/value 配置（feature flag、阈值、开关）可走此表。"""
-    __tablename__ = "app_config"
-    __table_args__ = {"comment": "通用动态配置KV（feature flag/阈值/开关兜底）"}
-    key: Mapped[str] = mapped_column(String(64), primary_key=True, comment="配置键")
-    value_json: Mapped[str] = mapped_column(Text, comment="配置值（JSON）")
-    version: Mapped[int] = mapped_column(default=1, comment="版本号")
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
-                                                 onupdate=func.now(), comment="更新时间")
-
-
 class LlmConfigRow(Base):
     """动态 LLM 配置（admin 后台可改，热更新）。按用途 id 多行 + 启停：
     analysis（对话查询 chat）/ embedding（知识库向量）/ attribution（归因推理）。

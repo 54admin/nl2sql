@@ -57,6 +57,7 @@ _PG_MIGRATIONS = [
     # audit_traces 补成败标记+最终答案列（细粒度统计用）；audit_events 是新表 create_all 建。
     "ALTER TABLE audit_traces ADD COLUMN IF NOT EXISTS success BOOLEAN",
     "ALTER TABLE audit_traces ADD COLUMN IF NOT EXISTS final_answer TEXT",
+    "DROP TABLE IF EXISTS app_config",
     # 业务规则分层（scope 通用/表级 + table_name 关联）
     "ALTER TABLE business_rules ADD COLUMN IF NOT EXISTS scope VARCHAR(16) DEFAULT 'global'",
     "ALTER TABLE business_rules ADD COLUMN IF NOT EXISTS table_name VARCHAR(128)",

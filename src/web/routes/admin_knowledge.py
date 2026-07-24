@@ -7,6 +7,8 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from src.knowledge.parsing import parse_to_text
 from src.knowledge.store import get_knowledge_store
+from src.storage.models import KnowledgeChunk
+from src.storage.pg_client import AsyncSessionFactory
 
 
 def build_knowledge_router() -> APIRouter:
@@ -15,6 +17,14 @@ def build_knowledge_router() -> APIRouter:
     @router.get("/api/admin/knowledge/docs")
     async def list_docs(category: str | None = None) -> dict:
         return {"docs": await get_knowledge_store().list_documents(category)}
+
+    @router.get("/api/admin/knowledge/docs/{doc_id}/chunks")
+    async def list_chunks(doc_id: int) -> dict:
+        """查看某文档的分段内容（点进去看 chunks）。"""
+        async with AsyncSessionFactory() as s:
+            rows = (await s.execute(KnowledgeChunk.__table__.select().where(
+                KnowledgeChunk.doc_id == doc_id).order_by(KnowledgeChunk.chunk_index))).all()
+        return {"chunks": [{"index": r.chunk_index, "content": r.content} for r in rows]}
 
     @router.post("/api/admin/knowledge/upload")
     async def upload(file: UploadFile = File(...),

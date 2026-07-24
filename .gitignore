@@ -4,3 +4,8 @@ __pycache__/
 *.db
 .env
 .pytest_cache/
+# 临时灌库目录（转换/上传产出的 txt，不入库）
+kb-insight/
+kb-txt/
+kb-xlsx-txt/
+kb-csv/

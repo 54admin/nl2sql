@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
 from src.datasource.metadata_sync import fetch_table_columns
-from src.storage.models import BusinessRule, MetadataTable, SqlTemplate, TableRelation
+from src.storage.models import BusinessRule, MetadataTable, TableRelation
 from src.storage.pg_client import AsyncSessionFactory
 
 
@@ -50,22 +50,6 @@ async def _list_relations(datasource_id: int) -> list[dict]:
             "join_type": r.join_type,
             "business_note": r.business_note or "",
         } for r in rels]
-
-
-async def _list_sql_templates(datasource_id: int) -> list[dict]:
-    """读已配 SQL 模板（sql_templates，enabled=True）。供 LLM 套用/参考。
-    ponytail: 只把模板喂给 LLM，:param 占位由 LLM 填值；自动命中即用留 P2+。"""
-    async with AsyncSessionFactory() as s:
-        tpls = (await s.execute(SqlTemplate.__table__.select().where(
-            SqlTemplate.datasource_id == datasource_id,
-            SqlTemplate.enabled.is_(True)))).all()
-    return [{
-        "name": t.name,
-        "trigger_keywords": [k for k in (t.trigger_keywords or "").split(",") if k],
-        "trigger_semantics": t.trigger_semantics or "",
-        "sql_template": t.sql_template,
-        "params": json.loads(t.params_json) if t.params_json else None,
-    } for t in tpls]
 
 
 async def _list_table_rules() -> dict[str, list[str]]:

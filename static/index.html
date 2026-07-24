@@ -7,7 +7,7 @@
 <style>
   * { box-sizing: border-box; }
   body { font-family: -apple-system, "PingFang SC", sans-serif; margin: 0; background: #f0f2f5; }
-  #app { max-width: 1400px; margin: 0 auto; display: flex; flex-direction: column; height: 100vh; }
+  #app { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; height: 100vh; }
   header { background: #fff; padding: 12px 16px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
   header h1 { font-size: 16px; margin: 0; color: #333; }
   #mode { padding: 4px 8px; border: 1px solid #ccc; border-radius: 6px; }
@@ -43,7 +43,7 @@
   .sess-item:hover .s-del { display: inline; }
   .sess-item .s-edit { display: none; background: none; border: none; color: #888; cursor: pointer; font-size: 12px; padding: 0 2px; }
   .sess-item:hover .s-edit { display: inline; }
-  #chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; max-width: 760px; margin: 0 auto; }
+  #chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   #chat-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   #config-panel { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
 
@@ -107,7 +107,6 @@
   #btn-sync:disabled { opacity: 0.6; cursor: not-allowed; }
   /* ===== 管理后台（name-dict/规则/模板/知识库/模型限流） ===== */
   #admin-panel { padding: 12px; overflow: auto; flex: 1; }
-  .admin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; }
   /* ===== 设置页子标签切换 ===== */
   .settings-pane { flex: 1; min-height: 0; }
   .settings-panels { padding: 12px; overflow: auto; flex: 1; }
@@ -128,20 +127,30 @@
   .admin-list li .li-text { flex: 1; word-break: break-all; line-height: 1.4; }
   .admin-list li .li-del { background: none; border: none; color: #c62828; cursor: pointer; font-size: 15px; padding: 0 4px; }
   .admin-list li .li-toggle { background: #fafafa; border: 1px solid #ccc; border-radius: 3px; cursor: pointer; font-size: 11px; padding: 2px 8px; }
-  .llm-sub { border: 1px solid #e8e8e8; border-radius: 6px; padding: 10px; margin-bottom: 10px; }
-  .llm-sub-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; }
-  .llm-sub input, .llm-sub select { width: 100%; padding: 5px 8px; border: 1px solid #d0d0d0; border-radius: 4px; font-size: 12px; margin-bottom: 6px; }
-  .llm-sub button { padding: 5px 14px; background: #4caf50; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
-  .llm-row { display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-bottom: 1px solid #f0f0f0; font-size: 12px; flex-wrap: wrap; }
-  .llm-row .llm-info { flex: 1; color: #555; min-width: 150px; word-break: break-all; }
+  /* ===== 后台表格列表（带表头） ===== */
+  .admin-table { width: 100%; border-collapse: collapse; font-size: 12px; list-style: none; }
+  .admin-table th { background: #f5f5f5; text-align: left; padding: 8px 10px; border-bottom: 2px solid #e0e0e0; font-weight: 600; color: #555; white-space: nowrap; }
+  .admin-table td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; vertical-align: top; word-break: break-all; }
+  .admin-table tr:hover td { background: #fafafa; }
+  .admin-table .col-op { white-space: nowrap; }
+  .admin-table .llm-edit-btn { background: #fafafa; border: 1px solid #ccc; border-radius: 3px; cursor: pointer; font-size: 11px; padding: 2px 8px; margin-right: 4px; }
+  /* ===== 通用弹框（后台 CRUD 新增/编辑） ===== */
+  #admin-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 1000; display: none; justify-content: center; align-items: center; }
+  #admin-modal.show { display: flex; }
+  .admin-modal-box { background: #fff; border-radius: 8px; padding: 20px; width: 1100px; max-width: 96vw; min-height: 75vh; max-height: 92vh; display: flex; flex-direction: column; }
+  #admin-modal-body { flex: 1; overflow-y: auto; min-height: 0; margin-bottom: 8px; }
+  .admin-modal-box h3 { margin: 0 0 12px; font-size: 15px; }
+  .admin-modal-box input, .admin-modal-box select, .admin-modal-box textarea { width: 100%; padding: 6px 8px; border: 1px solid #d0d0d0; border-radius: 4px; font-size: 13px; margin-bottom: 8px; box-sizing: border-box; }
+  .admin-modal-btns { margin-top: 14px; text-align: right; }
+  .admin-modal-btns button { padding: 6px 18px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; margin-left: 8px; }
+  .admin-modal-save { background: #4caf50; color: #fff; }
+  .admin-modal-cancel { background: #999; color: #fff; }
+  .add-btn { float: right; padding: 4px 12px; background: #1976d2; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
   .llm-tag { font-size: 10px; padding: 2px 8px; border-radius: 10px; color: #fff; }
   .llm-tag-analysis { background: #1976d2; }
   .llm-tag-embedding { background: #7b1fa2; }
   .llm-tag-attribution { background: #e65100; }
   .llm-edit-btn { background: #fafafa; border: 1px solid #ccc; border-radius: 3px; cursor: pointer; font-size: 11px; padding: 2px 8px; }
-  .llm-new { margin-top: 8px; padding: 6px 14px; background: #1976d2; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
-  #llm-editor input, #llm-editor select { width: 100%; padding: 5px 8px; border: 1px solid #d0d0d0; border-radius: 4px; font-size: 12px; margin-bottom: 6px; }
-  #llm-editor button { padding: 5px 14px; background: #4caf50; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; margin-right: 6px; }
   #btn-dashboard { padding: 4px 10px; font-size: 12px; border: 1px solid #1976d2; background: #fff; color: #1976d2; border-radius: 4px; cursor: pointer; white-space: nowrap; }
   #btn-dashboard:hover { background: #e3f2fd; }
   #table-search { width: 100%; padding: 5px 8px; border: 1px solid #d0d0d0; border-radius: 4px; font-size: 12px; }
@@ -321,61 +330,24 @@
         <p class="placeholder" style="font-size:11px;color:#999;margin-top:6px">default 场景的 system prompt；空保存=恢复内置兜底（清空 default 记录）。</p>
       </section>
       <section class="admin-card stab-panel" id="stab-namedict">
-        <h3>名称纠错字典</h3>
-        <div class="admin-form">
-          <input id="nd-alias" placeholder="别名/错写">
-          <input id="nd-standard" placeholder="标准名">
-          <select id="nd-category"><option value="table">表</option><option value="column">列</option><option value="metric">指标</option></select>
-          <button onclick="addNameDict()">添加</button>
-        </div>
+        <h3>名称纠错字典 <button class="add-btn" onclick="openNdModal()">+ 新增</button></h3>
         <ul id="nd-list" class="admin-list"></ul>
       </section>
       <section class="admin-card stab-panel" id="stab-rules">
-        <h3>业务规则</h3>
-        <div class="admin-form">
-          <select id="br-scope"><option value="global">通用</option><option value="table">表级</option></select>
-          <input id="br-table" placeholder="表名(表级填，如 fact_power)">
-          <input id="br-key" placeholder="键名">
-          <input id="br-value" placeholder='值(如 万kWh)'>
-          <button onclick="addRule()">添加</button>
-        </div>
+        <h3>业务规则 <button class="add-btn" onclick="openRuleModal()">+ 新增</button></h3>
         <ul id="br-list" class="admin-list"></ul>
       </section>
       <section class="admin-card stab-panel" id="stab-templates">
-        <h3>SQL 模板（复杂查询样板，进 system prompt 给 LLM 参考）</h3>
-        <input id="tpl-id" type="hidden">
-        <input id="tpl-name" placeholder="标题（如 同比环比 / 行转列排名）" style="width:100%;padding:6px 8px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px;margin-bottom:6px">
-        <textarea id="tpl-sql" placeholder="SQL 样板（同比/环比/行转列等复杂 SQL，含 :param 占位）" rows="8" style="width:100%;font-family:monospace;font-size:12px;border:1px solid #d0d0d0;border-radius:4px;padding:8px;margin-bottom:6px"></textarea>
-        <button onclick="saveTpl()">保存</button>
-        <button onclick="cancelTplEdit()" style="background:#999">取消</button>
+        <h3>SQL 模板（复杂查询样板） <button class="add-btn" onclick="openTplModal()">+ 新增</button></h3>
         <ul id="st-list" class="admin-list"></ul>
       </section>
       <section class="admin-card stab-panel" id="stab-knowledge">
-        <h3>知识库</h3>
-        <div class="admin-form">
-          <input id="kb-file" type="file" accept=".txt,.md,.csv,.docx,.xlsx">
-          <button onclick="uploadKb()">上传</button>
-        </div>
-        <p class="placeholder" style="font-size:11px;color:#999;margin-bottom:8px">支持 txt/md/csv(会议洞察)/docx/xlsx，后端自动解析分段</p>
-        <ul id="kb-list" class="admin-list"></ul>
+        <h3>知识库 <button class="add-btn" onclick="openKbModal()">+ 上传</button></h3>
+        <div id="kb-list"></div>
       </section>
       <section class="admin-card stab-panel" id="stab-models">
-        <h3>模型 &amp; 限流（按用途，可新建多个备用）</h3>
+        <h3>模型 &amp; 限流 <button class="add-btn" onclick="openLlmModal()">+ 新增</button></h3>
         <div id="llm-cards"></div>
-        <button class="llm-new" onclick="newLlm()">+ 新建模型</button>
-        <div id="llm-editor" style="display:none;margin-top:10px;border-top:1px solid #eee;padding-top:10px">
-          <input id="llm-edit-id" placeholder="配置ID（如 qwen-chat）">
-          <select id="llm-edit-purpose"><option value="analysis">analysis 分析</option><option value="embedding">embedding 向量</option><option value="attribution">attribution 归因</option></select>
-          <input id="llm-edit-model" placeholder="模型名">
-          <input id="llm-edit-base" placeholder="base_url">
-          <input id="llm-edit-key" placeholder="api_key">
-          <select id="llm-edit-protocol"><option value="openai">openai</option><option value="anthropic">anthropic</option></select>
-          <input id="llm-edit-rpm" type="number" placeholder="RPM(空=不限)">
-          <input id="llm-edit-conc" type="number" placeholder="并发(空=不限)">
-          <button onclick="saveLlmEdit()">保存</button>
-          <button onclick="closeLlmEditor()" style="background:#999">取消</button>
-        </div>
-        <p class="placeholder" style="font-size:11px;color:#999;margin-top:8px">同用途多个时取启用的最新版；限流 None=不限。</p>
       </section>
     </div>
   </div>
@@ -402,6 +374,16 @@
     <h3>总览 — 数据源 / 库 / 勾选表</h3>
     <div id="dash-content"></div>
     <button id="dash-close" style="margin-top:12px;padding:8px;background:#eee;border:none;border-radius:6px;cursor:pointer;width:100%">关闭</button>
+  </div>
+</div>
+<div id="admin-modal">
+  <div class="admin-modal-box">
+    <h3 id="admin-modal-title"></h3>
+    <div id="admin-modal-body"></div>
+    <div class="admin-modal-btns">
+      <button class="admin-modal-save" id="admin-modal-save">保存</button>
+      <button class="admin-modal-cancel" onclick="closeAdminModal()">取消</button>
+    </div>
   </div>
 </div>
 <script>
@@ -748,6 +730,17 @@ input.addEventListener("keydown", e => {
 });
 
 // ===== 配置页：DBeaver 层级导航（数据源 > 库 > 表/视图 > 字段）=====
+function openAdminModal(title, bodyHTML, onSave) {
+  document.getElementById("admin-modal-title").textContent = title;
+  document.getElementById("admin-modal-body").innerHTML = bodyHTML;
+  const saveBtn = document.getElementById("admin-modal-save");
+  saveBtn.style.display = onSave ? "" : "none";   // 查看类（onSave=null）隐藏保存按钮
+  saveBtn.onclick = onSave || (() => {});
+  document.getElementById("admin-modal").classList.add("show");
+}
+function closeAdminModal() {
+  document.getElementById("admin-modal").classList.remove("show");
+}
 function showSettings(enter) {
   document.getElementById("chat-panel").style.display = enter ? "none" : "flex";
   document.getElementById("chat-nav").style.display = enter ? "none" : "block";
@@ -768,9 +761,6 @@ function showSettingsTab(tab) {
 }
 
 // ===== 管理后台：name-dict / 业务规则 / SQL模板 / 知识库 / 模型限流 =====
-async function loadAdmin() {
-  await Promise.all([loadPrompt(), loadNameDict(), loadRules(), loadSqlTemplates(), loadKbDocs(), loadLlm()]);
-}
 async function loadPrompt() {
   const r = await fetch("/api/admin/prompts/default");
   const {content} = await r.json().catch(() => ({}));
@@ -782,80 +772,110 @@ async function savePrompt() {
     body: JSON.stringify({scene: "default", content, enabled: true})});
   if (r.ok) alert("prompt 已保存"); else alert("保存失败");
 }
-function _renderList(elId, items, rowHtml, empty = "暂无") {
+function _renderTable(elId, headers, rows, empty = "暂无") {
   const el = document.getElementById(elId);
-  el.innerHTML = items.length ? items.map(rowHtml).join("") : `<li><span class="placeholder">${empty}</span></li>`;
+  el.innerHTML = `<table class="admin-table"><thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}<th style="width:130px">操作</th></tr></thead><tbody>${
+    rows.length ? rows.join("") : `<tr><td colspan="${headers.length + 1}" style="text-align:center;padding:20px;color:#999">${empty}</td></tr>`
+  }</tbody></table>`;
 }
 // 名称纠错字典
 async function loadNameDict() {
   const {items = []} = await (await fetch("/api/admin/name-dict")).json().catch(() => ({}));
-  _renderList("nd-list", items, d =>
-    `<li><span class="li-text">${escapeHtml(d.alias)} → ${escapeHtml(d.standard)} <small>[${d.category}]</small></span><button class="li-del" onclick="delNameDict(${d.id})">×</button></li>`);
+  _renderTable("nd-list", ["别名/错写", "标准名", "类别"], items.map(d =>
+    `<tr><td>${escapeHtml(d.alias)}</td><td>${escapeHtml(d.standard)}</td><td>${d.category}</td>
+      <td class="col-op"><button class="llm-edit-btn" onclick="openNdModal(${d.id})">编辑</button><button class="li-del" onclick="delNameDict(${d.id})">×</button></td></tr>`));
 }
-async function addNameDict() {
-  const alias = document.getElementById("nd-alias").value.trim();
-  const standard = document.getElementById("nd-standard").value.trim();
-  if (!alias || !standard) return alert("别名和标准名都要填");
-  await fetch("/api/admin/name-dict", {method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({alias, standard, category: document.getElementById("nd-category").value})});
-  document.getElementById("nd-alias").value = ""; document.getElementById("nd-standard").value = "";
-  await loadNameDict();
+function _ndFormHTML(d) {
+  d = d || {};
+  return `<input id="nm-alias" placeholder="别名/错写（用户可能输的）" value="${escapeHtml(d.alias||'')}">
+    <input id="nm-standard" placeholder="标准名（纠成这个）" value="${escapeHtml(d.standard||'')}">
+    <select id="nm-category"><option value="table" ${d.category==='table'?'selected':''}>表</option><option value="column" ${d.category==='column'?'selected':''}>列</option><option value="metric" ${d.category==='metric'?'selected':''}>指标</option></select>`;
+}
+async function openNdModal(id) {
+  let d = {};
+  if (id != null) {
+    const {items = []} = await (await fetch("/api/admin/name-dict")).json().catch(() => ({}));
+    d = items.find(x => x.id === id) || {};
+  }
+  openAdminModal(id != null ? "编辑名称纠错" : "新增名称纠错", _ndFormHTML(d), () => saveNdFromModal(id));
+}
+async function saveNdFromModal(id) {
+  const alias = document.getElementById("nm-alias").value.trim();
+  const standard = document.getElementById("nm-standard").value.trim();
+  if (!alias || !standard) return alert("别名和标准名必填");
+  const body = {alias, standard, category: document.getElementById("nm-category").value, enabled: true};
+  const url = "/api/admin/name-dict" + (id != null ? `/${id}` : "");
+  const r = await fetch(url, {method: id != null ? "PUT" : "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  if (r.ok) { closeAdminModal(); await loadNameDict(); } else alert("保存失败");
 }
 async function delNameDict(id) { await fetch(`/api/admin/name-dict/${id}`, {method: "DELETE"}); await loadNameDict(); }
 // 业务规则
 async function loadRules() {
   const {rules = []} = await (await fetch("/api/admin/business-rules")).json().catch(() => ({}));
-  _renderList("br-list", rules, d => {
-    const tag = d.scope === "table" ? `[表级:${escapeHtml(d.table_name || "")}]` : "[通用]";
-    return `<li><span class="li-text">${tag} ${escapeHtml(d.key)} = ${escapeHtml(d.value_json || "")}</span><button class="li-del" onclick="delRule(${d.id})">×</button></li>`;
-  });
+  _renderTable("br-list", ["作用域", "名称", "内容"], rules.map(d => {
+    const tag = d.scope === "table" ? `表级：${escapeHtml(d.table_name || "")}` : "通用";
+    return `<tr><td>${tag}</td><td>${escapeHtml(d.key)}</td><td>${escapeHtml(d.value_json || "")}</td>
+      <td class="col-op"><button class="llm-edit-btn" onclick="openRuleModal(${d.id})">编辑</button><button class="li-del" onclick="delRule(${d.id})">×</button></td></tr>`;
+  }));
 }
-async function addRule() {
-  const scope = document.getElementById("br-scope").value;
-  const table_name = scope === "table" ? document.getElementById("br-table").value.trim() : null;
-  const key = document.getElementById("br-key").value.trim();
+function _ruleFormHTML(r) {
+  r = r || {};
+  const scope = r.scope || "global";
+  const val = (r.value_json || "").replace(/^"|"$/g, "");
+  return `<select id="rm-scope" onchange="document.getElementById('rm-table-row').style.display=this.value==='table'?'block':'none'"><option value="global" ${scope==='global'?'selected':''}>通用（全局，进 system prompt）</option><option value="table" ${scope==='table'?'selected':''}>表级（关联某张表）</option></select>
+    <div id="rm-table-row" style="display:${scope==='table'?'block':'none'}"><input id="rm-table" placeholder="表全限定名（如 fact_power）" value="${escapeHtml(r.table_name||'')}"></div>
+    <input id="rm-key" placeholder="名称（如 发电量单位）" value="${escapeHtml(r.key||'')}">
+    <input id="rm-value" placeholder='内容（如 万kWh）' value="${escapeHtml(val)}">`;
+}
+async function openRuleModal(id) {
+  let r = {};
+  if (id != null) {
+    const {rules = []} = await (await fetch("/api/admin/business-rules")).json().catch(() => ({}));
+    r = rules.find(x => x.id === id) || {};
+  }
+  openAdminModal(id != null ? "编辑业务规则" : "新增业务规则", _ruleFormHTML(r), () => saveRuleFromModal(id));
+}
+async function saveRuleFromModal(id) {
+  const scope = document.getElementById("rm-scope").value;
+  const table_name = scope === "table" ? document.getElementById("rm-table").value.trim() : null;
+  const key = document.getElementById("rm-key").value.trim();
+  const value = document.getElementById("rm-value").value.trim();
   if (!key) return alert("键名必填");
   if (scope === "table" && !table_name) return alert("表级规则要填表名");
-  await fetch("/api/admin/business-rules", {method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({scope, table_name, key, value_json: document.getElementById("br-value").value.trim() || "{}"})});
-  await loadRules();
+  const body = {scope, table_name, key, value_json: value || "{}", enabled: true};
+  const url = "/api/admin/business-rules" + (id != null ? `/${id}` : "");
+  const r = await fetch(url, {method: id != null ? "PUT" : "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  if (r.ok) { closeAdminModal(); await loadRules(); } else alert("保存失败");
 }
 async function delRule(id) { await fetch(`/api/admin/business-rules/${id}`, {method: "DELETE"}); await loadRules(); }
-// SQL 模板（新建/编辑/删除，datasource 下拉）
-async function loadDsOptions() {
-  const {datasources = []} = await (await fetch("/api/admin/datasources")).json().catch(() => ({}));
-  const sel = document.getElementById("tpl-ds");
-  const cur = sel.value;
-  sel.innerHTML = '<option value="">选数据源</option>' + datasources.map(d => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join("");
-  if (cur) sel.value = cur;
-}
+// SQL 模板（新建/编辑/删除弹框）
 async function loadSqlTemplates() {
   const {templates = []} = await (await fetch("/api/admin/sql-templates")).json().catch(() => ({}));
-  _renderList("st-list", templates, d =>
-    `<li><span class="li-text"><b>${escapeHtml(d.name || "")}</b>${d.enabled === false ? " (停用)" : ""}</span>
-       <button class="llm-edit-btn" onclick="editTpl(${d.id})">编辑</button>
-       <button class="li-del" onclick="delTpl(${d.id})">×</button></li>`);
+  _renderTable("st-list", ["标题"], templates.map(d =>
+    `<tr><td><b>${escapeHtml(d.name || "")}</b>${d.enabled === false ? " (停用)" : ""}</td>
+      <td class="col-op"><button class="llm-edit-btn" onclick="openTplModal(${d.id})">编辑</button><button class="li-del" onclick="delTpl(${d.id})">×</button></td></tr>`));
 }
-async function saveTpl() {
-  const id = document.getElementById("tpl-id").value;
-  const name = document.getElementById("tpl-name").value.trim();
-  const sql_template = document.getElementById("tpl-sql").value.trim();
+function _tplFormHTML(t) {
+  t = t || {};
+  return `<input id="tm-name" placeholder="标题（如 同比环比 / 行转列排名）" value="${escapeHtml(t.name||'')}">
+    <textarea id="tm-sql" placeholder="SQL 样板（含 :param 占位）" style="height:55vh;font-family:monospace;font-size:13px">${escapeHtml(t.sql_template||'')}</textarea>`;
+}
+async function openTplModal(id) {
+  let t = {};
+  if (id != null) {
+    const {templates = []} = await (await fetch("/api/admin/sql-templates")).json().catch(() => ({}));
+    t = templates.find(x => x.id === id) || {};
+  }
+  openAdminModal(id != null ? "编辑 SQL 模板" : "新增 SQL 模板", _tplFormHTML(t), () => saveTplFromModal(id));
+}
+async function saveTplFromModal(id) {
+  const name = document.getElementById("tm-name").value.trim();
+  const sql_template = document.getElementById("tm-sql").value.trim();
   if (!name || !sql_template) return alert("标题和 SQL 必填");
   const body = {name, sql_template, enabled: true};
-  const url = "/api/admin/sql-templates" + (id ? `/${id}` : "");
-  const r = await fetch(url, {method: id ? "PUT" : "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-  if (r.ok) { cancelTplEdit(); await loadSqlTemplates(); } else alert("保存失败");
-}
-async function editTpl(id) {
-  const {templates = []} = await (await fetch("/api/admin/sql-templates")).json().catch(() => ({}));
-  const t = templates.find(x => x.id === id);
-  if (!t) return;
-  document.getElementById("tpl-id").value = t.id;
-  document.getElementById("tpl-name").value = t.name || "";
-  document.getElementById("tpl-sql").value = t.sql_template || "";
-}
-function cancelTplEdit() {
-  ["tpl-id", "tpl-name", "tpl-sql"].forEach(i => document.getElementById(i).value = "");
+  const url = "/api/admin/sql-templates" + (id != null ? `/${id}` : "");
+  const r = await fetch(url, {method: id != null ? "PUT" : "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  if (r.ok) { closeAdminModal(); await loadSqlTemplates(); } else alert("保存失败");
 }
 async function delTpl(id) {
   if (!confirm("删除该模板？")) return;
@@ -865,76 +885,80 @@ async function delTpl(id) {
 // 知识库
 async function loadKbDocs() {
   const {docs = []} = await (await fetch("/api/admin/knowledge/docs")).json().catch(() => ({}));
-  _renderList("kb-list", docs, d =>
-    `<li><span class="li-text">${escapeHtml(d.name)} <small>[${d.chunk_count}段·${d.enabled ? "启用" : "停用"}]</small></span>
-       <button class="li-toggle" onclick="toggleKb(${d.id}, ${!d.enabled})">${d.enabled ? "停用" : "启用"}</button>
-       <button class="li-del" onclick="delKb(${d.id})">×</button></li>`);
+  _renderTable("kb-list", ["文件名", "分段数", "状态"], docs.map(d =>
+    `<tr><td><a onclick="openKbViewModal(${d.id})" style="color:#1976d2;cursor:pointer;text-decoration:underline">${escapeHtml(d.name)}</a></td><td>${d.chunk_count}</td><td>${d.enabled ? "启用" : "停用"}</td>
+      <td class="col-op"><button class="llm-edit-btn" onclick="openKbViewModal(${d.id})">查看</button><button class="llm-edit-btn" onclick="toggleKb(${d.id}, ${!d.enabled})">${d.enabled ? "停用" : "启用"}</button><button class="li-del" onclick="delKb(${d.id})">×</button></td></tr>`));
 }
-async function uploadKb() {
-  const f = document.getElementById("kb-file").files[0];
+async function openKbViewModal(docId) {
+  const {chunks = []} = await (await fetch(`/api/admin/knowledge/docs/${docId}/chunks`)).json().catch(() => ({}));
+  const body = chunks.length
+    ? chunks.map(c => `<div style="border:1px solid #eee;border-radius:4px;padding:8px;margin-bottom:6px;font-size:12px;white-space:pre-wrap;max-height:220px;overflow:auto">${escapeHtml(c.content)}</div>`).join("")
+    : '<p class="placeholder">无分段</p>';
+  openAdminModal(`文档分段（共 ${chunks.length} 段，每段一个检索块）`, body, null);
+}
+function openKbModal() {
+  openAdminModal("上传知识库文档",
+    `<input id="km-file" type="file" accept=".txt,.md,.csv,.docx,.xlsx">
+     <p style="font-size:11px;color:#999;margin-top:4px">支持 txt/md/csv/docx/xlsx，后端自动解析分段</p>`,
+    uploadKbFromModal);
+}
+async function uploadKbFromModal() {
+  const f = document.getElementById("km-file").files[0];
   if (!f) return alert("选文件");
   const fd = new FormData();
   fd.append("file", f);
   const r = await fetch("/api/admin/knowledge/upload", {method: "POST", body: fd});
-  if (!r.ok) { const e = await r.json().catch(() => ({})); return alert("上传失败: " + (e.detail || r.status)); }
-  await loadKbDocs();
+  if (r.ok) { closeAdminModal(); await loadKbDocs(); } else { const e = await r.json().catch(() => ({})); alert("上传失败: " + (e.detail || r.status)); }
 }
 async function delKb(id) { await fetch(`/api/admin/knowledge/docs/${id}`, {method: "DELETE"}); await loadKbDocs(); }
 async function toggleKb(id, enabled) {
   await fetch(`/api/admin/knowledge/docs/${id}?enabled=${enabled}`, {method: "PUT"}); await loadKbDocs();
 }
-// 模型 & 限流（列表 + 新建/编辑/删除/启停，同 purpose 可多个备用）
+// 模型 & 限流（表格列表 + 新建/编辑弹框/启停/删除）
 async function loadLlm() {
   const {configs = []} = await (await fetch("/api/admin/llm-config")).json().catch(() => ({}));
-  document.getElementById("llm-cards").innerHTML = configs.length ? configs.map(c => `
-    <div class="llm-row">
-      <span class="llm-tag llm-tag-${c.purpose}">${c.purpose}</span>
-      <b>${escapeHtml(c.id)}</b>
-      <span class="llm-info">${escapeHtml(c.model)} · ${escapeHtml(c.base_url)} ${c.enabled ? "" : "(停用)"}</span>
-      <button class="li-toggle" onclick="toggleLlm('${escapeHtml(c.id)}', ${c.enabled})">${c.enabled ? "停用" : "启用"}</button>
-      <button class="llm-edit-btn" onclick="editLlm('${escapeHtml(c.id)}')">编辑</button>
-      <button class="li-del" onclick="deleteLlm('${escapeHtml(c.id)}')">×</button>
-    </div>`).join("") : "<div class='placeholder'>暂无模型，点下方新建</div>";
+  _renderTable("llm-cards", ["用途", "配置ID", "模型", "地址", "状态"], configs.map(c =>
+    `<tr><td><span class="llm-tag llm-tag-${c.purpose}">${c.purpose}</span></td><td>${escapeHtml(c.id)}</td><td>${escapeHtml(c.model)}</td><td>${escapeHtml(c.base_url)}</td><td>${c.enabled ? "启用" : "停用"}</td>
+      <td class="col-op"><button class="llm-edit-btn" onclick="toggleLlm('${escapeHtml(c.id)}', ${c.enabled})">${c.enabled ? "停用" : "启用"}</button><button class="llm-edit-btn" onclick="openLlmModal('${escapeHtml(c.id)}')">编辑</button><button class="li-del" onclick="deleteLlm('${escapeHtml(c.id)}')">×</button></td></tr>`));
 }
-function _fillEditor(c) {
-  document.getElementById("llm-edit-id").value = c.id || "";
-  document.getElementById("llm-edit-purpose").value = c.purpose || "analysis";
-  document.getElementById("llm-edit-model").value = c.model || "";
-  document.getElementById("llm-edit-base").value = c.base_url || "";
-  document.getElementById("llm-edit-key").value = c.api_key || "";
-  document.getElementById("llm-edit-protocol").value = c.protocol || "openai";
-  document.getElementById("llm-edit-rpm").value = c.rpm_limit || "";
-  document.getElementById("llm-edit-conc").value = c.concurrency || "";
-  document.getElementById("llm-editor").style.display = "block";
+function _llmFormHTML(c) {
+  c = c || {};
+  return `<input id="lm-id" placeholder="配置ID（如 qwen-chat）" value="${escapeHtml(c.id||'')}" ${c.id?'readonly':''}>
+    <select id="lm-purpose"><option value="analysis" ${c.purpose==='analysis'?'selected':''}>analysis 分析</option><option value="embedding" ${c.purpose==='embedding'?'selected':''}>embedding 向量</option><option value="attribution" ${c.purpose==='attribution'?'selected':''}>attribution 归因</option></select>
+    <input id="lm-model" placeholder="模型名" value="${escapeHtml(c.model||'')}">
+    <input id="lm-base" placeholder="base_url" value="${escapeHtml(c.base_url||'')}">
+    <input id="lm-key" placeholder="api_key" value="${escapeHtml(c.api_key||'')}">
+    <select id="lm-protocol"><option value="openai" ${c.protocol==='openai'?'selected':''}>openai</option><option value="anthropic" ${c.protocol==='anthropic'?'selected':''}>anthropic</option></select>
+    <input id="lm-rpm" type="number" placeholder="RPM(空=不限)" value="${c.rpm_limit||''}">
+    <input id="lm-conc" type="number" placeholder="并发(空=不限)" value="${c.concurrency||''}">`;
 }
-function newLlm() {
-  _fillEditor({id: "", purpose: "analysis"});
-  document.getElementById("llm-edit-id").focus();
+async function openLlmModal(id) {
+  let c = {};
+  if (id) {
+    const {configs = []} = await (await fetch("/api/admin/llm-config")).json().catch(() => ({}));
+    c = configs.find(x => x.id === id) || {};
+  }
+  openAdminModal(id ? "编辑模型" : "新增模型", _llmFormHTML(c), () => saveLlmFromModal(id));
 }
-async function editLlm(id) {
-  const {configs = []} = await (await fetch("/api/admin/llm-config")).json().catch(() => ({}));
-  const c = configs.find(x => x.id === id);
-  if (c) _fillEditor(c);
-}
-function closeLlmEditor() { document.getElementById("llm-editor").style.display = "none"; }
-async function saveLlmEdit() {
-  const id = document.getElementById("llm-edit-id").value.trim();
-  if (!id) return alert("填配置ID（如 qwen-chat）");
+async function saveLlmFromModal(id) {
+  const cfgId = document.getElementById("lm-id").value.trim();
+  const targetId = id || cfgId;
+  if (!targetId) return alert("填配置ID");
   const num = v => { const n = parseInt(v); return isNaN(n) ? null : n; };
   const body = {
-    purpose: document.getElementById("llm-edit-purpose").value,
-    model: document.getElementById("llm-edit-model").value.trim(),
-    base_url: document.getElementById("llm-edit-base").value.trim(),
-    api_key: document.getElementById("llm-edit-key").value.trim(),
-    protocol: document.getElementById("llm-edit-protocol").value,
+    purpose: document.getElementById("lm-purpose").value,
+    model: document.getElementById("lm-model").value.trim(),
+    base_url: document.getElementById("lm-base").value.trim(),
+    api_key: document.getElementById("lm-key").value.trim(),
+    protocol: document.getElementById("lm-protocol").value,
     temperature: 0.0, timeout: 60, max_context: 32000,
-    rpm_limit: num(document.getElementById("llm-edit-rpm").value),
-    concurrency: num(document.getElementById("llm-edit-conc").value),
+    rpm_limit: num(document.getElementById("lm-rpm").value),
+    concurrency: num(document.getElementById("lm-conc").value),
     enabled: true,
   };
   if (!body.model || !body.base_url) return alert("模型名和 base_url 必填");
-  const r = await fetch(`/api/admin/llm-config/${encodeURIComponent(id)}`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-  if (r.ok) { closeLlmEditor(); await loadLlm(); } else alert("保存失败");
+  const r = await fetch(`/api/admin/llm-config/${encodeURIComponent(targetId)}`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  if (r.ok) { closeAdminModal(); await loadLlm(); } else alert("保存失败");
 }
 async function toggleLlm(id, enabled) {
   const {configs = []} = await (await fetch("/api/admin/llm-config")).json().catch(() => ({}));
