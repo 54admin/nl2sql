@@ -78,14 +78,13 @@ def build_admin_llm_router(llm_service=None) -> APIRouter:
         if not payload.purposes or not all(p in PURPOSES for p in payload.purposes):
             raise HTTPException(400, f"purposes 必须是 {PURPOSES} 的非空子集")
         async with AsyncSessionFactory() as s:
-            # 互斥（一用途一启用）：启用本模型时，把它每个用途从其他 enabled 模型的 purposes 移除
-            if payload.enabled:
-                others = (await s.execute(select(LlmConfigRow).where(
-                    LlmConfigRow.enabled.is_(True), LlmConfigRow.id != cfg_id))).scalars().all()
-                for o in others:
-                    overlap = set(o.purposes or []) & set(payload.purposes)
-                    if overlap:
-                        o.purposes = [p for p in (o.purposes or []) if p not in overlap]
+            # 互斥（一 purpose 一模型）：把本模型每个用途从其他模型的 purposes 移除（配置即启用，不看 enabled）
+            others = (await s.execute(select(LlmConfigRow).where(
+                LlmConfigRow.id != cfg_id))).scalars().all()
+            for o in others:
+                overlap = set(o.purposes or []) & set(payload.purposes)
+                if overlap:
+                    o.purposes = [p for p in (o.purposes or []) if p not in overlap]
             row = await s.get(LlmConfigRow, cfg_id)
             if row is None:
                 row = LlmConfigRow(id=cfg_id, version=0)

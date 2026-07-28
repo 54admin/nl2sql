@@ -47,6 +47,7 @@ class ToolResult:
     result_id: str | None = None
     finished: bool = False
     suspended: bool = False
+    options: list | None = None   # ask_user 候选（[{label, description}]），前端渲染成按钮让用户选
 
 
 @dataclass

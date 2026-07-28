@@ -23,8 +23,8 @@ async def _finish(args: dict, ctx: LoopContext, cancel_token: CancelToken) -> To
 
 
 async def _ask_user(args: dict, ctx: LoopContext, cancel_token: CancelToken) -> ToolResult:
-    """向用户提问以澄清需求。agent_loop 观察 suspended=True 后存 checkpoint 并挂起。"""
-    return ToolResult(summary=args.get("question", ""), suspended=True)
+    """向用户提问澄清。有候选时给 options（前端渲染按钮），用户选项或自定义。"""
+    return ToolResult(summary=args.get("question", ""), suspended=True, options=args.get("options"))
 
 
 ECHO = ToolDefinition(
@@ -47,9 +47,15 @@ FINISH = ToolDefinition(
 
 ASK_USER = ToolDefinition(
     name="ask_user",
-    description="向用户提问以澄清需求（如缺参、歧义）。调用后本轮暂停等待用户回答。",
+    description="向用户提问澄清。有明确候选时给 options（2-4 个，第一个推荐，用户选项或自定义）；没候选就只问 question。",
     parameters={"type": "object",
-                "properties": {"question": {"type": "string", "description": "要问用户的问题"}},
+                "properties": {
+                    "question": {"type": "string", "description": "要问用户的问题"},
+                    "options": {"type": "array", "description": "候选选项（2-4 个，第一个为推荐）；用户可选项或自定义",
+                                "items": {"type": "object",
+                                          "properties": {"label": {"type": "string"}, "description": {"type": "string"}},
+                                          "required": ["label"]}}
+                },
                 "required": ["question"]},
     handler=_ask_user,
 )

@@ -52,7 +52,7 @@ _PG_MIGRATIONS = [
     "UPDATE llm_config SET id='analysis' WHERE id='default'",
     "ALTER TABLE llm_config DROP COLUMN IF EXISTS embedding_model",
     "ALTER TABLE llm_config ADD COLUMN IF NOT EXISTS purpose VARCHAR(32)",
-    "UPDATE llm_config SET purpose=id WHERE purpose IS NULL",
+    # 原 "UPDATE llm_config SET purpose=id" 已删：model 级后 id=host__model 变长，塞 purpose varchar(32) 超长报错；purpose 列已废弃（改用 purposes）
     "CREATE INDEX IF NOT EXISTS ix_llm_config_purpose ON llm_config(purpose)",
     # audit_traces 补成败标记+最终答案列（细粒度统计用）；audit_events 是新表 create_all 建。
     "ALTER TABLE audit_traces ADD COLUMN IF NOT EXISTS success BOOLEAN",

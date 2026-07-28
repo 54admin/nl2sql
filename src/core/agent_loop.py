@@ -237,10 +237,11 @@ class AgentLoop:
                         await self._state.suspend(session_id, msgs,
                                                   pending_tool=cid)
                         yield SSEEvent("clarification_needed",
-                                       {"question": result.summary, "turn": turn},
-                                       trace_id)
+                                       {"question": result.summary, "turn": turn,
+                                        "options": result.options}, trace_id)
                         self._audit_event("clarification_needed",
-                                          {"question": result.summary, "turn": turn}, trace_id, turn)
+                                          {"question": result.summary, "turn": turn,
+                                           "options": result.options}, trace_id, turn)
                         return
 
                     final_summary = result.summary + fail_hint

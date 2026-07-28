@@ -18,6 +18,8 @@
   .assistant { background: #fff; color: #333; border: 1px solid #e0e0e0; }
   .system { background: #fff8e1; color: #e65100; font-size: 13px; max-width: 90%; }
   .clarify { background: #e3f2fd; color: #1565c0; max-width: 90%; }
+  .clarify-opt { text-align:left; background:#fff; border:1px solid #90caf9; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:13px; line-height:1.5; }
+  .clarify-opt:hover { background:#e3f2fd; }
   .err { background: #ffebee; color: #c62828; }
   footer { background: #fff; padding: 12px; border-top: 1px solid #e0e0e0; display: flex; gap: 8px; }
   #input { flex: 1; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; }
@@ -676,7 +678,21 @@ async function ask(text) {
         else if (evt.type === "clarification_needed") {
           stopTyper();
           bubble.remove();
-          addMsg("🤔 需要补充：" + evt.data.question, "clarify");
+          const opts = evt.data.options;
+          const div = addMsg("🤔 " + evt.data.question, "clarify");
+          if (opts && opts.length) {
+            // 选项按钮（cc 风格：第一个推荐）+ 输入框当 Other（不点选项直接输自定义）
+            const box = document.createElement("div");
+            box.style.cssText = "margin-top:8px;display:flex;flex-direction:column;gap:6px";
+            opts.forEach((o, i) => {
+              const btn = document.createElement("button");
+              btn.className = "clarify-opt";
+              btn.innerHTML = `<b>${escapeHtml(o.label)}</b>${i===0?' <span style="font-size:10px;color:#4caf50">推荐</span>':''}${o.description?`<br><span style="font-size:11px;color:#888">${escapeHtml(o.description)}</span>`:''}`;
+              btn.onclick = () => { input.value = o.label; onSend(); };
+              box.appendChild(btn);
+            });
+            div.appendChild(box);
+          }
         } else if (evt.type === "correction") {
           addMsg("已纠正：" + evt.data.original + " → " + evt.data.normalized, "system");
         } else if (evt.type === "error") {
@@ -1061,7 +1077,7 @@ async function toggleKb(id, enabled) {
   await fetch(`/api/admin/knowledge/docs/${id}?enabled=${enabled}`, {method: "PUT"}); await loadKbDocs();
 }
 // 模型配置（model 级：一行=一个模型，purposes 多选；网关分组展示；发现+导入）
-const LLM_PURPOSES = [{p:"analysis",label:"分析"},{p:"embedding",label:"向量"},{p:"attribution",label:"归因"}];
+const LLM_PURPOSES = [{p:"analysis",label:"对话问数"},{p:"embedding",label:"向量"},{p:"attribution",label:"归因"}];
 function _llmId(base, model) {
   const host = (base.match(/:\/\/([^/]+)/) || [,"gw"])[1].replace(/[^a-zA-Z0-9]/g,"_");
   return (host + "__" + model).replace(/[^a-zA-Z0-9_]/g,"_");
@@ -1114,15 +1130,16 @@ function renderLlmGateways() {
   }).join("");
 }
 function _renderLlmModel(c) {
+  const isEmbed = /embed/i.test(c.model);
   const checks = LLM_PURPOSES.map(({p,label}) => {
     const has = (c.purposes || []).includes(p);
-    return `<label style="font-size:12px;margin-right:10px;cursor:pointer;color:${has && c.enabled ? '#2e7d32' : '#888'}"><input type="checkbox" ${has?"checked":""} onchange="toggleModelPurpose('${escapeHtml(c.id)}','${p}')"> ${label}</label>`;
+    const dis = isEmbed ? (p !== "embedding") : (p === "embedding");   // embed 模型只能向量；非 embed 不能向量
+    return `<label style="font-size:12px;margin-right:10px;color:${dis?'#ccc':(has?'#2e7d32':'#888')}"><input type="checkbox" ${has?"checked":""} ${dis?"disabled":""} onchange="toggleModelPurpose('${escapeHtml(c.id)}','${p}')"> ${label}</label>`;
   }).join("");
   return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f0f0f0;flex-wrap:wrap">
     <b style="min-width:170px;font-family:Menlo,Monaco,monospace;font-size:13px">${escapeHtml(c.model)}</b>
     <span>${checks}</span>
     <span style="margin-left:auto;display:flex;gap:4px">
-      <button class="llm-edit-btn" onclick="toggleLlmModel('${escapeHtml(c.id)}')">${c.enabled?"停用":"启用"}</button>
       <button class="li-del" onclick="deleteLlmModel('${escapeHtml(c.id)}')">×</button>
     </span>
   </div>`;
@@ -1157,14 +1174,46 @@ async function deleteLlmModel(id) {
 function _llmPurpChecks() {
   return LLM_PURPOSES.map(({p,label}) => `<label style="font-size:13px;margin-right:10px"><input type="checkbox" id="lm-p-${p}"> ${label}</label>`).join("");
 }
-async function openLlmModal() {  // 顶部"+ 新增"：新网关 + 首个模型
+async function openLlmModal() {  // 顶部"+ 新增"：新网关 + 发现模型导入
   openAdminModal("新增网关 + 模型",
     `<input id="lm-base" placeholder="base_url（如 http://10.0.0.1:3001）">
      <input id="lm-key" type="password" placeholder="api_key">
-     <input id="lm-model" placeholder="模型名（含 embed→向量，其他→对话+归因）">
+     <input id="lm-model" placeholder="模型名（不支持发现时手填，多个用逗号分隔）">
      <select id="lm-protocol"><option value="openai">openai</option><option value="anthropic">anthropic</option></select>
-     <p style="font-size:11px;color:#888">用途按模型名自动识别，无需手选</p>`,
-    () => saveLlmModel(null));
+     <button class="llm-edit-btn" onclick="_discNewGw()" style="margin:8px 0">🔍 发现模型（填好地址+key 点）</button>
+     <div id="lm-disc" style="max-height:40vh;overflow:auto"></div>
+     <p style="font-size:11px;color:#888">二选一：手填模型名 / 点发现勾选，保存导入（用途自动识别）</p>`,
+    () => _saveNewGwModels());
+}
+async function _discNewGw() {
+  const base = document.getElementById("lm-base").value.trim();
+  const key = document.getElementById("lm-key").value.trim();
+  if (!base || !key) return alert("先填 base_url 和 api_key");
+  const box = document.getElementById("lm-disc");
+  box.innerHTML = '<p class="placeholder">拉取中…</p>';
+  try {
+    const r = await fetch("/api/admin/llm-config/discover", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({base_url:base, api_key:key})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || r.status);
+    const models = data.models || [];
+    if (!models.length) { box.innerHTML = '<p class="placeholder">网关未返回模型</p>'; return; }
+    box.innerHTML = `<div style="margin-bottom:6px"><button class="llm-edit-btn" onclick="document.querySelectorAll('#lm-disc .dc').forEach(c=>c.checked=true)">全选</button></div>` +
+      models.map(m => `<label style="display:block;padding:4px 0;font-size:13px"><input type="checkbox" class="dc" value="${escapeHtml(m)}" checked> ${escapeHtml(m)}</label>`).join("");
+  } catch(e) { box.innerHTML = `<p class="placeholder err">拉取失败: ${e.message}</p>`; }
+}
+async function _saveNewGwModels() {
+  const base = document.getElementById("lm-base").value.trim();
+  const key = document.getElementById("lm-key").value.trim();
+  const protocol = document.getElementById("lm-protocol").value;
+  if (!base || !key) return alert("base_url 和 api_key 必填");
+  const picked = [...document.querySelectorAll("#lm-disc .dc:checked")].map(c => c.value);
+  const manual = (document.getElementById("lm-model").value || "").split(/[，,\s]+/).map(s => s.trim()).filter(Boolean);
+  const all = [...new Set([...picked, ...manual])];
+  if (!all.length) return alert("手填模型名 或 点「发现模型」勾选，至少一个");
+  try {
+    for (const m of all) await _putLlm(_llmId(base, m), base, key, m, _autoPurposes(m), true, {protocol});
+  } catch(e) { return alert("保存失败: " + e.message); }
+  closeAdminModal(); await loadLlm();
 }
 async function openLlmModelModal(gi) {  // 已有网关加模型
   const g = window._llmGws[gi]; if (!g) return;
@@ -1201,7 +1250,7 @@ async function discoverModels(gi) {
   if (!models.length) { body.innerHTML = '<p class="placeholder">网关未返回模型</p>'; return; }
   body.innerHTML = `<div style="display:flex;gap:6px;margin-bottom:8px"><button class="llm-edit-btn" onclick="document.querySelectorAll('#admin-modal-body .dc').forEach(c=>c.checked=true)">全选</button><button class="llm-edit-btn" onclick="document.querySelectorAll('#admin-modal-body .dc').forEach(c=>c.checked=false)">清空</button></div>
     <div style="max-height:45vh;overflow:auto">${models.map(m=>`<label style="display:block;padding:4px 0;font-size:13px"><input type="checkbox" class="dc" value="${escapeHtml(m)}" checked> ${escapeHtml(m)}</label>`).join("")}</div>
-    <p style="font-size:11px;color:#888;margin-top:8px">用途自动识别：含 embed → 向量；其他 → 对话+归因。导入为停用，到列表启用</p>`;
+    <p style="font-size:11px;color:#888;margin-top:8px">用途自动识别：含 embed → 向量；其他 → 对话+归因。导入即启用（同用途互斥，重复的被顶掉）</p>`;
   const saveBtn = document.getElementById("admin-modal-save");
   saveBtn.style.display = "";
   saveBtn.onclick = async () => {
@@ -1210,9 +1259,9 @@ async function discoverModels(gi) {
     const existing = new Set(g.models.map(m => m.model));
     const fresh = picked.filter(m => !existing.has(m));
     try {
-      // 用途程序识别（embed→向量，其他→对话+归因），单行建模型，停用导入
+      // 用途程序识别（embed→向量，其他→对话+归因），导入即启用（同用途互斥，重复的会被新导入的顶掉）
       for (const m of fresh) {
-        await _putLlm(_llmId(g.base_url, m), g.base_url, g.api_key, m, _autoPurposes(m), false, {});
+        await _putLlm(_llmId(g.base_url, m), g.base_url, g.api_key, m, _autoPurposes(m), true, {});
       }
     } catch(e) { return alert("导入失败: " + e.message); }
     closeAdminModal(); await loadLlm();
