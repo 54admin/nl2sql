@@ -28,12 +28,12 @@
 ## 快速开始
 
 ```bash
-# 1. 配置 postgres + redis（config/application-dev.yml）
+# 1. 配置 postgres + redis（复制 config/application-dev.yml.example 为 application-dev.yml 填值）
 # 2. 装依赖
 pip install -r requirements.txt
 
 # 3. 启动
-./run.sh    # uvicorn src.main:app --reload，监听 8000
+python3 -m uvicorn src.main:app --reload --port 8000
 
 # 4. 首次配 LLM（模型/密钥不在 yml，存数据库）
 #    启动后进 admin 后台（顶部「⚙ 设置」→ 模型）或 PUT /api/admin/llm-config
@@ -45,19 +45,9 @@ pip install -r requirements.txt
 
 接口文档：http://127.0.0.1:8000/docs
 
-## 常用命令
-
-```bash
-./run.sh                                  # 启动（--reload，监听 8000）
-pip install -r requirements.txt           # 装依赖
-pytest                                    # 全量测试（asyncio_mode=auto）
-pytest tests/test_agent_loop.py           # 单文件
-pytest tests/test_agent_loop.py::test_xxx # 单用例
-```
-
 ## 配置说明
 
-- **app / redis / postgres**：`config/application.yml` + profile（`application-dev.yml`）
+- **app / redis / postgres**：`config/application.yml` + profile（`application-dev.yml`，本地填值、不入库）
 - **LLM 模型 / 密钥 / base_url / 协议 / 限流**：数据库 `llm_config` 表（**不进 yml**），admin 后台热更新。一行 = 一个模型，用途 `purposes` 多选（analysis/embedding/attribution），启用互斥
 
 ## 管理后台
@@ -85,15 +75,6 @@ src/
   datasource/    业务数据源管理 + 元数据反向同步
   knowledge/     知识库解析 + 向量存储
   web/routes/    对话侧（ask/session/result）+ admin_* CRUD
-config/          application.yml + profile
+config/          application.yml + profile（application-dev.yml 本地配置，不入库）
 static/          前端单页（index.html）
-tests/           pytest 测试
-docs/superpowers/ 设计文档（specs）+ 实施计划（plans）
-```
-
-## 文档
-
-- 总体设计：[`docs/superpowers/specs/2026-07-17-nl2sql-ai-wenshu-design.md`](docs/superpowers/specs/2026-07-17-nl2sql-ai-wenshu-design.md)
-- 分阶段 spec / plan：[`docs/superpowers/specs/`](docs/superpowers/specs/)、[`docs/superpowers/plans/`](docs/superpowers/plans/)
-- 给 Claude Code 的开发指引（架构/约定/写代码口径）：[`CLAUDE.md`](CLAUDE.md)
 ```
