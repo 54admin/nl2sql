@@ -72,8 +72,10 @@ _PG_MIGRATIONS = [
 ]
 
 
-async def init_db(url: str | None = None, config: PostgresConfig | None = None):
-    """初始化引擎并建表。url 优先（测试用 sqlite），否则用 config 拼 pg。"""
+async def init_db(url: str | None = None, config: PostgresConfig | None = None,
+                  auto_migrate: bool = False):
+    """初始化引擎并建表。url 优先（测试用 sqlite），否则用 config 拼 pg。
+    auto_migrate=true 才跑建扩展/迁移/刷注释（权限敏感，生产普通账号设 false 跳过）。"""
     global _engine, _AsyncSessionFactory
     target = url or _pg_url(config)
     kwargs = {}
@@ -85,19 +87,29 @@ async def init_db(url: str | None = None, config: PostgresConfig | None = None):
     _engine = create_async_engine(target, echo=False, **kwargs)
     _AsyncSessionFactory = async_sessionmaker(_engine, expire_on_commit=False)
     async with _engine.begin() as conn:
-        if not is_sqlite:
-            # pgvector 扩展（P3b）：必须在 create_all 前建（knowledge_chunks 用 Vector 类型）
+        if not is_sqlite and auto_migrate:
+            # pgvector 扩展（auto_migrate=true 才试，savepoint 兜底）
             try:
-                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                async with conn.begin_nested():
+                    await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             except Exception as e:
                 log.warning("pgvector 扩展创建失败（知识库不可用，联系DBA预装/授权）: %s", e)
         await conn.run_sync(Base.metadata.create_all)
-        if not is_sqlite:
+        if not is_sqlite and auto_migrate:
+            # 迁移每条 savepoint 隔离：已应用/非 owner 权限不足跳过，不阻塞启动
+            # （华为云等托管库表可能非当前账号所建，ALTER/COMMENT 要 owner 会失败；
+            #  create_all 已建最新结构，这些 ALTER 多为冗余，跳了不影响）
             for stmt in _PG_MIGRATIONS:
-                await conn.execute(text(stmt))
-            # 把 ORM 模型里的 comment= 刷进 PG（DDL 注释），单一事实源=models.py，不维护第二份 SQL。
-            # create_all 只在新建表时带 comment，已存在表不会被回填——这里显式刷一遍，幂等。
-            await conn.run_sync(_apply_model_comments)
+                try:
+                    async with conn.begin_nested():
+                        await conn.execute(text(stmt))
+                except Exception as e:
+                    log.warning("迁移跳过（权限/已应用）[%s]", stmt[:60])
+            # 模型注释刷 PG（COMMENT 也要 owner，失败跳）
+            try:
+                await conn.run_sync(_apply_model_comments)
+            except Exception as e:
+                log.warning("模型注释刷新跳过（权限）: %s", e)
     log.info("PG 已初始化: %s", "sqlite" if is_sqlite else "postgres")
 
 

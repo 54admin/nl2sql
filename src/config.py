@@ -58,6 +58,7 @@ class ApplicationConfig:
     redis: RedisConfig = field(default_factory=RedisConfig)
     postgres: PostgresConfig = field(default_factory=PostgresConfig)
     profiles: list = field(default_factory=list)
+    auto_migrate: bool = False   # 顶层独立：true 才启动时建扩展/ALTER/刷注释（生产/普通账号设 false 跳）
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -85,6 +86,7 @@ def _build(d: dict) -> ApplicationConfig:
         redis=RedisConfig(**d.get("redis", {})),
         postgres=PostgresConfig(**d.get("postgres", {})),
         profiles=profiles,
+        auto_migrate=bool(d.get("auto_migrate", False)),
     )
 
 

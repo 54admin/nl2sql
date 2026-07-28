@@ -21,6 +21,15 @@ class AskRequest(BaseModel):
     mode: ViewerMode = ViewerMode.USER
 
 
+class AskSyncRequest(BaseModel):
+    """同步问数（/api/ask，非 SSE）：供飞书智能体/Aily 插件等外部调用。
+    session_id 空则自动建（首次），返回里带 session_id 供多轮带上次返回的。"""
+    user_id: str
+    text: str
+    session_id: str | None = None
+    mode: ViewerMode = ViewerMode.USER
+
+
 # 进程内 trace_id → CancelToken 注册表，供取消端点置位。
 # ponytail: 单进程内存即可（uvicorn 单 worker 内）；多 worker 部署需换 Redis 标志，
 # 但本期单进程内网工具够用。流结束自动清理。
@@ -68,5 +77,28 @@ def build_ask_router(orchestrator) -> APIRouter:
             raise HTTPException(404, "无此 trace 的运行中会话（可能已结束）")
         tok.cancel()
         return {"ok": True, "trace_id": trace_id}
+
+    @router.post("/api/ask")
+    async def ask_sync(req: AskSyncRequest) -> dict:
+        """同步问数（非 SSE）：跑完返回最终答案；需要澄清返回 question+options。
+        供飞书智能体/Aily 插件等外部调用。session_id 空则自动建并返回（多轮带上次返回的）。"""
+        sid = req.session_id
+        if not sid:
+            sid = await orchestrator._sessions.create_session(req.user_id, "feishu")
+        trace_id = uuid4().hex
+        answer, clarify = "", None
+        async for evt in orchestrator.handle_message(
+            req.user_id, sid, req.text, req.mode, trace_id, cancel_token=CancelToken()
+        ):
+            if evt.type == "done":
+                answer = evt.data.get("answer", "")
+            elif evt.type == "clarification_needed":
+                clarify = {"question": evt.data.get("question"), "options": evt.data.get("options")}
+            elif evt.type == "error":
+                return {"session_id": sid, "error": evt.data.get("message", "出错")}
+        if clarify:
+            return {"session_id": sid, "need_clarify": True,
+                    "question": clarify["question"], "options": clarify.get("options")}
+        return {"session_id": sid, "answer": answer}
 
     return router

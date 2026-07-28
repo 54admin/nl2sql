@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):
     log = get_logger("main")
 
     # 数据库连接走 config/application.yml 的 postgres 段
-    await init_db(_pg_url(cfg.postgres))
+    await init_db(_pg_url(cfg.postgres), auto_migrate=cfg.auto_migrate)
 
     redis = RedisClient(cfg.redis)
     await redis.connect()
