@@ -64,6 +64,11 @@ _PG_MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS ix_business_rules_scope ON business_rules(scope)",
     # SQL 模板 datasource_id 可空（通用样板，SQL模板进 system prompt 不分数据源）
     "ALTER TABLE sql_templates ALTER COLUMN datasource_id DROP NOT NULL",
+    # llm_config.id 扩容：网关__模型 的 id 较长，老表 varchar(32) 装不下
+    "ALTER TABLE llm_config ALTER COLUMN id TYPE VARCHAR(128)",
+    # 模型级重构：加 purposes（JSON 多选）；旧 purpose 单值先转进 purposes，聚合同模型多行→一行 由迁移脚本做
+    "ALTER TABLE llm_config ADD COLUMN IF NOT EXISTS purposes JSON",
+    "UPDATE llm_config SET purposes = json_build_array(purpose) WHERE purposes IS NULL AND purpose IS NOT NULL",
 ]
 
 

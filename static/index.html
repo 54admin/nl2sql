@@ -122,7 +122,7 @@
   .admin-form { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
   .admin-form input, .admin-form select { padding: 5px 8px; border: 1px solid #d0d0d0; border-radius: 4px; font-size: 12px; min-width: 90px; flex: 1; }
   .admin-form button { padding: 5px 14px; background: #4caf50; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
-  .admin-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
+  .admin-list { list-style: none; margin: 0; padding: 0; max-height: 70vh; overflow-y: auto; }
   .admin-list li { display: flex; align-items: center; gap: 6px; padding: 6px 2px; border-bottom: 1px solid #f0f0f0; font-size: 12px; }
   .admin-list li .li-text { flex: 1; word-break: break-all; line-height: 1.4; }
   .admin-list li .li-del { background: none; border: none; color: #c62828; cursor: pointer; font-size: 15px; padding: 0 4px; }
@@ -238,7 +238,17 @@
   .sql-toggle { background: #fff; color: #1565c0; border: 1px solid #90caf9; border-radius: 4px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
   .sql-toggle:hover { background: #e3f2fd; }
   /* assistant 气泡分区：思考/答案/表格 互不覆盖 */
-  .msg-thought { font-size: 12px; color: #888; background: #fafafa; border-left: 3px solid #ddd; padding: 6px 10px; margin-bottom: 8px; white-space: pre-wrap; display: none; border-radius: 0 4px 4px 0; }
+  /* 思考过程区（Dify 风格）：可折叠的线性工具路径，execute_sql 摘要人话化，不堆 raw SQL/JSON */
+  .msg-thought { font-size: 12px; background: #fafafa; border: 1px solid #ececec; border-radius: 6px; margin-bottom: 8px; display: none; overflow: hidden; }
+  .thought-header { padding: 6px 10px; cursor: pointer; user-select: none; color: #888; display: flex; align-items: center; gap: 4px; }
+  .thought-header:hover { background: #f0f0f0; }
+  .thought-steps { padding: 2px 10px 8px; }
+  .step { padding: 3px 0 3px 8px; border-left: 2px solid #ddd; margin: 3px 0; display: flex; gap: 6px; align-items: baseline; }
+  .step .step-idx { color: #aaa; min-width: 14px; }
+  .step .step-label { color: #555; flex: 1; }
+  .step .step-status { font-size: 11px; white-space: nowrap; }
+  .step.ok { border-left-color: #4caf50; } .step.ok .step-status { color: #4caf50; }
+  .step.fail { border-left-color: #e53935; } .step.fail .step-status { color: #e53935; }
   .msg-answer { line-height: 1.6; }
   .msg-table { margin-top: 8px; overflow-x: auto; }
   .msg-table table { border-collapse: collapse; font-size: 13px; width: 100%; }
@@ -248,13 +258,18 @@
   .sql-wrap { margin-top: 6px; }
   .sql-code { background: #2d2d2d; color: #e6e6e6; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; }
   .sql-code { background: #1e1e1e; color: #d4d4d4; padding: 10px 12px; border-radius: 6px; overflow-x: auto; font-family: Menlo, Monaco, monospace; font-size: 12px; line-height: 1.5; margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
+  /* 统计页：全局卡片 + trace 列表 */
+  .stat-row { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .stat-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 14px 22px; min-width: 130px; }
+  .stat-val { font-size: 24px; font-weight: 600; color: #333; }
+  .stat-label { font-size: 12px; color: #888; margin-top: 4px; }
 </style>
 </head>
 <body>
 <div id="app">
   <header>
     <h1>AI 问数</h1>
-    <nav id="chat-nav"><button class="gear" onclick="showSettings(true)">⚙ 设置</button></nav>
+    <nav id="chat-nav"><button class="gear" onclick="showStats(true)">📊 统计</button><button class="gear" onclick="showSettings(true)">⚙ 设置</button></nav>
     <nav id="settings-nav" style="display:none">
       <button class="stab active" data-tab="datasource" onclick="showSettingsTab('datasource')">数据源</button>
       <button class="stab" data-tab="prompt" onclick="showSettingsTab('prompt')">提示词</button>
@@ -343,12 +358,29 @@
       </section>
       <section class="admin-card stab-panel" id="stab-knowledge">
         <h3>知识库 <button class="add-btn" onclick="openKbModal()">+ 上传</button></h3>
-        <div id="kb-list"></div>
+        <div id="kb-list" style="max-height:70vh;overflow:auto"></div>
       </section>
       <section class="admin-card stab-panel" id="stab-models">
         <h3>模型 &amp; 限流 <button class="add-btn" onclick="openLlmModal()">+ 新增</button></h3>
-        <div id="llm-cards"></div>
+        <div id="llm-cards" style="max-height:70vh;overflow:auto"></div>
       </section>
+    </div>
+  </div>
+  <div id="stats-panel" style="display:none;flex-direction:column;flex:1;min-height:0">
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #e0e0e0">
+      <b>📊 问数统计</b>
+      <select id="stats-filter-sel" onchange="loadStats(1, this.value===''?null:this.value==='true')">
+        <option value="">全部</option>
+        <option value="true">仅成功</option>
+        <option value="false">仅失败</option>
+      </select>
+      <button onclick="showStats(false)" style="margin-left:auto;padding:5px 12px;background:#fff;color:#1976d2;border:1px solid #1976d2;border-radius:6px;cursor:pointer;font-size:13px">← 返回</button>
+    </div>
+    <div style="padding:12px;overflow:auto;flex:1">
+      <div id="stats-cards" class="stat-row"></div>
+      <h3 style="margin:8px 0">问数记录 <span style="font-weight:normal;color:#888;font-size:12px">（点行看全链路）</span></h3>
+      <div id="stats-traces"></div>
+      <div id="stats-pager" style="margin-top:8px;font-size:13px"></div>
     </div>
   </div>
 </div>
@@ -531,6 +563,30 @@ async function ask(text) {
   // 气泡分区：thought（思考过程）/ answer（答案文本，打字机+md）/ result-table（表格）/ sql 区
   // 各区独立 DOM 子节点，finish 的 renderMarkdown 只作用于 answer，不覆盖其他区。
   const thoughtEl = document.createElement("div"); thoughtEl.className = "msg-thought";
+  thoughtEl.innerHTML = `<div class="thought-header">💡 思考过程</div><div class="thought-steps"></div>`;
+  thoughtEl.style.display = "none";
+  const stepsEl = thoughtEl.querySelector(".thought-steps");
+  thoughtEl.querySelector(".thought-header").onclick = () => {
+    stepsEl.style.display = stepsEl.style.display === "none" ? "block" : "none";
+  };
+  const steps = [];   // 线性思考路径：{el, done}
+  const stepLabels = {query_metadata:"查看可查的表与字段", execute_sql:"执行查询", ask_user:"向用户确认",
+    do_attribution:"归因分析", attribution:"归因分析", knowledge_search:"检索知识库", finish:"完成"};
+  function addStep(label) {
+    thoughtEl.style.display = "block";
+    const el = document.createElement("div");
+    el.className = "step";
+    el.innerHTML = `<span class="step-idx">${steps.length+1}</span><span class="step-label">${label}</span><span class="step-status">…</span>`;
+    stepsEl.appendChild(el);
+    steps.push({el, done: false});
+  }
+  function finishStep(status, ok) {
+    const s = steps.find(x => !x.done);
+    if (!s) return;
+    s.done = true;
+    s.el.querySelector(".step-status").textContent = status;
+    s.el.classList.add(ok ? "ok" : "fail");
+  }
   const answerEl = document.createElement("div"); answerEl.className = "msg-answer";
   const tableEl = document.createElement("div"); tableEl.className = "msg-table";
   bubble.append(thoughtEl, answerEl, tableEl);
@@ -586,20 +642,28 @@ async function ask(text) {
         if (evt.data && evt.data.trace_id) traceId = evt.data.trace_id;  // 首个事件拿 trace_id 供取消
         got = true;
         if (evt.type === "answer_delta") pushDelta(evt.data.text || "");
-        else if (evt.type === "tool_call" && evt.data.name === "execute_sql") {
-          // 收集执行的 SQL，done 后在答案下挂折叠按钮（默认隐藏）。
+        else if (evt.type === "tool_call") {
+          const n = evt.data.name;
           const sql = evt.data.args && evt.data.args.sql;
-          if (sql) sqls.push(sql);
-          // 思考过程：调了啥工具，往 thought 区写一行
-          if (thoughtEl.textContent) thoughtEl.textContent += "\n";
-          thoughtEl.textContent += `▸ 调用 ${evt.data.name}`;
-          if (sql) thoughtEl.textContent += `：${sql.length > 60 ? sql.slice(0,60)+"…" : sql}`;
-          thoughtEl.style.display = "block";
+          if (n === "execute_sql" && sql) sqls.push(sql);   // SQL 收集到折叠区，不进思考区
+          addStep(stepLabels[n] || ("调用 " + n));
         }
         else if (evt.type === "tool_result") {
-          // 工具返回：思考区补一行结果摘要；带 result_id 的拉表格渲染到 table 区
-          const sum = evt.data.summary || "";
-          if (sum) { if (thoughtEl.textContent) thoughtEl.textContent += "\n"; thoughtEl.textContent += `◂ ${sum.slice(0,80)}`; }
+          const n = evt.data.name, sum = evt.data.summary || "";
+          let status = "✓", ok = true;
+          if (n === "execute_sql") {
+            try { const d = JSON.parse(sum);
+              status = d.rows > 0 ? `✓ 查到 ${d.rows} 行` : "✗ 无数据"; ok = d.rows > 0; }
+            catch {   // 非 JSON：execute_sql 报错，或 P0 熔断提示
+              status = sum.includes("上限") ? "⛔ 到查询上限" :
+                       sum.includes("系统提示") ? "⛔ 停止重试" :
+                       (sum.includes("失败") || sum.includes("拦截")) ? "✗ 失败" : "✓";
+              ok = !status.startsWith("✗") && !status.startsWith("⛔");
+            }
+          } else if (n === "query_metadata") {
+            try { status = `✓ ${(JSON.parse(sum).tables || []).length} 张可查表`; } catch {}
+          }
+          finishStep(status, ok);
           const rid = evt.data.result_id;
           if (rid) renderResultTable(tableEl, rid);
         }
@@ -746,7 +810,78 @@ function showSettings(enter) {
   document.getElementById("chat-nav").style.display = enter ? "none" : "block";
   document.getElementById("settings-nav").style.display = enter ? "flex" : "none";
   document.getElementById("admin-panel").style.display = enter ? "block" : "none";
+  document.getElementById("stats-panel").style.display = "none";   // 进设置时关统计
   if (enter) showSettingsTab("datasource");
+}
+
+// ===== 统计页（顶部独立按钮）：全局卡片 + trace 列表 + 点行看全链路 =====
+function showStats(enter) {
+  document.getElementById("chat-panel").style.display = enter ? "none" : "flex";
+  document.getElementById("chat-nav").style.display = enter ? "none" : "block";
+  document.getElementById("settings-nav").style.display = "none";
+  document.getElementById("admin-panel").style.display = "none";
+  document.getElementById("stats-panel").style.display = enter ? "flex" : "none";
+  if (enter) loadStats(1, null);
+}
+async function loadStats(page, success) {
+  const sc = await (await fetch("/api/admin/audit/stats")).json().catch(() => ({}));
+  renderStatsCards(sc);
+  let url = `/api/admin/audit/traces?page=${page}&page_size=20`;
+  if (success !== null) url += `&success=${success}`;
+  const data = await (await fetch(url)).json().catch(() => ({}));
+  renderTraces(data.traces || [], data.total || 0, data.page || 1, success);
+}
+function renderStatsCards(s) {
+  const eb = s.events_by_type || {};
+  const card = (label, val, color) => `<div class="stat-card" style="border-top:3px solid ${color}"><div class="stat-val">${val}</div><div class="stat-label">${label}</div></div>`;
+  document.getElementById("stats-cards").innerHTML =
+    card("总问数", s.total_traces || 0, "#1976d2") +
+    card("成功率", ((s.success_rate || 0) * 100).toFixed(0) + "%", "#4caf50") +
+    card("平均耗时", ((s.avg_elapsed_ms || 0) / 1000).toFixed(1) + "s", "#ff9800") +
+    card("工具调用", eb.tool_call || 0, "#9c27b0") +
+    card("错误/取消", (eb.error || 0) + (eb.cancelled || 0), "#e53935");
+}
+function renderTraces(traces, total, page, success) {
+  const badge = ok => ok ? '<span style="color:#4caf50">✓</span>' : '<span style="color:#e53935">✗</span>';
+  const rows = traces.length ? traces.map(t =>
+    `<tr style="cursor:pointer" onclick="openTraceDetail('${t.trace_id}')">
+       <td>${escapeHtml((t.raw_input || "").slice(0, 40))}</td>
+       <td title="${escapeHtml(t.session_id || "")}" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.session_title || (t.session_id || "").slice(0, 8) || "-")}</td>
+       <td>${badge(t.success)}</td>
+       <td>${t.elapsed_ms ? (t.elapsed_ms / 1000).toFixed(1) + "s" : "-"}</td>
+       <td>${t.created_at ? new Date(t.created_at).toLocaleString("zh-CN") : ""}</td>
+     </tr>`).join("") :
+    `<tr><td colspan="5" style="text-align:center;padding:20px;color:#999">无记录</td></tr>`;
+  document.getElementById("stats-traces").innerHTML =
+    `<table class="admin-table"><thead><tr><th>问题</th><th>会话</th><th style="width:50px">成功</th><th style="width:70px">耗时</th><th style="width:150px">时间</th></tr></thead><tbody>${rows}</tbody></table>`;
+  const pages = Math.ceil(total / 20);
+  document.getElementById("stats-pager").innerHTML = pages > 1
+    ? `第 ${page}/${pages} 页 · 共 ${total} 条 `
+      + (page > 1 ? `<button onclick="loadStats(${page - 1}, ${success})">上一页</button>` : "") + " "
+      + (page < pages ? `<button onclick="loadStats(${page + 1}, ${success})">下一页</button>` : "")
+    : "";
+}
+async function openTraceDetail(tid) {
+  const r = await fetch(`/api/admin/audit/trace/${tid}`);
+  if (!r.ok) { alert("加载失败"); return; }
+  const {trace = {}, events = []} = await r.json();
+  const evRows = events.map(e => {
+    const c = e.content || {};
+    let d = "";
+    if (e.event_type === "tool_call") d = c.name + (c.args && c.args.sql ? "：" + (c.args.sql.length > 50 ? c.args.sql.slice(0, 50) + "…" : c.args.sql) : "");
+    else if (e.event_type === "tool_result") d = (c.summary || "").slice(0, 80);
+    else if (e.event_type === "clarification_needed") d = c.question || "";
+    else if (e.event_type === "answer_delta") d = (c.text || "").slice(0, 40);
+    else d = JSON.stringify(c).slice(0, 60);
+    return `<tr><td>${e.seq}</td><td>${e.event_type}</td><td style="word-break:break-all">${escapeHtml(d)}</td></tr>`;
+  }).join("");
+  openAdminModal(`trace 详情 · ${tid.slice(0, 8)}`,
+    `<div style="margin-bottom:10px;line-height:1.7"><b>问题：</b>${escapeHtml(trace.raw_input || "")}<br>
+     <b>会话：</b>${escapeHtml((trace.session_id || "").slice(0, 8))}<br>
+     <b>结果：</b>${trace.success ? "✓ 成功" : "✗ 失败"} · ${trace.elapsed_ms ? (trace.elapsed_ms / 1000).toFixed(1) + "s" : "-"}<br>
+     <b>答案：</b>${escapeHtml((trace.final_answer || "").slice(0, 300))}</div>
+     <table class="admin-table"><thead><tr><th style="width:40px">seq</th><th style="width:130px">事件</th><th>内容</th></tr></thead><tbody>${evRows}</tbody></table>`,
+    null);
 }
 function showSettingsTab(tab) {
   document.querySelectorAll(".stab-panel").forEach(p => p.classList.toggle("active", p.id === "stab-" + tab));
@@ -823,7 +958,7 @@ function _ruleFormHTML(r) {
   const scope = r.scope || "global";
   const val = (r.value_json || "").replace(/^"|"$/g, "");
   return `<select id="rm-scope" onchange="document.getElementById('rm-table-row').style.display=this.value==='table'?'block':'none'"><option value="global" ${scope==='global'?'selected':''}>通用（全局，进 system prompt）</option><option value="table" ${scope==='table'?'selected':''}>表级（关联某张表）</option></select>
-    <div id="rm-table-row" style="display:${scope==='table'?'block':'none'}"><input id="rm-table" placeholder="表全限定名（如 fact_power）" value="${escapeHtml(r.table_name||'')}"></div>
+    <div id="rm-table-row" style="display:${scope==='table'?'block':'none'}"><select id="rm-table"><option value="">（选参与问数的表）</option></select></div>
     <input id="rm-key" placeholder="名称（如 发电量单位）" value="${escapeHtml(r.key||'')}">
     <input id="rm-value" placeholder='内容（如 万kWh）' value="${escapeHtml(val)}">`;
 }
@@ -834,6 +969,17 @@ async function openRuleModal(id) {
     r = rules.find(x => x.id === id) || {};
   }
   openAdminModal(id != null ? "编辑业务规则" : "新增业务规则", _ruleFormHTML(r), () => saveRuleFromModal(id));
+  // 表名下拉：填已参与问数的表（enabled=true），编辑时回选当前 table_name
+  const _sel = document.getElementById("rm-table");
+  if (_sel) {
+    const {tables = []} = await (await fetch("/api/admin/metadata/enabled-tables")).json().catch(() => ({}));
+    tables.forEach(t => {
+      const o = document.createElement("option");
+      o.value = t; o.textContent = t;
+      if (t === r.table_name) o.selected = true;
+      _sel.appendChild(o);
+    });
+  }
 }
 async function saveRuleFromModal(id) {
   const scope = document.getElementById("rm-scope").value;
@@ -914,66 +1060,164 @@ async function delKb(id) { await fetch(`/api/admin/knowledge/docs/${id}`, {metho
 async function toggleKb(id, enabled) {
   await fetch(`/api/admin/knowledge/docs/${id}?enabled=${enabled}`, {method: "PUT"}); await loadKbDocs();
 }
-// 模型 & 限流（表格列表 + 新建/编辑弹框/启停/删除）
+// 模型配置（model 级：一行=一个模型，purposes 多选；网关分组展示；发现+导入）
+const LLM_PURPOSES = [{p:"analysis",label:"分析"},{p:"embedding",label:"向量"},{p:"attribution",label:"归因"}];
+function _llmId(base, model) {
+  const host = (base.match(/:\/\/([^/]+)/) || [,"gw"])[1].replace(/[^a-zA-Z0-9]/g,"_");
+  return (host + "__" + model).replace(/[^a-zA-Z0-9_]/g,"_");
+}
+// 用途程序识别：模型名含 embed → 向量；其他 → 对话+归因
+function _autoPurposes(model) {
+  return /embed/i.test(model) ? ["embedding"] : ["analysis", "attribution"];
+}
+async function _putLlm(id, base, key, model, purposes, enabled, extra) {
+  extra = extra || {};
+  const body = {purposes, model, base_url: base, api_key: key,
+    protocol: extra.protocol || "openai", temperature: 0.0, timeout: 60, max_context: 32000,
+    rpm_limit: extra.rpm_limit ?? null, concurrency: extra.concurrency ?? null, enabled};
+  const r = await fetch(`/api/admin/llm-config/${encodeURIComponent(id)}`,
+    {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.detail || r.status); }
+}
+function _findCfg(id) {
+  for (const g of (window._llmGws || [])) for (const m of g.models) if (m.id === id) return m;
+  return null;
+}
 async function loadLlm() {
   const {configs = []} = await (await fetch("/api/admin/llm-config")).json().catch(() => ({}));
-  _renderTable("llm-cards", ["用途", "配置ID", "模型", "地址", "状态"], configs.map(c =>
-    `<tr><td><span class="llm-tag llm-tag-${c.purpose}">${c.purpose}</span></td><td>${escapeHtml(c.id)}</td><td>${escapeHtml(c.model)}</td><td>${escapeHtml(c.base_url)}</td><td>${c.enabled ? "启用" : "停用"}</td>
-      <td class="col-op"><button class="llm-edit-btn" onclick="toggleLlm('${escapeHtml(c.id)}', ${c.enabled})">${c.enabled ? "停用" : "启用"}</button><button class="llm-edit-btn" onclick="openLlmModal('${escapeHtml(c.id)}')">编辑</button><button class="li-del" onclick="deleteLlm('${escapeHtml(c.id)}')">×</button></td></tr>`));
-}
-function _llmFormHTML(c) {
-  c = c || {};
-  return `<input id="lm-id" placeholder="配置ID（如 qwen-chat）" value="${escapeHtml(c.id||'')}" ${c.id?'readonly':''}>
-    <select id="lm-purpose"><option value="analysis" ${c.purpose==='analysis'?'selected':''}>analysis 分析</option><option value="embedding" ${c.purpose==='embedding'?'selected':''}>embedding 向量</option><option value="attribution" ${c.purpose==='attribution'?'selected':''}>attribution 归因</option></select>
-    <input id="lm-model" placeholder="模型名" value="${escapeHtml(c.model||'')}">
-    <input id="lm-base" placeholder="base_url" value="${escapeHtml(c.base_url||'')}">
-    <input id="lm-key" placeholder="api_key" value="${escapeHtml(c.api_key||'')}">
-    <select id="lm-protocol"><option value="openai" ${c.protocol==='openai'?'selected':''}>openai</option><option value="anthropic" ${c.protocol==='anthropic'?'selected':''}>anthropic</option></select>
-    <input id="lm-rpm" type="number" placeholder="RPM(空=不限)" value="${c.rpm_limit||''}">
-    <input id="lm-conc" type="number" placeholder="并发(空=不限)" value="${c.concurrency||''}">`;
-}
-async function openLlmModal(id) {
-  let c = {};
-  if (id) {
-    const {configs = []} = await (await fetch("/api/admin/llm-config")).json().catch(() => ({}));
-    c = configs.find(x => x.id === id) || {};
+  const gws = {};
+  for (const c of configs) {
+    const k = c.base_url + "" + (c.api_key || "");
+    (gws[k] ||= {base_url: c.base_url, api_key: c.api_key || "", models: []});
+    gws[k].models.push(c);
   }
-  openAdminModal(id ? "编辑模型" : "新增模型", _llmFormHTML(c), () => saveLlmFromModal(id));
+  window._llmGws = Object.values(gws);
+  renderLlmGateways();
 }
-async function saveLlmFromModal(id) {
-  const cfgId = document.getElementById("lm-id").value.trim();
-  const targetId = id || cfgId;
-  if (!targetId) return alert("填配置ID");
-  const num = v => { const n = parseInt(v); return isNaN(n) ? null : n; };
-  const body = {
-    purpose: document.getElementById("lm-purpose").value,
-    model: document.getElementById("lm-model").value.trim(),
-    base_url: document.getElementById("lm-base").value.trim(),
-    api_key: document.getElementById("lm-key").value.trim(),
-    protocol: document.getElementById("lm-protocol").value,
-    temperature: 0.0, timeout: 60, max_context: 32000,
-    rpm_limit: num(document.getElementById("lm-rpm").value),
-    concurrency: num(document.getElementById("lm-conc").value),
-    enabled: true,
+function renderLlmGateways() {
+  const el = document.getElementById("llm-cards");
+  const gws = window._llmGws || [];
+  if (!gws.length) { el.innerHTML = '<p class="placeholder">暂无模型配置，点右上"+ 新增"配网关</p>'; return; }
+  el.innerHTML = gws.map((g, gi) => {
+    const kh = g.api_key ? g.api_key.slice(0,5)+"…"+g.api_key.slice(-4) : "（无key）";
+    return `<div style="border:1px solid #e0e0e0;border-radius:8px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f5f5f5;border-radius:8px 8px 0 0;flex-wrap:wrap">
+        <b>🌐 ${escapeHtml(g.base_url)}</b>
+        <span style="font-size:11px;color:#888">key: ${escapeHtml(kh)}</span>
+        <span style="margin-left:auto;display:flex;gap:4px">
+          <button class="llm-edit-btn" onclick="discoverModels(${gi})">🔍 发现模型</button>
+          <button class="llm-edit-btn" onclick="openLlmModelModal(${gi})">+ 加模型</button>
+        </span>
+      </div>
+      <div style="padding:4px 10px">${g.models.map(c => _renderLlmModel(c)).join("") || '<p class="placeholder">无模型</p>'}</div>
+    </div>`;
+  }).join("");
+}
+function _renderLlmModel(c) {
+  const checks = LLM_PURPOSES.map(({p,label}) => {
+    const has = (c.purposes || []).includes(p);
+    return `<label style="font-size:12px;margin-right:10px;cursor:pointer;color:${has && c.enabled ? '#2e7d32' : '#888'}"><input type="checkbox" ${has?"checked":""} onchange="toggleModelPurpose('${escapeHtml(c.id)}','${p}')"> ${label}</label>`;
+  }).join("");
+  return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f0f0f0;flex-wrap:wrap">
+    <b style="min-width:170px;font-family:Menlo,Monaco,monospace;font-size:13px">${escapeHtml(c.model)}</b>
+    <span>${checks}</span>
+    <span style="margin-left:auto;display:flex;gap:4px">
+      <button class="llm-edit-btn" onclick="toggleLlmModel('${escapeHtml(c.id)}')">${c.enabled?"停用":"启用"}</button>
+      <button class="li-del" onclick="deleteLlmModel('${escapeHtml(c.id)}')">×</button>
+    </span>
+  </div>`;
+}
+async function toggleModelPurpose(id, purpose) {
+  // 勾/取消用途 = 改该模型的 purposes（取消不删模型，只移除该用途）
+  const c = _findCfg(id); if (!c) return;
+  const ps = new Set(c.purposes || []);
+  if (ps.has(purpose)) ps.delete(purpose); else ps.add(purpose);
+  const purposes = [...ps];
+  if (!purposes.length) return alert("至少留一个用途；都不想要就点 × 删模型");
+  try {
+    await _putLlm(id, c.base_url, c.api_key, c.model, purposes, c.enabled,
+      {protocol: c.protocol, rpm_limit: c.rpm_limit, concurrency: c.concurrency});
+  } catch(e) { alert("保存失败: " + e.message); }
+  await loadLlm();
+}
+async function toggleLlmModel(id) {
+  const c = _findCfg(id); if (!c) return;
+  try {
+    await _putLlm(id, c.base_url, c.api_key, c.model, c.purposes, !c.enabled,
+      {protocol: c.protocol, rpm_limit: c.rpm_limit, concurrency: c.concurrency});
+  } catch(e) { alert("操作失败: " + e.message); }
+  await loadLlm();
+}
+async function deleteLlmModel(id) {
+  const c = _findCfg(id); if (!c) return;
+  if (!confirm(`删除模型 ${c.model}？`)) return;
+  await fetch(`/api/admin/llm-config/${encodeURIComponent(id)}`, {method:"DELETE"});
+  await loadLlm();
+}
+function _llmPurpChecks() {
+  return LLM_PURPOSES.map(({p,label}) => `<label style="font-size:13px;margin-right:10px"><input type="checkbox" id="lm-p-${p}"> ${label}</label>`).join("");
+}
+async function openLlmModal() {  // 顶部"+ 新增"：新网关 + 首个模型
+  openAdminModal("新增网关 + 模型",
+    `<input id="lm-base" placeholder="base_url（如 http://10.0.0.1:3001）">
+     <input id="lm-key" type="password" placeholder="api_key">
+     <input id="lm-model" placeholder="模型名（含 embed→向量，其他→对话+归因）">
+     <select id="lm-protocol"><option value="openai">openai</option><option value="anthropic">anthropic</option></select>
+     <p style="font-size:11px;color:#888">用途按模型名自动识别，无需手选</p>`,
+    () => saveLlmModel(null));
+}
+async function openLlmModelModal(gi) {  // 已有网关加模型
+  const g = window._llmGws[gi]; if (!g) return;
+  openAdminModal(`加模型（${g.base_url}）`,
+    `<input id="lm-model" placeholder="模型名（含 embed→向量，其他→对话+归因）">
+     <p style="font-size:11px;color:#888">网关：${escapeHtml(g.base_url)}（key ${escapeHtml(g.api_key?g.api_key.slice(0,5)+"…":"无")}）· 用途按名自动识别</p>`,
+    () => saveLlmModel(gi));
+}
+async function saveLlmModel(gi) {
+  const g = (gi != null && window._llmGws?.[gi]) || null;
+  const base = g ? g.base_url : document.getElementById("lm-base").value.trim();
+  const key = g ? g.api_key : document.getElementById("lm-key").value.trim();
+  const model = document.getElementById("lm-model").value.trim();
+  const protocol = document.getElementById("lm-protocol")?.value || "openai";
+  if (!base || !model) return alert("base_url 和模型名必填");
+  if (!g && !key) return alert("新网关要填 api_key");
+  try {
+    await _putLlm(_llmId(base, model), base, key, model, _autoPurposes(model), true, {protocol});
+  } catch(e) { return alert("保存失败: " + e.message); }
+  closeAdminModal(); await loadLlm();
+}
+async function discoverModels(gi) {
+  const g = window._llmGws?.[gi]; if (!g) return;
+  openAdminModal(`发现模型（${g.base_url}）`, '<p class="placeholder">拉取中…</p>', null);
+  const body = document.querySelector("#admin-modal-body");
+  let models = [];
+  try {
+    const r = await fetch("/api/admin/llm-config/discover", {method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({base_url: g.base_url, api_key: g.api_key})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || r.status);
+    models = data.models || [];
+  } catch(e) { body.innerHTML = `<p class="placeholder err">拉取失败: ${e.message}</p>`; return; }
+  if (!models.length) { body.innerHTML = '<p class="placeholder">网关未返回模型</p>'; return; }
+  body.innerHTML = `<div style="display:flex;gap:6px;margin-bottom:8px"><button class="llm-edit-btn" onclick="document.querySelectorAll('#admin-modal-body .dc').forEach(c=>c.checked=true)">全选</button><button class="llm-edit-btn" onclick="document.querySelectorAll('#admin-modal-body .dc').forEach(c=>c.checked=false)">清空</button></div>
+    <div style="max-height:45vh;overflow:auto">${models.map(m=>`<label style="display:block;padding:4px 0;font-size:13px"><input type="checkbox" class="dc" value="${escapeHtml(m)}" checked> ${escapeHtml(m)}</label>`).join("")}</div>
+    <p style="font-size:11px;color:#888;margin-top:8px">用途自动识别：含 embed → 向量；其他 → 对话+归因。导入为停用，到列表启用</p>`;
+  const saveBtn = document.getElementById("admin-modal-save");
+  saveBtn.style.display = "";
+  saveBtn.onclick = async () => {
+    const picked = [...document.querySelectorAll("#admin-modal-body .dc:checked")].map(c => c.value);
+    if (!picked.length) return alert("勾选要导入的模型");
+    const existing = new Set(g.models.map(m => m.model));
+    const fresh = picked.filter(m => !existing.has(m));
+    try {
+      // 用途程序识别（embed→向量，其他→对话+归因），单行建模型，停用导入
+      for (const m of fresh) {
+        await _putLlm(_llmId(g.base_url, m), g.base_url, g.api_key, m, _autoPurposes(m), false, {});
+      }
+    } catch(e) { return alert("导入失败: " + e.message); }
+    closeAdminModal(); await loadLlm();
+    if (picked.length > fresh.length) alert(`导入 ${fresh.length} 个新模型，跳过 ${picked.length - fresh.length} 个已配置`);
   };
-  if (!body.model || !body.base_url) return alert("模型名和 base_url 必填");
-  const r = await fetch(`/api/admin/llm-config/${encodeURIComponent(targetId)}`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-  if (r.ok) { closeAdminModal(); await loadLlm(); } else alert("保存失败");
-}
-async function toggleLlm(id, enabled) {
-  const {configs = []} = await (await fetch("/api/admin/llm-config")).json().catch(() => ({}));
-  const c = configs.find(x => x.id === id);
-  if (!c) return;
-  const body = {purpose: c.purpose, model: c.model, base_url: c.base_url, api_key: c.api_key,
-                protocol: c.protocol, temperature: c.temperature, timeout: c.timeout, max_context: c.max_context,
-                rpm_limit: c.rpm_limit, concurrency: c.concurrency, enabled: !enabled};
-  await fetch(`/api/admin/llm-config/${encodeURIComponent(id)}`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-  await loadLlm();
-}
-async function deleteLlm(id) {
-  if (!confirm("删除该模型配置？")) return;
-  await fetch(`/api/admin/llm-config/${encodeURIComponent(id)}`, {method: "DELETE"});
-  await loadLlm();
 }
 
 let selectedDsId = null;

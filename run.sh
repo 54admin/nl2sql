@@ -6,9 +6,6 @@
 set -e
 cd "$(dirname "$0")"
 
-# 本地环境变量（.env 不进 git）：数据源密码加密密钥 NL2SQL_DS_KEY 等
-if [[ -f .env ]]; then set -a; . .env; set +a; fi
-
 # 依赖兜底（没装就装）
 python3 -c "import uvicorn, fastapi" 2>/dev/null || python3 -m pip install -q uvicorn fastapi
 

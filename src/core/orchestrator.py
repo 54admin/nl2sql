@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import asdict
+from datetime import datetime
 
 from src.core.types import CancelToken, SSEEvent
 from src.logging import get_logger
@@ -58,6 +59,14 @@ class Orchestrator:
         system_prompt = None
         if self._prompts is not None:
             system_prompt = await self._prompts.get("default")
+        # 注入当前日期：LLM 据此换算"本月/上月"等相对时间，否则会瞎猜年份（审计实证猜成去年）
+        if system_prompt:
+            _now = datetime.now()
+            _wd = "一二三四五六日"[_now.weekday()]
+            _ym = f"{_now.year}-{_now.month:02d}"
+            system_prompt = (f"【当前日期】今天 {_now.year}-{_now.month:02d}-{_now.day:02d}"
+                             f"（周{_wd}），当前年月 {_ym}。用户说\"本月/上月/最近\"等相对时间时据此换算。\n\n"
+                             + system_prompt)
         # 业务规则段追加到 system_prompt（P2）：让 LLM 知晓人工录入口径
         if system_prompt and self._rule_store is not None:
             rules_text = await self._rule_store.all_text()

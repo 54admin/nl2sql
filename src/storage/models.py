@@ -119,10 +119,10 @@ class LlmConfigRow(Base):
     LLMService 按 id=用途 取 enabled 配置。"""
     __tablename__ = "llm_config"
     __table_args__ = {"comment": "动态LLM配置（按用途多行analysis/embedding/attribution+启停）"}
-    id: Mapped[str] = mapped_column(String(64), primary_key=True,
+    id: Mapped[str] = mapped_column(String(128), primary_key=True,
                                      comment="配置ID（自定义名，如 qwen-chat）")
-    purpose: Mapped[str] = mapped_column(String(32), default="analysis", index=True,
-                                          comment="用途（analysis对话/embedding向量/attribution归因）")
+    purposes: Mapped[list] = mapped_column(JSON, default=list,
+                                           comment="用途列表（analysis/embedding/attribution 子集，可多选）")
     model: Mapped[str] = mapped_column(String(128), comment="模型名")
     base_url: Mapped[str] = mapped_column(String(256), comment="API地址")
     api_key: Mapped[str] = mapped_column(String(256), comment="密钥")

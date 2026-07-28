@@ -1,0 +1,15 @@
+# 本地开发配置：复制本文件为 application-dev.yml 并填实际值
+# （application-dev.yml 已在 .gitignore，不会入库）
+app:
+  name: NL2SQL AI问数——DEV
+redis:
+  host: "127.0.0.1"
+  port: 6379
+  db: 0
+  password:
+postgres:
+  host: "127.0.0.1"
+  port: 5432
+  database: nl2sql
+  username: postgres
+  password: <your_postgres_password>

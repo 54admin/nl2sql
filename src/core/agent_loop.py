@@ -26,6 +26,20 @@ def _args_key(args: dict) -> str:
     return json.dumps(args, sort_keys=True, ensure_ascii=False)
 
 
+def _sql_failed(summary: str) -> bool:
+    """execute_sql 结果是否算失败（空结果或报错），供试错熔断计数。
+    成功时 summary 是 JSON（{"result_id":..,"rows":N,...}）；失败时是纯文本错误兜底。
+    成功看 rows==0；非 JSON 一律算失败（execute_sql 失败必走文本兜底）。"""
+    if not summary:
+        return True
+    if summary.startswith("{"):
+        try:
+            return int(json.loads(summary).get("rows", -1)) == 0
+        except (ValueError, TypeError):
+            return False
+    return True
+
+
 def _normalize_args(raw) -> dict:
     """LLM 返回的 args 可能是 str，归一化成 dict。None/list/int 等兜底成 {}。"""
     if isinstance(raw, dict):
@@ -56,12 +70,18 @@ class AgentLoop:
     def __init__(self, llm: LLMService, registry: ToolRegistry, state: SessionState,
                  *, max_turns: int = 10, max_ask_user: int = 2,
                  max_context: int | None = None,
+                 max_sql: int = 4, max_sql_fail_streak: int = 2,
+                 max_meta_per_run: int = 1,
                  session_manager=None, audit=None):
         self._llm = llm
         self._registry = registry
         self._state = state
         self._max_turns = max_turns
         self._max_ask_user = max_ask_user
+        # 试错熔断（P0）：审计实证 LLM 单对话能跑 15 条 SQL 撞爆网关额度，必须拦。
+        self._max_sql = max_sql                        # 单次对话 execute_sql 硬上限
+        self._max_sql_fail_streak = max_sql_fail_streak  # 连续空/错几次就提示 LLM 收手
+        self._max_meta_per_run = max_meta_per_run        # query_metadata 每轮最多查几次
         # 压缩阈值（token，逼近即压）。对齐 Claude Code：window 即阈值，绝对值非占比。
         # None=运行时读 LLM 配置/环境变量 max_context，拿不到用 32000 兜底。
         self._max_context = max_context
@@ -88,6 +108,10 @@ class AgentLoop:
         last_answer = ""
         ask_count = 0
         prev_keys: set[tuple[str, str]] = set()
+        # 试错熔断计数器（P0）：单 run 内 query_metadata/execute_sql 调用数与连续失败统计
+        meta_calls = 0
+        sql_calls = 0
+        sql_fail_streak = 0
         turn = 0
         try:
             for turn in range(self._max_turns):
@@ -175,7 +199,37 @@ class AgentLoop:
                             self._audit_event("tool_result", {"name": name, "summary": tip}, trace_id, turn)
                             continue
 
+                    # 试错熔断（P0）：query_metadata 每轮只查1次；execute_sql 硬上限。
+                    # 防 LLM 反复试探烧光网关额度（审计实证：单对话 15 条 SQL 撞爆配额）。
+                    if name == "query_metadata":
+                        meta_calls += 1
+                        if meta_calls > self._max_meta_per_run:
+                            tip = "元数据本轮已查过，直接用上面返回的表清单，不要重复调 query_metadata。"
+                            msgs.append({"role": "tool", "tool_call_id": cid, "content": tip})
+                            yield SSEEvent("tool_result",
+                                           {"name": name, "summary": tip, "converged": True}, trace_id)
+                            self._audit_event("tool_result", {"name": name, "summary": tip}, trace_id, turn)
+                            continue
+                    elif name == "execute_sql":
+                        if sql_calls >= self._max_sql:
+                            tip = f"已达查询上限（{self._max_sql} 次），停止继续查，基于已有结果直接回答用户。"
+                            msgs.append({"role": "tool", "tool_call_id": cid, "content": tip})
+                            yield SSEEvent("tool_result",
+                                           {"name": name, "summary": tip, "converged": True}, trace_id)
+                            self._audit_event("tool_result", {"name": name, "summary": tip}, trace_id, turn)
+                            continue
+                        sql_calls += 1
+
                     result = await self._registry.execute(name, args, ctx, cancel_token)
+
+                    # execute_sql 连续空/错熔断（P0）：提示 LLM 收手，别闷头试到口径都乱。
+                    fail_hint = ""
+                    if name == "execute_sql":
+                        sql_fail_streak = sql_fail_streak + 1 if _sql_failed(result.summary) else 0
+                        if sql_fail_streak >= self._max_sql_fail_streak:
+                            fail_hint = ("\n\n【系统提示】连续多次查询无结果，很可能是筛选口径不对"
+                                         "（时间范围/取值/字段名）。停止重试，基于已有信息作答"
+                                         "或直接说明'未查到符合条件的数据'。")
 
                     if result.suspended:
                         # ask_user 挂起：本轮不 append tool 消息——
@@ -189,12 +243,13 @@ class AgentLoop:
                                           {"question": result.summary, "turn": turn}, trace_id, turn)
                         return
 
+                    final_summary = result.summary + fail_hint
                     msgs.append({"role": "tool", "tool_call_id": cid,
-                                 "content": result.summary})
+                                 "content": final_summary})
                     yield SSEEvent("tool_result",
-                                   {"name": name, "summary": result.summary,
+                                   {"name": name, "summary": final_summary,
                                     "result_id": result.result_id}, trace_id)
-                    self._audit_event("tool_result", {"name": name, "summary": result.summary,
+                    self._audit_event("tool_result", {"name": name, "summary": final_summary,
                                                       "result_id": result.result_id}, trace_id, turn)
 
                     if result.finished:

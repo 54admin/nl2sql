@@ -8,11 +8,6 @@ from src.storage.pg_client import AsyncSessionFactory, init_db
 from src.tools.metadata import _list_enabled_tables, query_metadata
 
 
-@pytest.fixture(autouse=True)
-def fernet_key(monkeypatch):
-    from cryptography.fernet import Fernet
-    monkeypatch.setenv("NL2SQL_DS_KEY", Fernet.generate_key().decode())
-
 
 class FakeEngine:     # 不连真库，fetch 被 mock，engine 仅作占位
     pass

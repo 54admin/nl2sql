@@ -44,13 +44,6 @@ class FakeEngine:
         return self._c
 
 
-@pytest.fixture(autouse=True)
-def fernet_key(monkeypatch):
-    """manager 在 import 时引用 crypto，但本测试 mock 掉了 get_engine，
-    实际不会触发加解密；fixture 留着与 test_query_metadata 同款兜底。"""
-    from cryptography.fernet import Fernet
-    monkeypatch.setenv("NL2SQL_DS_KEY", Fernet.generate_key().decode())
-
 
 @pytest.fixture(autouse=True)
 def _no_sensitive_columns(monkeypatch):

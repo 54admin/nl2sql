@@ -395,3 +395,60 @@ async def test_no_compress_when_under_window_threshold(env):
                      session_manager=mgr)
     await _collect(loop.run(sid, "u1", "查", "t1", CancelToken()))
     assert len(llm.summarize_calls) == 0
+
+
+# ===== 试错熔断（P0）：query_metadata 去重 / execute_sql 硬上限 / 连续空错收手 =====
+
+@pytest.mark.asyncio
+async def test_guard_meta_once_per_run(env):
+    """query_metadata 每轮只查1次：第二次调用被拦，registry 只执行1次。"""
+    mgr, state = env
+    sid = await mgr.create_session("u1", "web")
+    llm = FakeLLM([
+        FakeResp(content="", tool_calls=[{"name": "query_metadata", "args": {}, "id": "m1"}]),
+        FakeResp(content="", tool_calls=[{"name": "query_metadata", "args": {}, "id": "m2"}]),
+        FakeResp(content="done"),
+    ])
+    reg = FakeRegistry({"query_metadata": ToolResult(summary='{"tables":[]}')})
+    loop = AgentLoop(llm, reg, state, session_manager=mgr)
+    events = await _collect(loop.run(sid, "u1", "查", "t1", CancelToken()))
+    assert sum(1 for a in reg.executed if a[0] == "query_metadata") == 1
+    assert any(e.type == "tool_result" and e.data.get("converged") for e in events)
+
+
+@pytest.mark.asyncio
+async def test_guard_sql_hard_limit(env):
+    """execute_sql 硬上限：超限的调用被拦不执行。"""
+    mgr, state = env
+    sid = await mgr.create_session("u1", "web")
+    sql_ok = '{"result_id":"r","rows":1,"columns":["a"],"preview":[]}'
+    llm = FakeLLM([
+        FakeResp(content="", tool_calls=[{"name": "execute_sql", "args": {"sql": "select 1"}, "id": "s1"}]),
+        FakeResp(content="", tool_calls=[{"name": "execute_sql", "args": {"sql": "select 2"}, "id": "s2"}]),
+        FakeResp(content="", tool_calls=[{"name": "execute_sql", "args": {"sql": "select 3"}, "id": "s3"}]),
+        FakeResp(content="done"),
+    ])
+    reg = FakeRegistry({"execute_sql": ToolResult(summary=sql_ok)})
+    loop = AgentLoop(llm, reg, state, max_sql=2, session_manager=mgr)
+    events = await _collect(loop.run(sid, "u1", "查", "t1", CancelToken()))
+    assert sum(1 for a in reg.executed if a[0] == "execute_sql") == 2
+    assert any(e.type == "tool_result" and e.data.get("converged") for e in events)
+
+
+@pytest.mark.asyncio
+async def test_guard_sql_fail_streak(env):
+    """连续2次空结果触发熔断：第2次 tool_result 回灌【系统提示】让 LLM 收手。"""
+    mgr, state = env
+    sid = await mgr.create_session("u1", "web")
+    sql_empty = '{"result_id":"r","rows":0,"columns":[],"preview":[]}'
+    llm = FakeLLM([
+        FakeResp(content="", tool_calls=[{"name": "execute_sql", "args": {"sql": "select 1"}, "id": "s1"}]),
+        FakeResp(content="", tool_calls=[{"name": "execute_sql", "args": {"sql": "select 2"}, "id": "s2"}]),
+        FakeResp(content="没查到"),
+    ])
+    reg = FakeRegistry({"execute_sql": ToolResult(summary=sql_empty)})
+    loop = AgentLoop(llm, reg, state, max_sql_fail_streak=2, session_manager=mgr)
+    events = await _collect(loop.run(sid, "u1", "查", "t1", CancelToken()))
+    sql_results = [e for e in events if e.type == "tool_result"
+                   and e.data.get("name") == "execute_sql"]
+    assert any("系统提示" in e.data["summary"] for e in sql_results)

@@ -1,4 +1,4 @@
-"""admin LLM 配置路由测试（CRUD：列表/新建/改/删/启停，按 purpose）。"""
+"""admin LLM 配置路由测试（model 级：一行=一个模型，purposes 多选，启用互斥移除用途）。"""
 import pytest
 import httpx
 from fastapi import FastAPI
@@ -17,35 +17,34 @@ async def client():
         yield c
 
 
-async def _put(c, cid, purpose="analysis", **kw):
-    body = {"purpose": purpose, "model": "m", "base_url": "u", "enabled": True}
+async def _put(c, cid, purposes=None, **kw):
+    body = {"purposes": purposes if purposes is not None else ["analysis"], "model": "m", "base_url": "u", "enabled": True}
     body.update(kw)
     return await c.put(f"/api/admin/llm-config/{cid}", json=body)
 
 
 @pytest.mark.asyncio
 async def test_list_empty(client):
-    resp = await client.get("/api/admin/llm-config")
-    assert resp.json() == {"configs": []}
+    assert (await client.get("/api/admin/llm-config")).json() == {"configs": []}
 
 
 @pytest.mark.asyncio
 async def test_put_creates(client):
-    resp = await _put(client, "qwen-chat", purpose="analysis", model="Qwen")
-    assert resp.status_code == 200
-    assert resp.json()["id"] == "qwen-chat"
+    r = await _put(client, "qwen", purposes=["analysis", "attribution"], model="Qwen")
+    assert r.status_code == 200
     cfgs = {c["id"]: c for c in (await client.get("/api/admin/llm-config")).json()["configs"]}
-    assert cfgs["qwen-chat"]["model"] == "Qwen"
-    assert cfgs["qwen-chat"]["purpose"] == "analysis"
+    assert cfgs["qwen"]["purposes"] == ["analysis", "attribution"]
+    assert cfgs["qwen"]["model"] == "Qwen"
 
 
 @pytest.mark.asyncio
-async def test_put_then_put_bumps_version(client):
-    await _put(client, "m1")
-    await _put(client, "m1", model="m2")
-    cfg = {c["id"]: c for c in (await client.get("/api/admin/llm-config")).json()["configs"]}["m1"]
-    assert cfg["version"] == 2
-    assert cfg["model"] == "m2"
+async def test_invalid_purpose_rejected(client):
+    assert (await _put(client, "m1", purposes=["foo"])).status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_empty_purposes_rejected(client):
+    assert (await _put(client, "m1", purposes=[])).status_code == 400
 
 
 @pytest.mark.asyncio
@@ -61,19 +60,14 @@ async def test_delete_missing_404(client):
 
 
 @pytest.mark.asyncio
-async def test_invalid_purpose_rejected(client):
-    resp = await _put(client, "m1", purpose="foo")
-    assert resp.status_code == 400
-
-
-@pytest.mark.asyncio
-async def test_same_purpose_multiple(client):
-    """同用途可多个（备用切换）。"""
-    await _put(client, "chat-a", purpose="analysis", model="A")
-    await _put(client, "chat-b", purpose="analysis", model="B")
-    cfgs = [c for c in (await client.get("/api/admin/llm-config")).json()["configs"]
-            if c["purpose"] == "analysis"]
-    assert len(cfgs) == 2
+async def test_enabling_removes_overlap_purpose_from_others(client):
+    """一用途一启用：启用 B(analysis) → A 的 analysis 从 purposes 移除（模型不删，只移除冲突用途）。"""
+    await _put(client, "a", purposes=["analysis", "attribution"], enabled=True)
+    await _put(client, "b", purposes=["analysis"], enabled=True)   # B 抢 analysis
+    cfgs = {c["id"]: c for c in (await client.get("/api/admin/llm-config")).json()["configs"]}
+    assert cfgs["a"]["purposes"] == ["attribution"]   # analysis 被移除，attribution 留着（不冲突）
+    assert cfgs["b"]["purposes"] == ["analysis"]
+    assert cfgs["a"]["enabled"] is True               # A 模型还在、仍 enabled
 
 
 @pytest.mark.asyncio

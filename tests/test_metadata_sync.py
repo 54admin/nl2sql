@@ -6,11 +6,6 @@ from src.storage.models import Datasource, MetadataColumn, MetadataTable
 from src.storage.pg_client import AsyncSessionFactory, init_db
 
 
-@pytest.fixture(autouse=True)
-def fernet_key(monkeypatch):
-    from cryptography.fernet import Fernet
-    monkeypatch.setenv("NL2SQL_DS_KEY", Fernet.generate_key().decode())
-
 
 class FakeEngine:
     """假业务库 engine：connect() → FakeConn，run_sync 调度到 collect_fn/fetch_fn 返回预设数据。"""

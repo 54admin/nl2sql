@@ -54,12 +54,12 @@ class LLMService:
         try:
             async with AsyncSessionFactory() as s:
                 from sqlalchemy import select
-                # 按 purpose 取 enabled 的（同用途多个时取 version 最新），id 不再=用途
-                stmt = (select(LlmConfigRow).where(
-                            LlmConfigRow.purpose == purpose,
-                            LlmConfigRow.enabled.is_(True))
-                        .order_by(LlmConfigRow.version.desc()).limit(1))
-                row = (await s.execute(stmt)).scalar_one_or_none()
+                # model 级：取 enabled 且 purposes 含 purpose 的（取 version 最新）；python 过滤跨方言
+                rows = (await s.execute(select(LlmConfigRow).where(
+                    LlmConfigRow.enabled.is_(True)))).scalars().all()
+                matched = sorted([r for r in rows if purpose in (r.purposes or [])],
+                                 key=lambda r: r.version, reverse=True)
+                row = matched[0] if matched else None
                 if row is None:
                     return None
                 self._dynamic[purpose] = {

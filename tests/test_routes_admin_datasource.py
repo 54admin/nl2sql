@@ -7,11 +7,6 @@ from src.storage.pg_client import init_db
 from src.web.routes.admin_datasource import build_datasource_router
 
 
-@pytest.fixture(autouse=True)
-def fernet_key(monkeypatch):
-    from cryptography.fernet import Fernet
-    monkeypatch.setenv("NL2SQL_DS_KEY", Fernet.generate_key().decode())
-
 
 @pytest.fixture
 async def client():

@@ -41,6 +41,17 @@ def build_metadata_router() -> APIRouter:
                    for t in tables]
             return {"tables": out}
 
+    @router.get("/api/admin/metadata/enabled-tables")
+    async def enabled_tables() -> dict:
+        """所有参与问数（enabled=true）的表全限定名列表。
+        业务规则页「表名」下拉用——只让用户选已加入查询的表。"""
+        async with AsyncSessionFactory() as s:
+            rows = (await s.execute(MetadataTable.__table__.select().where(
+                MetadataTable.enabled.is_(True)))).all()
+        names = [f"{r.schema_name}.{r.table_name}" if r.schema_name else r.table_name
+                 for r in rows]
+        return {"tables": names}
+
     @router.get("/api/admin/metadata/tables/{table_id}/columns")
     async def get_table_columns(table_id: int) -> dict:
         """点表展开时实时拉该表字段（连业务库，字段懒加载，不存 PG）。

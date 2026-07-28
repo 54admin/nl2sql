@@ -174,7 +174,8 @@ async def test_prompt_store_injects_system_prompt(session_mgr):
     sid = await session_mgr.create_session("u1", "web")
     await _collect(orch.handle_message("u1", sid, "你好",
                                        ViewerMode.USER, "t1"))
-    assert loop.calls[0]["system_prompt"] == "你是问数助手"
+    assert "你是问数助手" in loop.calls[0]["system_prompt"]
+    assert "【当前日期】" in loop.calls[0]["system_prompt"]   # 自动注入当前日期
     assert prompts.get_calls == ["default"]
 
 
@@ -202,7 +203,7 @@ async def test_rule_store_appends_to_system_prompt(session_mgr):
     await _collect(orch.handle_message("u1", sid, "你好",
                                        ViewerMode.USER, "t1"))
     sp = loop.calls[0]["system_prompt"]
-    assert sp.startswith("你是问数助手")
+    assert "你是问数助手" in sp
     assert "【业务规则】" in sp
     assert "发电量单位" in sp
 
@@ -217,4 +218,4 @@ async def test_no_rule_store_keeps_prompt_untouched(session_mgr):
     sid = await session_mgr.create_session("u1", "web")
     await _collect(orch.handle_message("u1", sid, "你好",
                                        ViewerMode.USER, "t1"))
-    assert loop.calls[0]["system_prompt"] == "你是问数助手"
+    assert "你是问数助手" in loop.calls[0]["system_prompt"]
