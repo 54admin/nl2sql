@@ -146,10 +146,13 @@ class CardStream:
                .card_id(self._card_id).element_id(element_id)
                .request_body(ContentCardElementRequestBody.builder()
                              .content(content).sequence(self._next_seq()).build()).build())
-        resp = await self._lark.cardkit.v1.card_element.acontent(req)
-        if not resp.success():
-            log.warning("飞书流式文本失败 card=%s eid=%s seq=%s code=%s msg=%s",
-                        self._card_id, element_id, self._seq, resp.code, resp.msg)
+        try:
+            resp = await self._lark.cardkit.v1.card_element.acontent(req)
+            if not resp.success():
+                log.warning("飞书流式文本失败 card=%s eid=%s code=%s msg=%s",
+                            self._card_id, element_id, resp.code, resp.msg)
+        except Exception as e:
+            log.warning("飞书流式文本异常/超时 card=%s eid=%s: %s", self._card_id, element_id, e)
 
     async def _close_streaming(self) -> None:
         from lark_oapi.api.cardkit.v1 import SettingsCardRequest, SettingsCardRequestBody
@@ -157,9 +160,12 @@ class CardStream:
                .request_body(SettingsCardRequestBody.builder()
                              .settings(json.dumps({"config": {"streaming_mode": False}}))
                              .sequence(self._next_seq()).build()).build())
-        resp = await self._lark.cardkit.v1.card.asettings(req)
-        if not resp.success():
-            log.warning("飞书关流式失败 card=%s code=%s msg=%s", self._card_id, resp.code, resp.msg)
+        try:
+            resp = await self._lark.cardkit.v1.card.asettings(req)
+            if not resp.success():
+                log.warning("飞书关流式失败 card=%s code=%s msg=%s", self._card_id, resp.code, resp.msg)
+        except Exception as e:
+            log.warning("飞书关流式异常/超时 card=%s: %s", self._card_id, e)
 
     async def _add_element(self, element: dict) -> None:
         """card_element/create：insert_before answer 插入独立过程元素（带图标）。
@@ -170,10 +176,13 @@ class CardStream:
                              .type("insert_before").target_element_id(card.ANSWER_EID)
                              .uuid(uuid4().hex).sequence(self._next_seq())
                              .elements(json.dumps([element], ensure_ascii=False)).build()).build())
-        resp = await self._lark.cardkit.v1.card_element.acreate(req)
-        if not resp.success():
-            log.warning("飞书插入过程元素失败 card=%s code=%s msg=%s",
-                        self._card_id, resp.code, resp.msg)
+        try:
+            resp = await self._lark.cardkit.v1.card_element.acreate(req)
+            if not resp.success():
+                log.warning("飞书插入过程元素失败 card=%s code=%s msg=%s",
+                            self._card_id, resp.code, resp.msg)
+        except Exception as e:
+            log.warning("飞书插入过程元素异常/超时 card=%s: %s", self._card_id, e)
 
     async def _update_card_full(self, card_json: dict) -> None:
         """全量替换卡片（card.update）：done 后兜底，确保过程+答案完整 + summary 更新。
@@ -184,9 +193,12 @@ class CardStream:
         req = (UpdateCardRequest.builder().card_id(self._card_id)
                .request_body(UpdateCardRequestBody.builder().card(card_obj)
                              .sequence(self._next_seq()).build()).build())
-        resp = await self._lark.cardkit.v1.card.aupdate(req)
-        if not resp.success():
-            log.warning("飞书全量更新卡片失败 card=%s code=%s msg=%s", self._card_id, resp.code, resp.msg)
+        try:
+            resp = await self._lark.cardkit.v1.card.aupdate(req)
+            if not resp.success():
+                log.warning("飞书全量更新卡片失败 card=%s code=%s msg=%s", self._card_id, resp.code, resp.msg)
+        except Exception as e:
+            log.warning("飞书全量更新异常/超时 card=%s: %s", self._card_id, e)
 
     def _next_seq(self) -> int:
         self._seq += 1
@@ -261,7 +273,7 @@ class FeishuAdapter:
                    .build())
         self._lark_client = (lark.Client.builder()
                              .app_id(self._cfg.app_id).app_secret(self._cfg.app_secret)
-                             .log_level(lark.LogLevel.INFO).build())
+                             .log_level(lark.LogLevel.INFO).timeout(15).build())  # 15s：防飞书 API hang 死锁 agent→卡片卡"生成中"
         self._ws = WsClient(self._cfg.app_id, self._cfg.app_secret,
                             event_handler=handler, log_level=lark.LogLevel.INFO,
                             auto_reconnect=True)
