@@ -9,5 +9,7 @@ kb-insight/
 kb-txt/
 kb-xlsx-txt/
 kb-csv/
-# 本地开发配置（含 DB 密码，不入库；克隆后复制 application-dev.yml.example）
-config/application-dev.yml
+# 配置文件含 DB 密码/凭证，一律不入库；克隆后复制 application-dev.yml.example 自行改
+config/application.yml
+config/application-*.yml
+!config/*.example
