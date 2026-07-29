@@ -111,7 +111,9 @@ async def execute_sql(args: dict, ctx: LoopContext,
 EXECUTE_SQL = ToolDefinition(
     name="execute_sql",
     description=("在业务库执行只读 SQL 查询，返回结果摘要（行数/列名/前 5 行预览）+ result_id。"
-                 "调用前先用 query_metadata 了解可查的表与字段。"),
+                 "写 SQL 必须依据对话里已有的 query_metadata 结果（表名/字段类型/格式/表级规则）；"
+                 "上下文里没有该表元数据时再 query_metadata 查一次，已有就不必重复查。"
+                 "禁止凭印象猜字段格式——'YYYY-MM' 年月字符串字段用 = / IN / 范围，不得用 LIKE。"),
     parameters={"type": "object",
                 "properties": {"sql": {"type": "string", "description": "要执行的只读 SQL"},
                                "datasource_id": {"type": "integer", "description": "数据源 ID（可选，缺省取第一个）"}},

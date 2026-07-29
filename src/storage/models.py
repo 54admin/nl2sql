@@ -3,6 +3,7 @@
 列/表级 comment= 会进 DDL（create_all 建表时发 COMMENT ON TABLE/COLUMN）；
 已存在的表靠 pg_client.apply_table_comments() 把模型注释刷进 PG，单一事实源=本文件，不维护第二份 SQL。"""
 from datetime import datetime
+from uuid import uuid4
 
 from sqlalchemy import (JSON, String, Text, DateTime, Integer, Boolean,
                         ForeignKey, TypeDecorator, UniqueConstraint, func)
@@ -79,7 +80,8 @@ class AuditEvent(Base):
     user_input(多轮澄清每条都记) / clarification / error / cancelled / done。"""
     __tablename__ = "audit_events"
     __table_args__ = {"comment": "审计事件流：一次trace每步一行（细粒度复盘）"}
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: uuid4().hex,
+                                     comment="主键UUID（应用端生成，不用PG序列，免序列权限）")
     trace_id: Mapped[str] = mapped_column(String(64), index=True, comment="追踪ID")
     seq: Mapped[int] = mapped_column(Integer, comment="事件序号（同trace内递增，排序用）")
     event_type: Mapped[str] = mapped_column(String(32), comment="事件类型（turn_start/tool_call/...）")
@@ -140,6 +142,23 @@ class LlmConfigRow(Base):
     concurrency: Mapped[int | None] = mapped_column(default=None, nullable=True,
                                                      comment="并发上限（None=不限）")
     enabled: Mapped[bool] = mapped_column(default=True, comment="是否启用")
+    version: Mapped[int] = mapped_column(default=1, comment="版本号")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
+                                                 onupdate=func.now(), comment="更新时间")
+
+
+class FeishuConfigRow(Base):
+    """飞书机器人通道动态配置（admin 后台改，热重连）。单行有效（id=default）：
+    enabled=true 且凭证齐全时 adapter 从库读并启动 WsClient；改完调 adapter.reload()
+    热重连，不重启服务。凭证明文存沿用内网工具惯例。"""
+    __tablename__ = "feishu_config"
+    __table_args__ = {"comment": "飞书机器人通道动态配置（admin改+热重连，凭证明文存）"}
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="配置ID（default）")
+    app_id: Mapped[str] = mapped_column(String(128), default="", comment="飞书App ID（cli_xxx）")
+    app_secret: Mapped[str] = mapped_column(String(256), default="", comment="飞书App Secret")
+    whitelist: Mapped[list] = mapped_column(JSON, default=list, comment="open_id白名单（空=不限）")
+    card_throttle_ms: Mapped[int] = mapped_column(default=300, comment="卡片流式节流间隔（ms）")
+    enabled: Mapped[bool] = mapped_column(default=False, comment="是否启用")
     version: Mapped[int] = mapped_column(default=1, comment="版本号")
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
                                                  onupdate=func.now(), comment="更新时间")

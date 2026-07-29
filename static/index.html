@@ -280,6 +280,7 @@
       <button class="stab" data-tab="templates" onclick="showSettingsTab('templates')">SQL模板</button>
       <button class="stab" data-tab="knowledge" onclick="showSettingsTab('knowledge')">知识库</button>
       <button class="stab" data-tab="models" onclick="showSettingsTab('models')">模型</button>
+      <button class="stab" data-tab="feishu" onclick="showSettingsTab('feishu')">飞书</button>
       <button class="back" onclick="showSettings(false)">← 返回</button>
     </nav>
   </header>
@@ -365,6 +366,10 @@
       <section class="admin-card stab-panel" id="stab-models">
         <h3>模型 &amp; 限流 <button class="add-btn" onclick="openLlmModal()">+ 新增</button></h3>
         <div id="llm-cards" style="max-height:70vh;overflow:auto"></div>
+      </section>
+      <section class="admin-card stab-panel" id="stab-feishu">
+        <h3>飞书机器人通道</h3>
+        <div id="feishu-cfg" style="max-width:560px"><p class="placeholder">加载中…</p></div>
       </section>
     </div>
   </div>
@@ -909,6 +914,7 @@ function showSettingsTab(tab) {
   else if (tab === "templates") loadSqlTemplates();
   else if (tab === "knowledge") loadKbDocs();
   else if (tab === "models") loadLlm();
+  else if (tab === "feishu") loadFeishu();
 }
 
 // ===== 管理后台：name-dict / 业务规则 / SQL模板 / 知识库 / 模型限流 =====
@@ -1076,6 +1082,43 @@ async function delKb(id) { await fetch(`/api/admin/knowledge/docs/${id}`, {metho
 async function toggleKb(id, enabled) {
   await fetch(`/api/admin/knowledge/docs/${id}?enabled=${enabled}`, {method: "PUT"}); await loadKbDocs();
 }
+// 飞书机器人通道（动态配置：admin 改 + 保存即热重连，凭证走库不入 yml）
+const FS_INPUT = "display:block;width:100%;margin:6px 0;padding:6px;border:1px solid #d0d0d0;border-radius:4px;box-sizing:border-box";
+async function loadFeishu() {
+  const cfg = await (await fetch("/api/admin/feishu-config")).json().catch(() => ({}));
+  const el = document.getElementById("feishu-cfg");
+  const on = cfg.enabled ? "✅ 已启用" : "⏸ 未启用";
+  const ver = cfg.version ? `（v${cfg.version}）` : "（未配置）";
+  el.innerHTML = `
+    <p class="placeholder">状态：${on} ${ver} · 保存即热重连 WsClient，无需重启服务</p>
+    <input id="fs-app-id" value="${escapeHtml(cfg.app_id || "")}" placeholder="App ID（cli_xxx）" style="${FS_INPUT}">
+    <input id="fs-app-secret" type="password" value="${escapeHtml(cfg.app_secret || "")}" placeholder="App Secret" style="${FS_INPUT}">
+    <input id="fs-whitelist" value="${escapeHtml((cfg.whitelist || []).join(", "))}" placeholder="open_id 白名单（逗号分隔，空=不限）" style="${FS_INPUT}">
+    <input id="fs-throttle" type="number" value="${cfg.card_throttle_ms || 300}" placeholder="卡片流式节流 ms" style="${FS_INPUT}">
+    <label style="display:block;margin:8px 0"><input id="fs-enabled" type="checkbox" ${cfg.enabled ? "checked" : ""}> 启用飞书通道</label>
+    <button onclick="saveFeishu()">保存（热重连）</button>
+    <p class="placeholder" style="font-size:11px;color:#999;margin-top:8px">
+      飞书开放平台：自建应用→机器人→事件订阅选「长连接」→订阅 <code>im.message.receive_v1</code> + <code>card.action.trigger</code>→权限 <code>im:message:send_as_bot</code>→发布。
+    </p>`;
+}
+async function saveFeishu() {
+  const whitelist = (document.getElementById("fs-whitelist").value || "")
+    .split(/[，,\s]+/).map(s => s.trim()).filter(Boolean);
+  const body = {
+    app_id: document.getElementById("fs-app-id").value.trim(),
+    app_secret: document.getElementById("fs-app-secret").value.trim(),
+    whitelist,
+    card_throttle_ms: parseInt(document.getElementById("fs-throttle").value) || 300,
+    enabled: document.getElementById("fs-enabled").checked,
+  };
+  if (body.enabled && (!body.app_id || !body.app_secret))
+    return alert("启用前需填 App ID 和 App Secret");
+  const r = await fetch("/api/admin/feishu-config", {method: "PUT",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  if (r.ok) { alert("已保存，飞书通道已热重连"); await loadFeishu(); }
+  else { const d = await r.json().catch(() => ({})); alert("保存失败: " + (d.detail || r.status)); }
+}
+
 // 模型配置（model 级：一行=一个模型，purposes 多选；网关分组展示；发现+导入）
 const LLM_PURPOSES = [{p:"analysis",label:"对话问数"},{p:"embedding",label:"向量"},{p:"attribution",label:"归因"}];
 function _llmId(base, model) {

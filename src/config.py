@@ -53,10 +53,23 @@ class AppConfig:
 
 
 @dataclass
+class FeishuConfig:
+    """飞书机器人通道配置（旁路适配器，WebSocket 长连接，免公网）。
+    enable=true 且 app_id/app_secret 非空时，main.py lifespan 才启动适配器。
+    whitelist 是 open_id 列表，空=不限；密码明文存沿用项目内网工具惯例。"""
+    enable: bool = False
+    app_id: str = ""
+    app_secret: str = ""
+    whitelist: list = field(default_factory=list)
+    card_throttle_ms: int = 300   # 卡片流式节流间隔（全量重写，远低于飞书 ~10QPS 限流）
+
+
+@dataclass
 class ApplicationConfig:
     app: AppConfig = field(default_factory=AppConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
     postgres: PostgresConfig = field(default_factory=PostgresConfig)
+    feishu: FeishuConfig = field(default_factory=FeishuConfig)
     profiles: list = field(default_factory=list)
     auto_migrate: bool = False   # 顶层独立：true 才启动时建扩展/ALTER/刷注释（生产/普通账号设 false 跳）
 
@@ -85,6 +98,7 @@ def _build(d: dict) -> ApplicationConfig:
         app=AppConfig(**d.get("app", {})),
         redis=RedisConfig(**d.get("redis", {})),
         postgres=PostgresConfig(**d.get("postgres", {})),
+        feishu=FeishuConfig(**d.get("feishu", {})),
         profiles=profiles,
         auto_migrate=bool(d.get("auto_migrate", False)),
     )

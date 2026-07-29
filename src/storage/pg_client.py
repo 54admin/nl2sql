@@ -94,7 +94,10 @@ async def init_db(url: str | None = None, config: PostgresConfig | None = None,
                     await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             except Exception as e:
                 log.warning("pgvector 扩展创建失败（知识库不可用，联系DBA预装/授权）: %s", e)
-        await conn.run_sync(Base.metadata.create_all)
+        # create_all：sqlite 测试每次建（内存库）；PG 仅 auto_migrate=true 时建/检查
+        # 生产 auto_migrate=false 表已建好，跳过避免逐表 IF NOT EXISTS 连库检查卡顿
+        if is_sqlite or auto_migrate:
+            await conn.run_sync(Base.metadata.create_all)
         if not is_sqlite and auto_migrate:
             # 迁移每条 savepoint 隔离：已应用/非 owner 权限不足跳过，不阻塞启动
             # （华为云等托管库表可能非当前账号所建，ALTER/COMMENT 要 owner 会失败；

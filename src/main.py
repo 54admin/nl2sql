@@ -5,6 +5,15 @@
 接口文档：http://127.0.0.1:8000/docs
 模型动态配置（apikey/model/base_url）：PUT /api/admin/llm-config 存数据库，优先于 yml。
 """
+# 公司 SSL 拦截网关（内网 IP 如 10.111.86.78）用「不符合标准」的自签证书重签所有 HTTPS 流量，
+# Python 默认验证、truststore（系统钥匙串）都验证不过 → 飞书 WSS 连不上。实测唯一能连是关 SSL 验证。
+# 内网问数工具可接受（拦截的就是公司网关，数据本经其转发）；公网/正规 CA 环境部署时删掉这段即恢复验证。
+import ssl as _ssl
+_orig_ctx = _ssl.create_default_context
+def _insecure_ctx(*a, **k):
+    c = _orig_ctx(*a, **k); c.check_hostname = False; c.verify_mode = _ssl.CERT_NONE; return c
+_ssl.create_default_context = _insecure_ctx
+
 from contextlib import asynccontextmanager
 from urllib.parse import quote_plus
 
@@ -36,6 +45,7 @@ from src.web.routes.admin_metadata import build_metadata_router
 from src.web.routes.admin_business_rules import build_business_rules_router
 from src.web.routes.admin_name_dict import build_name_dict_router
 from src.web.routes.admin_sql_templates import build_sql_templates_router
+from src.web.routes.admin_feishu import build_admin_feishu_router
 from src.web.routes.ask import build_ask_router
 from src.web.routes.result import build_result_router
 from src.web.routes.session import build_session_router
@@ -69,10 +79,13 @@ async def lifespan(app: FastAPI):
     log = get_logger("main")
 
     # 数据库连接走 config/application.yml 的 postgres 段
-    await init_db(_pg_url(cfg.postgres), auto_migrate=cfg.auto_migrate)
-
     redis = RedisClient(cfg.redis)
-    await redis.connect()
+    import asyncio
+    # PG + Redis 并行连接（各自都是连华为云的网络耗时，并行省掉串行等待）
+    await asyncio.gather(
+        init_db(_pg_url(cfg.postgres), auto_migrate=cfg.auto_migrate),
+        redis.connect(),
+    )
 
     sm = SessionManager(redis)
     llm = LLMService()                     # 配置全走数据库 llm_config 表
@@ -101,6 +114,21 @@ async def lifespan(app: FastAPI):
              cfg.postgres.host, cfg.postgres.port, cfg.postgres.database,
              "可用" if redis.available else "降级内存")
 
+    # 飞书机器人通道（旁路接入，不碰 HTTP/SSE）：配置完全走数据库 feishu_config 表（后台「飞书」tab），
+    # yml 不再管开关——adapter 总是实例化待命，启停由后台「启用」热控制（reload 重连/断开）。
+    import asyncio
+    main_loop = asyncio.get_running_loop()
+    feishu_adapter = None
+    try:
+        from src.feishu import FeishuAdapter
+        feishu_adapter = FeishuAdapter(
+            cfg.feishu, main_loop=main_loop,
+            orchestrator=orch, session_mgr=sm, redis=redis)
+        await feishu_adapter.start()     # 从库读：enabled 且凭证齐才真连，否则空转待命
+    except Exception as e:
+        log.warning("飞书机器人通道初始化失败（忽略，不影响主服务）: %s", e)
+    _app_state["feishu_adapter"] = feishu_adapter   # admin 路由 _Lazy 取用，做热重连
+
     # 挂起超时清扫：启动补清（上次崩溃/被 kill 遗留的孤儿 checkpoint）+ 周期后台扫。
     # 服务挂了重启也能清滞留垃圾，不依赖常驻进程一直没死。
     import asyncio
@@ -125,7 +153,9 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # 服务关闭：取消后台清扫任务 + 关连接池
+    # 服务关闭：停飞书通道 + 取消后台清扫任务 + 关连接池
+    if feishu_adapter:
+        feishu_adapter.stop()
     sweep_task.cancel()
     try:
         await sweep_task
@@ -154,6 +184,7 @@ def create_app() -> FastAPI:
         return Response(content=html, media_type="text/html")
 
     app.include_router(build_ask_router(_Lazy("orchestrator")))
+    app.include_router(build_admin_feishu_router(_Lazy("feishu_adapter")))
     app.include_router(build_session_router(_Lazy("session_mgr")))
     app.include_router(build_admin_llm_router(_Lazy("llm_service")))
     app.include_router(build_admin_prompts_router(_Lazy("prompts")))

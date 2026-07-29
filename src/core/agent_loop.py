@@ -375,9 +375,19 @@ class AgentLoop:
         recent_groups = groups[-keep_groups:]
         # system 消息（最前的）原样保留；中段非 system group 喂摘要
         head = [m for m in old_groups[0] if m.get("role") == "system"] if old_groups else []
-        body = [m for g in old_groups for m in g if m.get("role") != "system"]
+        # query_metadata 的结果不压：表结构/字段/表级规则是写 SQL 的依据，压成摘要会丢细节
+        # → LLM 凭记忆把 years 猜成 LIKE '202%-%'。按 tool_call_id 关联出 query_metadata 的
+        # tool result，所在 group 原样保留，只压其余中段。
+        meta_call_ids = {tc.get("id") for g in old_groups for m in g if m.get("role") == "assistant"
+                         for tc in (m.get("tool_calls") or [])
+                         if (tc.get("function") or {}).get("name") == "query_metadata"}
+
+        def _has_meta(g: list[dict]) -> bool:
+            return any(m.get("tool_call_id") in meta_call_ids for m in g)
+        body = [m for g in old_groups if not _has_meta(g) for m in g if m.get("role") != "system"]
         if not body:
-            return
+            return   # 无可压内容（中段全是 query_metadata），原样保留即跳过
+        keep_meta_flat = [m for g in old_groups if _has_meta(g) for m in g if m.get("role") != "system"]
         try:
             digest = await self._summarize_segment(body)
         except Exception as e:
@@ -387,10 +397,10 @@ class AgentLoop:
             "role": "system",
             "content": (f"[对话摘要-压缩] 以下是早期对话的压缩摘要，供参考上下文：\n{digest}")
         }
-        # 重组：head + 摘要 + 最近 group（展平）
+        # 重组：head + 摘要 + query_metadata 结果（原样保留）+ 最近 group（展平）
         recent_flat = [m for g in recent_groups for m in g]
         msgs.clear()
-        msgs.extend(head + [summary_msg] + recent_flat)
+        msgs.extend(head + [summary_msg] + keep_meta_flat + recent_flat)
 
     async def _resolve_max_context(self) -> int:
         """拿压缩触发阈值（token）：优先构造参数 → 环境变量 → LLM 配置 max_context → 32000。
