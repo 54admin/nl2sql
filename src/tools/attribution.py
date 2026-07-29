@@ -4,11 +4,22 @@
 单 Agent loop 内完成，不引入子 Agent（spec 9.2）。"""
 from __future__ import annotations
 
+import re
+
 from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
 from src.knowledge.store import get_knowledge_store
 from src.logging import get_logger
 
 log = get_logger(__name__)
+
+
+def _refine_query(topic: str) -> str:
+    """提炼归因主题成检索友好的 query：去年月/数值/百分比/得分等噪声，留实体+指标+归因语义。
+    topic 常是「2026年6月新疆提质增效-增发电量得分1.515874表现差」——直接做向量检索，
+    数值/时间会稀释语义、召回跑偏；提炼成「新疆 提质增效-增发电量 表现差」语义更聚焦。"""
+    q = re.sub(r"\d{4}\s*年|\d{1,2}\s*月|\d+\.?\d*\s*%?|得分|分值|约为|约", " ", topic)
+    q = re.sub(r"\s+", " ", q).strip()
+    return q or topic
 
 
 async def do_attribution(args: dict, ctx: LoopContext,
@@ -17,9 +28,10 @@ async def do_attribution(args: dict, ctx: LoopContext,
     topic = args.get("topic")
     if not topic:
         return ToolResult(summary="缺少归因主题 topic")
-    # 1. 知识库查归因相关文档依据
+    # 1. 知识库查归因相关文档依据（topic 提炼成检索 query，去数值/时间噪声）
+    search_query = _refine_query(topic)
     try:
-        docs = await get_knowledge_store().search(topic, k=5)
+        docs = await get_knowledge_store().search(search_query, k=5)
     except RuntimeError:
         docs = []
     doc_text = "\n".join(f"- {d['content'][:300]}" for d in docs) if docs else "（知识库无相关文档）"
@@ -59,7 +71,7 @@ ATTRIBUTION = ToolDefinition(
                  "主因/次因/参考依据结论；你可再用 execute_sql 补量化数据。"),
     parameters={"type": "object",
                 "properties": {"topic": {"type": "string",
-                                         "description": "归因主题（如「6月发电量下降」）"}},
+                                         "description": "归因主题。提炼成检索友好的表述：去掉具体年月/分数/数值，保留省分公司+指标名+归因语义。如「新疆 提质增效-增发电量 偏低 原因」，而非「2026年6月新疆增发电量得分1.515874为什么差」"}},
                 "required": ["topic"]},
     handler=do_attribution,
 )

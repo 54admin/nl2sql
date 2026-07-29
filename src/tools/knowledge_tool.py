@@ -33,7 +33,7 @@ KNOWLEDGE_SEARCH = ToolDefinition(
                  "输入检索 query（自然语言），返回最相关的文档片段。"),
     parameters={"type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "检索内容（自然语言描述）"},
+                    "query": {"type": "string", "description": "检索内容。提炼成检索友好的关键词：去掉具体年月/数值/分数，保留实体+指标+归因语义；不要直接用用户原话（数值会稀释向量召回）"},
                     "top_k": {"type": "integer", "description": "返回片段数（默认5）"}},
                 "required": ["query"]},
     handler=knowledge_search,
