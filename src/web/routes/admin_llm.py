@@ -74,9 +74,10 @@ def build_admin_llm_router(llm_service=None) -> APIRouter:
 
     @router.put("/api/admin/llm-config/{cfg_id}")
     async def upsert_config(cfg_id: str, payload: LlmConfigPayload) -> dict:
-        """新建/更新（upsert by id）。启用互斥：启用本模型时，把它用途从其他 enabled 模型的 purposes 移除（模型不删，只移除冲突用途）。"""
-        if not payload.purposes or not all(p in PURPOSES for p in payload.purposes):
-            raise HTTPException(400, f"purposes 必须是 {PURPOSES} 的非空子集")
+        """新建/更新（upsert by id）。启用互斥：启用本模型时，把它用途从其他 enabled 模型的 purposes 移除（模型不删，只移除冲突用途）。
+        purposes 允许空（空=暂不参与任何场景，配置保留，如编辑网关地址时）——前端 toggle 仍拦「至少留一个」防误清空。"""
+        if not all(p in PURPOSES for p in payload.purposes):
+            raise HTTPException(400, f"purposes 必须是 {PURPOSES} 的子集")
         async with AsyncSessionFactory() as s:
             # 互斥（一 purpose 一模型）：把本模型每个用途从其他模型的 purposes 移除（配置即启用，不看 enabled）
             others = (await s.execute(select(LlmConfigRow).where(
