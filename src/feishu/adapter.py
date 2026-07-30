@@ -58,8 +58,7 @@ class CardStream:
 
     def on_answer_delta(self, text: str) -> None:
         self._answer += text
-        # 不流式 acontent 打字机：answer 仅在 on_done 全量 card.update 显示。
-        # 否则流式 acontent（打字机）与全量 content 叠加 → 答案重复两遍。
+        self._schedule_flush()   # 流式打字机：节流 acontent 全量 _answer，平台逐字渲染
 
     async def on_tool(self, token: str, line: str, *, rows: int | None = None) -> None:
         """一步过程：insert_before answer 插入独立元素（带 token 图标）。"""
@@ -90,12 +89,11 @@ class CardStream:
         if answer:
             self._answer = answer
         log.info("飞书 done：answer=%d 字符，过程=%d 步", len(self._answer), len(self._tool_lines))
-        # 全量替换：过程 + 答案 + summary + 关流式一次到位。
-        # answer 仅此一份（on_answer_delta 不再 acontent 打字机，避免和全量 content 叠加重复）。
-        ok = await self._update_card_full(card.build_final_card(self._tool_lines, self._answer))
-        if not ok:   # 全量替换失败（飞书超时等）→ 退回流式态兜底：flush 答案 + 关流式并更新 summary
-            await self._cancel_and_flush()
-            await self._close_streaming(self._answer)
+        # 先关流式再全量重建：流式态下 card.update 会与 acontent 叠加（答案重复两遍）；
+        # 先 _close_streaming 进入非流式态，card.update 才是真替换——过程+答案+summary 一次到位，
+        # 也兜底流式过程中可能的丢字/丢步（多轮对话飞书 streaming 有平台超时）。
+        await self._close_streaming()
+        await self._update_card_full(card.build_final_card(self._tool_lines, self._answer))
 
     async def on_clarify(self, question: str, options, sid: str) -> None:
         await self._cancel_and_flush()
@@ -103,12 +101,12 @@ class CardStream:
         tip = f"\n\n_请直接回复你的选择（{opts}）_" if opts else ""
         prefix = (self._answer + "\n\n") if self._answer else ""
         await self._stream_text(card.ANSWER_EID, prefix + f"**需要确认**：{question}{tip}")
-        await self._close_streaming()
+        await self._close_streaming(question)
 
     async def on_error(self, msg: str) -> None:
         self._answer = f"**错误**：{msg}"
         await self._cancel_and_flush()
-        await self._close_streaming()
+        await self._close_streaming(self._answer)
 
     # ---- 节流（streaming 不限 QPS，节流省 HTTP 往返）----
     def _schedule_flush(self) -> None:
