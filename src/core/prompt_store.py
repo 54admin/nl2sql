@@ -132,7 +132,29 @@ class PromptStore:
         async with AsyncSessionFactory() as s:
             rows = (await s.execute(Prompt.__table__.select())).all()
         return [{"scene": r.scene, "content": r.content,
-                 "version": r.version, "enabled": r.enabled} for r in rows]
+                 "version": r.version, "enabled": r.enabled,
+                 "is_active": r.is_active} for r in rows]
+
+    async def get_active(self) -> str | None:
+        """读 is_active=true 的 prompt（多版本里当前启用的）。无则回退 default。"""
+        async with AsyncSessionFactory() as s:
+            row = (await s.execute(Prompt.__table__.select().where(
+                Prompt.is_active.is_(True)).limit(1))).first()
+        if row is None:
+            return await self.get("default")   # 无启用项 → 回退 default（DB 记录或内置兜底）
+        return row.content
+
+    async def set_active(self, scene: str) -> bool:
+        """把 scene 设为当前启用（is_active=true），其余置 false。事务 + 清缓存。"""
+        async with AsyncSessionFactory() as s:
+            if await s.get(Prompt, scene) is None:
+                return False
+            await s.execute(Prompt.__table__.update().values(is_active=False))
+            await s.execute(Prompt.__table__.update().where(
+                Prompt.scene == scene).values(is_active=True))
+            await s.commit()
+        self._cache.clear()
+        return True
 
     async def refresh(self) -> None:
         scenes = list(self._cache.keys())

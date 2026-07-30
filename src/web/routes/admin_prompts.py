@@ -2,7 +2,7 @@
 ponytail: 鉴权层 P5 管理后台再补；P0b 暴露路由供页面调试。"""
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from src.core.prompt_store import PromptStore
@@ -40,5 +40,13 @@ def build_admin_prompts_router(store: PromptStore) -> APIRouter:
     async def delete_prompt(scene: str) -> dict:
         deleted = await store.delete(scene)
         return {"ok": True, "deleted": deleted}
+
+    @router.put("/api/admin/prompts/{scene}/activate")
+    async def activate_prompt(scene: str) -> dict:
+        """把指定 scene 设为当前启用的 prompt（其余 is_active 置 false）。"""
+        ok = await store.set_active(scene)
+        if not ok:
+            raise HTTPException(404, "prompt 不存在")
+        return {"ok": True, "scene": scene}
 
     return router

@@ -190,6 +190,7 @@ class Prompt(Base):
     content: Mapped[str] = mapped_column(Text, comment="提示词内容")
     version: Mapped[int] = mapped_column(default=1, comment="版本号")
     enabled: Mapped[bool] = mapped_column(default=True, comment="是否启用")
+    is_active: Mapped[bool] = mapped_column(default=False, comment="是否当前生效（多版本选一，orchestrator 读 is_active=true 的）")
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
                                                  onupdate=func.now(), comment="更新时间")
 

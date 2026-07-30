@@ -354,10 +354,8 @@
   <div id="admin-panel" class="settings-pane" style="display:none">
     <div class="settings-panels">
       <section class="admin-card stab-panel" id="stab-prompt">
-        <h3>系统提示词（prompt）</h3>
-        <textarea id="prompt-content" placeholder="加载中…" style="width:100%;height:70vh;font-family:monospace;font-size:13px;border:1px solid #d0d0d0;border-radius:4px;padding:8px"></textarea>
-        <button onclick="savePrompt()" style="margin-top:8px">保存</button>
-        <p class="placeholder" style="font-size:11px;color:#999;margin-top:6px">default 场景的 system prompt；空保存=恢复内置兜底（清空 default 记录）。</p>
+        <h3>系统提示词（多版本，启用一个生效） <button class="add-btn" onclick="openPromptModal()">+ 新版本</button></h3>
+        <div id="prompt-list"></div>
       </section>
       <section class="admin-card stab-panel" id="stab-namedict">
         <h3>名称纠错字典 <button class="add-btn" onclick="openNdModal()">+ 新增</button></h3>
@@ -982,15 +980,45 @@ function showSettingsTab(tab) {
 
 // ===== 管理后台：name-dict / 业务规则 / SQL模板 / 知识库 / 模型限流 =====
 async function loadPrompt() {
-  const r = await fetch("/api/admin/prompts/default");
-  const {content} = await r.json().catch(() => ({}));
-  document.getElementById("prompt-content").value = content || "";
+  const {prompts = []} = await (await fetch("/api/admin/prompts")).json().catch(() => ({}));
+  _renderTable("prompt-list", ["场景", "启用", "内容预览"], prompts.map(p =>
+    `<tr>
+       <td><b>${escapeHtml(p.scene)}</b></td>
+       <td>${p.is_active ? '<span style="color:#2e7d32">● 启用中</span>' : '<span style="color:#bbb">○</span>'}</td>
+       <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#666">${escapeHtml((p.content||"").slice(0,60))}</td>
+       <td class="col-op">
+         ${p.is_active ? "" : `<button class="llm-edit-btn" onclick="activatePrompt('${escapeHtml(p.scene)}')">启用</button>`}
+         <button class="llm-edit-btn" onclick="openPromptModal('${escapeHtml(p.scene)}')">编辑</button>
+         <button class="li-del" onclick="delPrompt('${escapeHtml(p.scene)}')">×</button>
+       </td>
+     </tr>`));
 }
-async function savePrompt() {
-  const content = document.getElementById("prompt-content").value;
-  const r = await fetch("/api/admin/prompts/default", {method: "PUT", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({scene: "default", content, enabled: true})});
-  if (r.ok) alert("prompt 已保存"); else alert("保存失败");
+function openPromptModal(scene) {
+  const editing = !!scene;
+  openAdminModal(editing ? `编辑 prompt：${escapeHtml(scene)}` : "新建 prompt 版本",
+    `<input id="pm-scene" placeholder="场景名（如 default / v2 / 实验版）" value="${escapeHtml(scene||"")}" ${editing?"readonly":""}>
+     <textarea id="pm-content" placeholder="system prompt 内容…" style="width:100%;height:50vh;font-family:monospace;font-size:13px;border:1px solid #d0d0d0;border-radius:4px;padding:8px"></textarea>`,
+    () => savePromptModal());
+  if (editing) fetch(`/api/admin/prompts/${encodeURIComponent(scene)}`).then(r => r.json()).then(d => {
+    document.getElementById("pm-content").value = d.content || "";
+  }).catch(() => {});
+}
+async function savePromptModal() {
+  const scene = document.getElementById("pm-scene").value.trim();
+  const content = document.getElementById("pm-content").value;
+  if (!scene) return alert("填场景名");
+  const r = await fetch(`/api/admin/prompts/${encodeURIComponent(scene)}`, {method: "PUT", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({scene, content, enabled: true})});
+  if (r.ok) { closeAdminModal(); await loadPrompt(); } else alert("保存失败");
+}
+async function activatePrompt(scene) {
+  await fetch(`/api/admin/prompts/${encodeURIComponent(scene)}/activate`, {method: "PUT"});
+  await loadPrompt();
+}
+async function delPrompt(scene) {
+  if (!confirm(`删除 prompt「${scene}」？`)) return;
+  await fetch(`/api/admin/prompts/${encodeURIComponent(scene)}`, {method: "DELETE"});
+  await loadPrompt();
 }
 function _renderTable(elId, headers, rows, empty = "暂无") {
   const el = document.getElementById(elId);

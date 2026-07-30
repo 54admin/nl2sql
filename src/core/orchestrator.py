@@ -58,7 +58,7 @@ class Orchestrator:
         # 3. 读 system prompt（Task 9 prompts 集成点；prompt_store 为空则 None）
         system_prompt = None
         if self._prompts is not None:
-            system_prompt = await self._prompts.get("default")
+            system_prompt = await self._prompts.get_active()
         # 注入当前日期：LLM 据此换算"本月/上月"等相对时间，否则会瞎猜年份（审计实证猜成去年）
         if system_prompt:
             _now = datetime.now()
