@@ -987,11 +987,20 @@ async function loadPrompt() {
        <td>${p.is_active ? '<span style="color:#2e7d32">● 启用中</span>' : '<span style="color:#bbb">○</span>'}</td>
        <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#666">${escapeHtml((p.content||"").slice(0,60))}</td>
        <td class="col-op">
+         <button class="llm-edit-btn" onclick="openPromptDetail('${escapeHtml(p.scene)}')">详情</button>
          ${p.is_active ? "" : `<button class="llm-edit-btn" onclick="activatePrompt('${escapeHtml(p.scene)}')">启用</button>`}
          <button class="llm-edit-btn" onclick="openPromptModal('${escapeHtml(p.scene)}')">编辑</button>
          <button class="li-del" onclick="delPrompt('${escapeHtml(p.scene)}')">×</button>
        </td>
      </tr>`));
+}
+async function openPromptDetail(scene) {
+  // 只读详情：弹框展示完整 prompt（等宽+自动换行+滚动，易读）
+  openAdminModal(`prompt 详情：${escapeHtml(scene)}`, '<p class="placeholder">加载中…</p>', null);
+  const body = document.querySelector("#admin-modal-body");
+  const r = await fetch(`/api/admin/prompts/${encodeURIComponent(scene)}`);
+  const {content} = await r.json().catch(() => ({}));
+  body.innerHTML = `<pre style="white-space:pre-wrap;word-break:break-word;font-family:Menlo,Monaco,monospace;font-size:13px;line-height:1.7;max-height:72vh;overflow:auto;background:#fafafa;padding:12px;border-radius:6px;border:1px solid #eee">${escapeHtml(content || "(空)")}</pre>`;
 }
 function openPromptModal(scene) {
   const editing = !!scene;
