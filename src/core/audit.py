@@ -41,13 +41,23 @@ class AuditSink:
 
     def begin(self, trace_id: str, session_id: str, user_id: str,
               raw_input: str, normalized_input: str | None = None) -> None:
-        """trace 开始：记原始输入 + 启动计时。"""
+        """trace 开始：重置所有累积状态 + 记原始输入 + 启动计时。
+
+        AuditSink 是单例（一个实例服务所有提问），begin 必须清空上一次 trace 的
+        _events/_seq/_sqls 等，否则新 trace 会带上历史提问的事件 —— 表现为「问数详情
+        里混入别的问题」。这是详情串台的根因。"""
         self._trace_id = trace_id
         self._session_id = session_id
         self._user_id = user_id
         self._raw_input = raw_input
         self._normalized_input = normalized_input
         self._start_ts = time.monotonic()
+        self._seq = 0
+        self._events = []
+        self._turn_buf = {}
+        self._sqls = []
+        self._result_ids = []
+        self._tool_calls = []
         self._append("user_input", None, {"raw": raw_input,
                                           "normalized": normalized_input})
 

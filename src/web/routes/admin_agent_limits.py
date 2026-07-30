@@ -10,8 +10,6 @@ from src.storage.models import AgentLimitsRow
 from src.storage.pg_client import AsyncSessionFactory
 
 DEFAULT_ID = "default"
-_DEFAULTS = {"max_turns": 10, "max_ask_user": 2, "max_sql": 4,
-             "max_sql_fail_streak": 2, "max_meta_per_run": 1}
 
 
 class AgentLimitsPayload(BaseModel):
@@ -22,15 +20,20 @@ class AgentLimitsPayload(BaseModel):
     max_meta_per_run: int = 1
 
 
+def _defaults() -> dict:
+    """默认上限——AgentLimitsPayload 为唯一真源，别处默认值都从这里取。"""
+    return AgentLimitsPayload().model_dump()
+
+
 async def load_agent_limits() -> dict:
     """读 agent_limits(default)，无行/表未建都返默认（不阻塞启动）。lifespan + GET 共用。"""
     try:
         async with AsyncSessionFactory() as s:
             row = await s.get(AgentLimitsRow, DEFAULT_ID)
     except Exception:
-        return {"id": DEFAULT_ID, "version": 0, **_DEFAULTS}   # 表未建 → 默认（lifespan 不崩）
+        return {"id": DEFAULT_ID, "version": 0, **_defaults()}   # 表未建 → 默认（lifespan 不崩）
     if row is None:
-        return {"id": DEFAULT_ID, "version": 0, **_DEFAULTS}
+        return {"id": DEFAULT_ID, "version": 0, **_defaults()}
     return {"id": row.id, "version": row.version,
             "max_turns": row.max_turns, "max_ask_user": row.max_ask_user,
             "max_sql": row.max_sql, "max_sql_fail_streak": row.max_sql_fail_streak,

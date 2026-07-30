@@ -21,6 +21,7 @@
   .clarify-opt { text-align:left; background:#fff; border:1px solid #90caf9; border-radius:6px; padding:8px 12px; cursor:pointer; font-size:13px; line-height:1.5; }
   .clarify-opt:hover { background:#e3f2fd; }
   .err { background: #ffebee; color: #c62828; }
+  .login-input { width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
   footer { background: #fff; padding: 12px; border-top: 1px solid #e0e0e0; display: flex; gap: 8px; }
   #input { flex: 1; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; }
   #send { padding: 10px 22px; background: #4caf50; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
@@ -272,8 +273,8 @@
 <div id="login-panel" style="display:none;align-items:center;justify-content:center;min-height:100vh;background:#f4f6f8">
   <div style="background:#fff;padding:32px 40px;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);width:300px">
     <h2 style="margin:0 0 20px;text-align:center;color:#1976d2">AI 问数</h2>
-    <input id="login-user" placeholder="账号" value="admin" style="width:100%;box-sizing:border-box;padding:10px;margin-bottom:12px;border:1px solid #ccc;border-radius:6px;font-size:14px">
-    <input id="login-pwd" type="password" placeholder="密码" style="width:100%;box-sizing:border-box;padding:10px;margin-bottom:12px;border:1px solid #ccc;border-radius:6px;font-size:14px">
+    <input id="login-user" class="login-input" placeholder="账号" value="admin">
+    <input id="login-pwd" class="login-input" type="password" placeholder="密码">
     <button onclick="doLogin()" style="width:100%;padding:10px;background:#1976d2;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">登录</button>
     <div id="login-err" style="color:#e53935;font-size:12px;margin-top:8px;text-align:center;min-height:16px"></div>
   </div>
@@ -861,8 +862,9 @@ function showStats(enter) {
   document.getElementById("settings-nav").style.display = "none";
   document.getElementById("admin-panel").style.display = "none";
   document.getElementById("stats-panel").style.display = enter ? "flex" : "none";
-  if (enter) { fillStatsFilters(); loadStats(1); }
+  if (enter) { _statsCache = null; fillStatsFilters(); loadStats(1); }
 }
+let _statsCache = null;   // 全局统计不随筛选/翻页变，进页拉一次缓存，翻页复用
 async function fillStatsFilters() {
   // 拉去重的 user / 有记录的 session，填两个 <select>；保留当前选中值（翻页不丢）
   const f = await (await fetch("/api/admin/audit/filters")).json().catch(() => ({}));
@@ -889,8 +891,8 @@ async function loadStats(page) {
   const success = sv === "" ? null : sv === "true";
   const user = document.getElementById("stats-filter-user").value;
   const session = document.getElementById("stats-filter-session").value;
-  const sc = await (await fetch("/api/admin/audit/stats")).json().catch(() => ({}));
-  renderStatsCards(sc);
+  if (!_statsCache) _statsCache = await (await fetch("/api/admin/audit/stats")).json().catch(() => ({}));
+  renderStatsCards(_statsCache);
   let url = `/api/admin/audit/traces?page=${page}&page_size=20`;
   if (success !== null) url += `&success=${success}`;
   if (user) url += `&user_id=${encodeURIComponent(user)}`;
@@ -939,16 +941,17 @@ async function openTraceDetail(tid) {
   if (!r.ok) { alert("加载失败"); return; }
   const {trace = {}, events = []} = await r.json();
   // 对话气泡：user_input（用户）/ answer·clarification（AI）按 seq 排成这次问答的对答
+  // 复用主聊天区 .msg/.user/.assistant 样式（视觉一致，免重写一整套内联样式）；AI 气泡 mdToHtml 渲染
+  const DIALOGUE_TYPES = ["user_input", "answer", "clarification"];
   const dialogue = events
-    .filter(e => ["user_input", "answer", "clarification"].includes(e.event_type))
+    .filter(e => DIALOGUE_TYPES.includes(e.event_type))
     .map(e => {
       const c = e.content || {};
-      if (e.event_type === "user_input")
-        return `<div style="display:flex;justify-content:flex-end;margin:8px 0"><div style="max-width:80%;background:#1976d2;color:#fff;padding:8px 12px;border-radius:10px;word-break:break-word">${escapeHtml(c.raw || "")}</div></div>`;
-      const txt = c.text || c.question || "";
-      return `<div style="display:flex;justify-content:flex-start;margin:8px 0"><div style="max-width:85%;background:#f0f4f8;padding:8px 12px;border-radius:10px;word-break:break-word;overflow:hidden">${mdToHtml(txt)}</div></div>`;
+      if (e.event_type === "user_input") return `<div class="msg user">${escapeHtml(c.raw || "")}</div>`;
+      return `<div class="msg assistant">${mdToHtml(c.text || c.question || "")}</div>`;
     }).join("");
-  const evRows = events.map(e => {
+  // 执行过程：只列对话气泡未展示的技术事件（tool_call/tool_result…），避免与气泡重复
+  const evRows = events.filter(e => !DIALOGUE_TYPES.includes(e.event_type)).map(e => {
     const c = e.content || {};
     let d = "";
     if (e.event_type === "tool_call") d = c.name + (c.args && c.args.sql ? "：" + c.args.sql : "");

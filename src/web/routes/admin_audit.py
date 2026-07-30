@@ -117,9 +117,9 @@ def build_audit_router() -> APIRouter:
             sess_rows = (await s.execute(
                 select(Session.id, Session.title, Session.channel)
                 .where(Session.deleted_at.is_(None))
-                .order_by(Session.updated_at.desc()))).all()
+                .order_by(Session.updated_at.desc()).limit(500))).all()   # 下拉装不下几千项，取最近 500
         return {
-            "users": [u for u in users if u],
+            "users": users,
             "sessions": [{"id": r.id, "title": r.title or "", "channel": r.channel or ""}
                          for r in sess_rows],
         }

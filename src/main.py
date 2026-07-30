@@ -88,10 +88,7 @@ def _verify_token(val: str | None, secret: str) -> str | None:
     expect = hmac.new(secret.encode(), f"{username}:{expire}".encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expect):
         return None
-    try:
-        if int(expire) < time.time():
-            return None
-    except ValueError:
+    if not expire.isdigit() or int(expire) < time.time():
         return None
     return username
 
@@ -138,10 +135,9 @@ async def lifespan(app: FastAPI):
     from src.core.audit import AuditSink
     audit = AuditSink()
     agent_limits = await load_agent_limits()
+    # 透传所有 max_* 上限给 AgentLoop（dict 里其余 key 如 id/version 不以 max_ 开头，自动排除）
     loop = AgentLoop(llm, reg, sess_state,
-                     max_turns=agent_limits["max_turns"], max_ask_user=agent_limits["max_ask_user"],
-                     max_sql=agent_limits["max_sql"], max_sql_fail_streak=agent_limits["max_sql_fail_streak"],
-                     max_meta_per_run=agent_limits["max_meta_per_run"],
+                     **{k: v for k, v in agent_limits.items() if k.startswith("max_")},
                      session_manager=sm, audit=audit)
     from src.core.name_store import NameStore, build_llm_corrector
     from src.core.rule_store import RuleStore
