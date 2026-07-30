@@ -58,7 +58,8 @@ class CardStream:
 
     def on_answer_delta(self, text: str) -> None:
         self._answer += text
-        self._schedule_flush()
+        # 不流式 acontent 打字机：answer 仅在 on_done 全量 card.update 显示。
+        # 否则流式 acontent（打字机）与全量 content 叠加 → 答案重复两遍。
 
     async def on_tool(self, token: str, line: str, *, rows: int | None = None) -> None:
         """一步过程：insert_before answer 插入独立元素（带 token 图标）。"""
@@ -89,11 +90,12 @@ class CardStream:
         if answer:
             self._answer = answer
         log.info("飞书 done：answer=%d 字符，过程=%d 步", len(self._answer), len(self._tool_lines))
-        await self._cancel_and_flush()   # flush 用最终 _answer 全量 acontent，补齐打字机
-        await self._close_streaming()
-        # 流式态（打字机 answer + insert 的过程步）flush 后即最终态。
-        # 不再 card.update 全量替换——它会和已渲染的流式态叠加，导致答案/过程重复两遍。
-        # ponytail: 流式超时丢字的风险先接受；若复现再用「先清空流式元素再全量」加兜底。
+        # 全量替换：过程 + 答案 + summary + 关流式一次到位。
+        # answer 仅此一份（on_answer_delta 不再 acontent 打字机，避免和全量 content 叠加重复）。
+        ok = await self._update_card_full(card.build_final_card(self._tool_lines, self._answer))
+        if not ok:   # 全量替换失败（飞书超时等）→ 退回流式态兜底：flush 答案 + 关流式并更新 summary
+            await self._cancel_and_flush()
+            await self._close_streaming(self._answer)
 
     async def on_clarify(self, question: str, options, sid: str) -> None:
         await self._cancel_and_flush()
@@ -154,11 +156,14 @@ class CardStream:
         except Exception as e:
             log.warning("飞书流式文本异常/超时 card=%s eid=%s: %s", self._card_id, element_id, e)
 
-    async def _close_streaming(self) -> None:
+    async def _close_streaming(self, answer: str | None = None) -> None:
         from lark_oapi.api.cardkit.v1 import SettingsCardRequest, SettingsCardRequestBody
+        cfg: dict = {"streaming_mode": False}
+        if answer:   # 关流式时一并更新 summary（"生成中..." → 答案摘要），避免卡片卡在生成中
+            cfg["summary"] = {"content": card._summary_text(answer)}
         req = (SettingsCardRequest.builder().card_id(self._card_id)
                .request_body(SettingsCardRequestBody.builder()
-                             .settings(json.dumps({"config": {"streaming_mode": False}}))
+                             .settings(json.dumps({"config": cfg}))
                              .sequence(self._next_seq()).build()).build())
         try:
             resp = await self._lark.cardkit.v1.card.asettings(req)
@@ -184,9 +189,9 @@ class CardStream:
         except Exception as e:
             log.warning("飞书插入过程元素异常/超时 card=%s: %s", self._card_id, e)
 
-    async def _update_card_full(self, card_json: dict) -> None:
-        """全量替换卡片（card.update）：done 后兜底，确保过程+答案完整 + summary 更新。
-        card 字段要 Card 对象（type=card_json + data=卡片JSON字符串）。"""
+    async def _update_card_full(self, card_json: dict) -> bool:
+        """全量替换卡片（card.update）：done 后，过程+答案+summary+关流式一次到位。
+        返回是否成功（失败时调用方走流式态兜底）。"""
         from lark_oapi.api.cardkit.v1 import Card, UpdateCardRequest, UpdateCardRequestBody
         card_obj = Card.builder().type("card_json").data(
             json.dumps(card_json, ensure_ascii=False)).build()
@@ -197,8 +202,11 @@ class CardStream:
             resp = await self._lark.cardkit.v1.card.aupdate(req)
             if not resp.success():
                 log.warning("飞书全量更新卡片失败 card=%s code=%s msg=%s", self._card_id, resp.code, resp.msg)
+                return False
+            return True
         except Exception as e:
             log.warning("飞书全量更新异常/超时 card=%s: %s", self._card_id, e)
+            return False
 
     def _next_seq(self) -> int:
         self._seq += 1
