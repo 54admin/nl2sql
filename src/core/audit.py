@@ -90,9 +90,6 @@ class AuditSink:
             # turn 结束：把合并的 answer 落一行
             self._flush_turn(turn or 0)
             return
-        if evt_type == "correction":
-            self._append("correction", turn, data)
-            return
         if evt_type == "clarification_needed":
             self._append("clarification", turn, {"question": data.get("question")})
             return
@@ -129,7 +126,6 @@ class AuditSink:
                     trace_id=self._trace_id, session_id=self._session_id,
                     user_id=self._user_id, raw_input=self._raw_input,
                     normalized_input=self._normalized_input,
-                    corrections_json=None,  # correction 事件已在 audit_events，这里不重复
                     tool_calls_json=json.dumps(self._tool_calls, ensure_ascii=False),
                     sql_text="\n;\n".join(self._sqls) if self._sqls else None,
                     result_id=self._result_ids[-1] if self._result_ids else None,

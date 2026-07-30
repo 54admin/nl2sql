@@ -1,6 +1,6 @@
 """业务规则缓存（P2）。读 enabled BusinessRule 拼成文本段，
 orchestrator 追加到 system_prompt 让 LLM 知晓人工口径。
-TTL 刷新（照 NameStore 模式，规则低频变更）。
+TTL 刷新（规则低频变更，过期重载）。
 ponytail: 跨进程广播失效 P5 改 Redis pub/sub。"""
 from __future__ import annotations
 

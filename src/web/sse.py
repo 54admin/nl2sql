@@ -12,7 +12,6 @@ from src.core.types import SSEEvent
 class SSEEventType(str, Enum):
     """SSE 事件类型常量（spec 6.8 表 + AgentLoop 内部技术事件）。"""
     # 用户友好事件（user 模式可见）
-    CORRECTION = "correction"
     CLARIFICATION_NEEDED = "clarification_needed"
     PLAN = "plan"
     TODO_UPDATE = "todo_update"

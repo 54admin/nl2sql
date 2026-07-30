@@ -108,7 +108,7 @@
   #btn-sync { padding: 4px 10px; font-size: 12px; border: 1px solid #4caf50; background: #fff; color: #4caf50; border-radius: 4px; cursor: pointer; white-space: nowrap; }
   #btn-sync:hover { background: #f1f8f1; }
   #btn-sync:disabled { opacity: 0.6; cursor: not-allowed; }
-  /* ===== 管理后台（name-dict/规则/模板/知识库/模型限流） ===== */
+  /* ===== 管理后台（规则/模板/知识库/模型限流） ===== */
   #admin-panel { padding: 12px; overflow: auto; flex: 1; }
   /* ===== 设置页子标签切换 ===== */
   .settings-pane { flex: 1; min-height: 0; }
@@ -286,7 +286,6 @@
     <nav id="settings-nav" style="display:none">
       <button class="stab active" data-tab="datasource" onclick="showSettingsTab('datasource')">数据源</button>
       <button class="stab" data-tab="prompt" onclick="showSettingsTab('prompt')">提示词</button>
-      <button class="stab" data-tab="namedict" onclick="showSettingsTab('namedict')">名称字典</button>
       <button class="stab" data-tab="rules" onclick="showSettingsTab('rules')">业务规则</button>
       <button class="stab" data-tab="templates" onclick="showSettingsTab('templates')">SQL模板</button>
       <button class="stab" data-tab="knowledge" onclick="showSettingsTab('knowledge')">知识库</button>
@@ -356,10 +355,6 @@
       <section class="admin-card stab-panel" id="stab-prompt">
         <h3>系统提示词（多版本，启用一个生效） <button class="add-btn" onclick="openPromptModal()">+ 新版本</button></h3>
         <div id="prompt-list"></div>
-      </section>
-      <section class="admin-card stab-panel" id="stab-namedict">
-        <h3>名称纠错字典 <button class="add-btn" onclick="openNdModal()">+ 新增</button></h3>
-        <ul id="nd-list" class="admin-list"></ul>
       </section>
       <section class="admin-card stab-panel" id="stab-rules">
         <h3>业务规则 <button class="add-btn" onclick="openRuleModal()">+ 新增</button></h3>
@@ -716,8 +711,6 @@ async function ask(text) {
             });
             div.appendChild(box);
           }
-        } else if (evt.type === "correction") {
-          addMsg("已纠正：" + evt.data.original + " → " + evt.data.normalized, "system");
         } else if (evt.type === "error") {
           stopTyper();
           bubble.textContent = "⚠ " + (evt.data.message || "出错");
@@ -969,7 +962,6 @@ function showSettingsTab(tab) {
   document.querySelectorAll("#settings-nav .stab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
   if (tab === "datasource") loadDatasources();
   else if (tab === "prompt") loadPrompt();
-  else if (tab === "namedict") loadNameDict();
   else if (tab === "rules") loadRules();
   else if (tab === "templates") loadSqlTemplates();
   else if (tab === "knowledge") loadKbDocs();
@@ -978,7 +970,7 @@ function showSettingsTab(tab) {
   else if (tab === "limits") loadLimits();
 }
 
-// ===== 管理后台：name-dict / 业务规则 / SQL模板 / 知识库 / 模型限流 =====
+// ===== 管理后台：业务规则 / SQL模板 / 知识库 / 模型限流 =====
 async function loadPrompt() {
   const {prompts = []} = await (await fetch("/api/admin/prompts")).json().catch(() => ({}));
   _renderTable("prompt-list", ["场景", "启用", "内容预览"], prompts.map(p =>
@@ -1035,37 +1027,6 @@ function _renderTable(elId, headers, rows, empty = "暂无") {
     rows.length ? rows.join("") : `<tr><td colspan="${headers.length + 1}" style="text-align:center;padding:20px;color:#999">${empty}</td></tr>`
   }</tbody></table>`;
 }
-// 名称纠错字典
-async function loadNameDict() {
-  const {items = []} = await (await fetch("/api/admin/name-dict")).json().catch(() => ({}));
-  _renderTable("nd-list", ["别名/错写", "标准名", "类别"], items.map(d =>
-    `<tr><td>${escapeHtml(d.alias)}</td><td>${escapeHtml(d.standard)}</td><td>${d.category}</td>
-      <td class="col-op"><button class="llm-edit-btn" onclick="openNdModal(${d.id})">编辑</button><button class="li-del" onclick="delNameDict(${d.id})">×</button></td></tr>`));
-}
-function _ndFormHTML(d) {
-  d = d || {};
-  return `<input id="nm-alias" placeholder="别名/错写（用户可能输的）" value="${escapeHtml(d.alias||'')}">
-    <input id="nm-standard" placeholder="标准名（纠成这个）" value="${escapeHtml(d.standard||'')}">
-    <select id="nm-category"><option value="table" ${d.category==='table'?'selected':''}>表</option><option value="column" ${d.category==='column'?'selected':''}>列</option><option value="metric" ${d.category==='metric'?'selected':''}>指标</option></select>`;
-}
-async function openNdModal(id) {
-  let d = {};
-  if (id != null) {
-    const {items = []} = await (await fetch("/api/admin/name-dict")).json().catch(() => ({}));
-    d = items.find(x => x.id === id) || {};
-  }
-  openAdminModal(id != null ? "编辑名称纠错" : "新增名称纠错", _ndFormHTML(d), () => saveNdFromModal(id));
-}
-async function saveNdFromModal(id) {
-  const alias = document.getElementById("nm-alias").value.trim();
-  const standard = document.getElementById("nm-standard").value.trim();
-  if (!alias || !standard) return alert("别名和标准名必填");
-  const body = {alias, standard, category: document.getElementById("nm-category").value, enabled: true};
-  const url = "/api/admin/name-dict" + (id != null ? `/${id}` : "");
-  const r = await fetch(url, {method: id != null ? "PUT" : "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-  if (r.ok) { closeAdminModal(); await loadNameDict(); } else alert("保存失败");
-}
-async function delNameDict(id) { await fetch(`/api/admin/name-dict/${id}`, {method: "DELETE"}); await loadNameDict(); }
 // 业务规则
 async function loadRules() {
   const {rules = []} = await (await fetch("/api/admin/business-rules")).json().catch(() => ({}));

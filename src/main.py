@@ -30,7 +30,6 @@ _INDEX_HTML = (Path(__file__).resolve().parent.parent / "static" / "index.html")
 
 from src.config import load_config
 from src.core.agent_loop import AgentLoop
-from src.core.normalizer import Normalizer
 from src.core.orchestrator import Orchestrator
 from src.core.prompt_store import PromptStore
 from src.core.session import SessionState
@@ -46,7 +45,6 @@ from src.web.routes.admin_datasource import build_datasource_router
 from src.web.routes.admin_knowledge import build_knowledge_router
 from src.web.routes.admin_metadata import build_metadata_router
 from src.web.routes.admin_business_rules import build_business_rules_router
-from src.web.routes.admin_name_dict import build_name_dict_router
 from src.web.routes.admin_sql_templates import build_sql_templates_router
 from src.web.routes.admin_feishu import build_admin_feishu_router
 from src.web.routes.admin_agent_limits import build_agent_limits_router, load_agent_limits
@@ -139,14 +137,8 @@ async def lifespan(app: FastAPI):
     loop = AgentLoop(llm, reg, sess_state,
                      **{k: v for k, v in agent_limits.items() if k.startswith("max_")},
                      session_manager=sm, audit=audit)
-    from src.core.name_store import NameStore, build_llm_corrector
     from src.core.rule_store import RuleStore
-    name_store = NameStore()
-    norm = Normalizer(
-        dict_fn=name_store.lookup_exact,
-        fuzzy_fn=name_store.lookup_fuzzy,
-        llm_fn=build_llm_corrector(name_store, llm))
-    orch = Orchestrator(norm, loop, sm, prompt_store=prompts, audit=audit,
+    orch = Orchestrator(loop, sm, prompt_store=prompts, audit=audit,
                         rule_store=RuleStore())
 
     _app_state.update(
@@ -266,7 +258,6 @@ def create_app() -> FastAPI:
     app.include_router(build_knowledge_router())   # P3b 知识库上传/检索管理
     app.include_router(build_metadata_router())
     app.include_router(build_business_rules_router())
-    app.include_router(build_name_dict_router())   # P2 名称纠错别名字典 CRUD
     app.include_router(build_sql_templates_router())
     app.include_router(build_result_router())  # P1b：前端按 result_id 取全量结果
     app.include_router(build_audit_router())   # 审计统计：trace 详情/会话级/全局统计

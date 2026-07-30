@@ -51,13 +51,12 @@ class Message(Base):
 class AuditTrace(Base):
     """审计追溯：全链路记录。"""
     __tablename__ = "audit_traces"
-    __table_args__ = {"comment": "审计追溯：输入→纠错→工具→SQL→结果→归因全链路"}
+    __table_args__ = {"comment": "审计追溯：输入→工具→SQL→结果→归因全链路"}
     trace_id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="追踪ID")
     session_id: Mapped[str] = mapped_column(String(64), index=True, comment="会话ID")
     user_id: Mapped[str] = mapped_column(String(64), index=True, comment="用户ID")
     raw_input: Mapped[str] = mapped_column(Text, comment="原始输入")
     normalized_input: Mapped[str | None] = mapped_column(Text, nullable=True, comment="纠错后输入")
-    corrections_json: Mapped[str | None] = mapped_column(Text, nullable=True, comment="名称纠错记录（JSON）")
     tool_calls_json: Mapped[str | None] = mapped_column(Text, nullable=True, comment="工具调用记录（JSON）")
     sql_text: Mapped[str | None] = mapped_column(Text, nullable=True, comment="生成的SQL")
     result_id: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="结果旁路ID")
@@ -76,7 +75,7 @@ class AuditTrace(Base):
 
 class AuditEvent(Base):
     """审计事件流：一次 trace 的每一步一行（细粒度复盘用）。
-    turn_start / answer_delta(合并) / tool_call / tool_result / correction /
+    turn_start / answer_delta(合并) / tool_call / tool_result /
     user_input(多轮澄清每条都记) / clarification / error / cancelled / done。"""
     __tablename__ = "audit_events"
     __table_args__ = {"comment": "审计事件流：一次trace每步一行（细粒度复盘）"}
@@ -291,22 +290,6 @@ class BusinessRule(Base):
                                                     comment="表级规则关联的表全限定名（scope=table 时填）")
     key: Mapped[str] = mapped_column(String(128), comment="键名")
     value_json: Mapped[str] = mapped_column(Text, comment="规则值（JSON）")
-    enabled: Mapped[bool] = mapped_column(default=True, comment="是否启用")
-    version: Mapped[int] = mapped_column(default=1, comment="版本号")
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), comment="创建时间")
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
-                                                 onupdate=func.now(), comment="更新时间")
-
-
-class NameDict(Base):
-    """名称纠错别名字典（P2）：alias→standard 映射，normalizer dict_fn/fuzzy_fn 消费。
-    alias 是用户可能的错写/别名，standard 是标准名（表/列/指标的业务名）。"""
-    __tablename__ = "name_dict"
-    __table_args__ = {"comment": "名称纠错别名字典（alias→standard，normalizer 消费）"}
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="ID")
-    alias: Mapped[str] = mapped_column(String(128), index=True, comment="别名/错写（用户输入可能出现的）")
-    standard: Mapped[str] = mapped_column(String(128), comment="标准名（纠错目标）")
-    category: Mapped[str] = mapped_column(String(32), default="table", comment="类别（table/column/metric）")
     enabled: Mapped[bool] = mapped_column(default=True, comment="是否启用")
     version: Mapped[int] = mapped_column(default=1, comment="版本号")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), comment="创建时间")
