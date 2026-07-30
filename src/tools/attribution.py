@@ -66,9 +66,9 @@ async def do_attribution(args: dict, ctx: LoopContext,
 
 ATTRIBUTION = ToolDefinition(
     name="do_attribution",
-    description=("归因分析：解释「为什么」（如发电量为什么下降/异动原因/对比差异）。"
-                 "用户问归因类问题时调用。内部已检索知识库文档依据并调归因模型整合成"
-                 "主因/次因/参考依据结论；你可再用 execute_sql 补量化数据。"),
+    description=("归因分析：解释「为什么」（发电量为什么下降/异动原因/对比差异）。"
+                 "先用 execute_sql 定位具体异常指标/数值，再调本工具解释原因；"
+                 "topic 带上查到的指标名。内部已检索知识库依据并调归因模型整合主因/次因/参考依据。"),
     parameters={"type": "object",
                 "properties": {"topic": {"type": "string",
                                          "description": "归因主题。提炼成检索友好的表述：去掉具体年月/分数/数值，保留省分公司+指标名+归因语义。如「新疆 提质增效-增发电量 偏低 原因」，而非「2026年6月新疆增发电量得分1.515874为什么差」"}},
