@@ -396,9 +396,10 @@
         <option value="true">仅成功</option>
         <option value="false">仅失败</option>
       </select>
-      <input id="stats-filter-user" placeholder="按人 (user/open_id)" style="padding:4px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;width:150px">
-      <input id="stats-filter-session" placeholder="按会话 id" style="padding:4px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;width:140px">
+      <select id="stats-filter-user" style="padding:4px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;width:150px"><option value="">所有人</option></select>
+      <select id="stats-filter-session" style="padding:4px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;width:200px"><option value="">全部会话</option></select>
       <button onclick="loadStats(1)" style="padding:4px 12px;background:#1976d2;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">查询</button>
+      <button onclick="resetStatsFilter()" style="padding:4px 12px;background:#fff;color:#1976d2;border:1px solid #1976d2;border-radius:6px;cursor:pointer;font-size:13px">重置</button>
       <button onclick="showStats(false)" style="margin-left:auto;padding:5px 12px;background:#fff;color:#1976d2;border:1px solid #1976d2;border-radius:6px;cursor:pointer;font-size:13px">← 返回</button>
     </div>
     <div style="padding:12px;overflow:auto;flex:1">
@@ -860,13 +861,34 @@ function showStats(enter) {
   document.getElementById("settings-nav").style.display = "none";
   document.getElementById("admin-panel").style.display = "none";
   document.getElementById("stats-panel").style.display = enter ? "flex" : "none";
-  if (enter) loadStats(1);
+  if (enter) { fillStatsFilters(); loadStats(1); }
+}
+async function fillStatsFilters() {
+  // 拉去重的 user / 有记录的 session，填两个 <select>；保留当前选中值（翻页不丢）
+  const f = await (await fetch("/api/admin/audit/filters")).json().catch(() => ({}));
+  const us = document.getElementById("stats-filter-user"), curU = us.value;
+  us.innerHTML = '<option value="">所有人</option>' +
+    (f.users || []).map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u.slice(0, 20))}</option>`).join("");
+  if (curU) us.value = curU;
+  const ss = document.getElementById("stats-filter-session"), curS = ss.value;
+  ss.innerHTML = '<option value="">全部会话</option>' +
+    (f.sessions || []).map(s => {
+      const ch = s.channel ? "（" + (s.channel === "feishu" ? "飞书" : "web") + "）" : "";
+      return `<option value="${escapeHtml(s.id)}">${escapeHtml((s.title || s.id.slice(0, 8)) + ch)}</option>`;
+    }).join("");
+  if (curS) ss.value = curS;
+}
+function resetStatsFilter() {
+  document.getElementById("stats-filter-sel").value = "";
+  document.getElementById("stats-filter-user").value = "";
+  document.getElementById("stats-filter-session").value = "";
+  loadStats(1);
 }
 async function loadStats(page) {
   const sv = document.getElementById("stats-filter-sel").value;
   const success = sv === "" ? null : sv === "true";
-  const user = document.getElementById("stats-filter-user").value.trim();
-  const session = document.getElementById("stats-filter-session").value.trim();
+  const user = document.getElementById("stats-filter-user").value;
+  const session = document.getElementById("stats-filter-session").value;
   const sc = await (await fetch("/api/admin/audit/stats")).json().catch(() => ({}));
   renderStatsCards(sc);
   let url = `/api/admin/audit/traces?page=${page}&page_size=20`;
@@ -894,14 +916,17 @@ function renderTraces(traces, total, page) {
        <td>${escapeHtml((t.raw_input || "").slice(0, 40))}</td>
        <td>${chBadge(t.channel)}</td>
        <td title="${escapeHtml(t.user_id || "")}" style="max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml((t.user_id || "-").slice(0, 14))}</td>
-       <td title="${escapeHtml(t.session_id || "")}" style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.session_title || (t.session_id || "").slice(0, 8) || "-")}</td>
+       <td style="max-width:160px" title="${escapeHtml(t.session_id || "")}">
+         <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.session_title || "(无标题)")}</div>
+         <div style="font-size:11px;color:#999;font-family:monospace">${escapeHtml((t.session_id || "").slice(0, 8))}</div>
+       </td>
        <td>${badge(t.success)}</td>
        <td>${t.elapsed_ms ? (t.elapsed_ms / 1000).toFixed(1) + "s" : "-"}</td>
        <td>${t.created_at ? new Date(t.created_at).toLocaleString("zh-CN") : ""}</td>
      </tr>`).join("") :
     `<tr><td colspan="7" style="text-align:center;padding:20px;color:#999">无记录</td></tr>`;
   document.getElementById("stats-traces").innerHTML =
-    `<table class="admin-table"><thead><tr><th>问题</th><th style="width:46px">端</th><th>人</th><th>会话</th><th style="width:40px">成功</th><th style="width:60px">耗时</th><th style="width:150px">时间</th></tr></thead><tbody>${rows}</tbody></table>`;
+    `<table class="admin-table"><thead><tr><th>问题</th><th style="width:60px">端</th><th>人</th><th style="width:160px">会话</th><th style="width:40px">成功</th><th style="width:60px">耗时</th><th style="width:150px">时间</th></tr></thead><tbody>${rows}</tbody></table>`;
   const pages = Math.ceil(total / 20);
   document.getElementById("stats-pager").innerHTML = pages > 1
     ? `第 ${page}/${pages} 页 · 共 ${total} 条 `
@@ -1803,7 +1828,7 @@ function showLogin() {
 }
 function enterApp() {
   document.getElementById("login-panel").style.display = "none";
-  document.getElementById("app").style.display = "block";
+  document.getElementById("app").style.display = "flex";   // 用 flex 不是 block——#app 是纵向 flex 容器（footer 输入框靠它贴底）
   refreshSessionList();
 }
 async function doLogin() {

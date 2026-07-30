@@ -105,4 +105,24 @@ def build_audit_router() -> APIRouter:
             "events_by_type": {r[0]: r[1] for r in type_rows},
         }
 
+    @router.get("/api/admin/audit/filters")
+    async def audit_filters() -> dict:
+        """筛选下拉选项：去重的人 + 有 trace 的会话（按最近问数时间倒序）。
+        仅供统计页两个 <select> 填充；会话只取有审计记录的（量可控、强相关）。"""
+        async with AsyncSessionFactory() as s:
+            users = (await s.execute(
+                select(AuditTrace.user_id)
+                .where(AuditTrace.user_id.isnot(None), AuditTrace.user_id != "")
+                .group_by(AuditTrace.user_id))).scalars().all()
+            sess_rows = (await s.execute(
+                select(Session.id, Session.title, Session.channel)
+                .join(AuditTrace, AuditTrace.session_id == Session.id)
+                .group_by(Session.id, Session.title, Session.channel)
+                .order_by(func.max(AuditTrace.created_at).desc()))).all()
+        return {
+            "users": [u for u in users if u],
+            "sessions": [{"id": r.id, "title": r.title or "", "channel": r.channel or ""}
+                         for r in sess_rows],
+        }
+
     return router
