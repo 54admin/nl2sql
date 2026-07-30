@@ -1260,6 +1260,7 @@ function renderLlmGateways() {
         <b>🌐 ${escapeHtml(g.base_url)}</b>
         <span style="font-size:11px;color:#888">key: ${escapeHtml(kh)}</span>
         <span style="margin-left:auto;display:flex;gap:4px">
+          <button class="llm-edit-btn" onclick="openLlmGwModal(${gi})">✏ 编辑网关</button>
           <button class="llm-edit-btn" onclick="discoverModels(${gi})">🔍 发现模型</button>
           <button class="llm-edit-btn" onclick="openLlmModelModal(${gi})">+ 加模型</button>
         </span>
@@ -1312,6 +1313,31 @@ async function deleteLlmModel(id) {
 }
 function _llmPurpChecks() {
   return LLM_PURPOSES.map(({p,label}) => `<label style="font-size:13px;margin-right:10px"><input type="checkbox" id="lm-p-${p}"> ${label}</label>`).join("");
+}
+function openLlmGwModal(gi) {  // 编辑已添加网关的 base_url/api_key
+  const g = (window._llmGws || [])[gi]; if (!g) return;
+  openAdminModal(`编辑网关：${escapeHtml(g.base_url)}`,
+    `<input id="gw-base" placeholder="base_url" value="${escapeHtml(g.base_url)}">
+     <input id="gw-key" type="password" placeholder="api_key" value="${escapeHtml(g.api_key)}">
+     <p style="font-size:11px;color:#888">保存后该网关下所有模型的地址/key 一并更新</p>`,
+    _saveLlmGw.bind(null, gi));
+}
+async function _saveLlmGw(gi) {
+  const g = (window._llmGws || [])[gi]; if (!g) return;
+  const base = document.getElementById("gw-base").value.trim();
+  const key = document.getElementById("gw-key").value.trim();
+  if (!base || !key) return alert("base_url 和 api_key 必填");
+  const btn = document.getElementById("admin-modal-save"); const old = btn.textContent;
+  btn.disabled = true; btn.textContent = "保存中…";
+  try {
+    // 该网关下每个模型都 PUT 改 base_url/api_key（其余字段保留）
+    for (const c of g.models) {
+      await _putLlm(c.id, base, key, c.model, c.purposes, c.enabled,
+        {protocol: c.protocol, rpm_limit: c.rpm_limit, concurrency: c.concurrency});
+    }
+    closeAdminModal(); await loadLlm();
+  } catch(e) { alert("保存失败: " + e.message); }
+  finally { btn.disabled = false; btn.textContent = old; }
 }
 async function openLlmModal() {  // 顶部"+ 新增"：新网关 + 发现模型导入
   openAdminModal("新增网关 + 模型",
