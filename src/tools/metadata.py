@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
 from src.datasource.metadata_sync import fetch_table_columns
-from src.storage.models import BusinessRule, MetadataTable, TableRelation
+from src.storage.models import BusinessRule, MetadataTable, SqlTemplate, TableRelation
 from src.storage.pg_client import AsyncSessionFactory
 
 
@@ -65,6 +65,16 @@ async def _list_table_rules() -> dict[str, list[str]]:
     return out
 
 
+async def _list_templates() -> list[dict]:
+    """读 enabled 的 SQL 模板（name + sql_template + 触发词），兑现 query_metadata 描述里的"已配 SQL 模板"——
+    之前只返回 tables/relations，prompt 又让 agent 来这里找模板，结果找不到、白配。"""
+    async with AsyncSessionFactory() as s:
+        rows = (await s.execute(SqlTemplate.__table__.select().where(
+            SqlTemplate.enabled.is_(True)))).all()
+    return [{"name": r.name, "sql_template": r.sql_template,
+             "triggers": r.trigger_keywords or ""} for r in rows]
+
+
 async def query_metadata(args: dict, ctx: LoopContext,
                          cancel_token: CancelToken) -> ToolResult:
     """工具 handler。args 可带 datasource_id；缺省取第一个数据源（单源场景，多源绑源留 P1c）。
@@ -82,10 +92,12 @@ async def query_metadata(args: dict, ctx: LoopContext,
     if not tables:
         return ToolResult(summary="该数据源没有勾选参与问数的表，请在配置页勾选表后再问。")
     relations = await _list_relations(int(ds_id))
+    templates = await _list_templates()
     table_rules = await _list_table_rules()
     for t in tables:
         t["rules"] = table_rules.get(t["table_name"], [])
-    return ToolResult(summary=json.dumps({"tables": tables, "relations": relations},
+    return ToolResult(summary=json.dumps({"tables": tables, "relations": relations,
+                                          "templates": templates},
                                          ensure_ascii=False, default=str))
 
 

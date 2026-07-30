@@ -442,10 +442,12 @@ def _tool_result_line(name, summary) -> tuple[str, str]:
     if name == "execute_sql":
         rows = _extract_rows(summary)
         cols = _extract_cols(summary)
-        # 空结果用 warning，有结果用 data-sheet（数据表）
+        # summary 不是合法 JSON 结果 → execute_sql 执行失败（SQL 报错），别显示"返回?行"
+        if rows is None:
+            return ("warning_outlined", "**查询失败**" + (f"：{summary[:60]}" if summary else ""))
         if rows == 0:
             return ("warning_outlined", "**查询完成**：无匹配数据（0 行）")
-        return ("data-sheet_outlined", f"**查询完成**：返回 {rows if rows is not None else '?'} 行"
+        return ("data-sheet_outlined", f"**查询完成**：返回 {rows} 行"
                 + (f"（{cols} 列）" if cols else ""))
     if name == "query_metadata":
         return ("check_outlined", "**元数据已获取**")
