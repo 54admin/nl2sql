@@ -152,7 +152,7 @@ class AgentLoop:
                     except Exception:
                         args = {}
                     tool_calls.append({"id": v["id"], "name": v["name"], "args": args})
-                if content:
+                if content.strip():  # 纯空白（如 "\n\n"）不算有效答案，避免覆盖前面已查到的结论
                     last_answer = content
                 msgs.append({"role": "assistant", "content": content,
                              "tool_calls": _to_openai_tool_calls(tool_calls)
@@ -265,6 +265,9 @@ class AgentLoop:
 
                 await self._maybe_compress(msgs)
             else:
+                # max_turns 用尽仍未 finish：别返回空答案——保住前面已得到的内容；全空则明确提示
+                if not last_answer.strip():
+                    last_answer = f"已达最大推理轮数（{self._max_turns} 轮），未能生成完整结论，请缩小问题范围或重试。"
                 yield SSEEvent("warning",
                                {"reason": "max_turns", "max": self._max_turns},
                                trace_id)
