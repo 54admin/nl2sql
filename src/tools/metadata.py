@@ -53,23 +53,22 @@ async def _list_relations(datasource_id: int) -> list[dict]:
 
 
 async def _list_table_rules() -> dict[str, list[str]]:
-    """读表级业务规则（scope=table，enabled），按 table_name 分组返回文本列表。
-    供 query_metadata 附在对应表上——查该表时 LLM 才看到，不污染全局 prompt。"""
+    """读表级业务规则（enabled），按 table_name 分组返回文本列表。
+    供 query_metadata 附在对应表上——查该表时 LLM 才看到，不污染全局 prompt。
+    （通用规则已挪进系统提示词，本表只存表级规则。）"""
     async with AsyncSessionFactory() as s:
         rows = (await s.execute(BusinessRule.__table__.select().where(
-            BusinessRule.enabled.is_(True), BusinessRule.scope == "table"))).all()
+            BusinessRule.enabled.is_(True)))).all()
     out: dict[str, list[str]] = {}
     for r in rows:
-        if r.table_name:
-            out.setdefault(r.table_name, []).append(f"{r.key}: {r.value_json}")
+        out.setdefault(r.table_name, []).append(f"{r.key}: {r.value_json}")
     return out
 
 
 async def query_metadata(args: dict, ctx: LoopContext,
                          cancel_token: CancelToken) -> ToolResult:
     """工具 handler。args 可带 datasource_id；缺省取第一个数据源（单源场景，多源绑源留 P1c）。
-    返回 {tables:[...], relations:[...]}：tables=白名单表（字段实时拉），relations=已配 JOIN 口径。
-    SQL 模板不在这里返回——走 system_prompt 注入（【SQL 样板】段）。"""
+    返回 {tables:[...], relations:[...]}：tables=白名单表（字段实时拉），relations=已配 JOIN 口径。"""
     from src.datasource.manager import DataSourceManager
     ds_id = args.get("datasource_id")
     mgr = DataSourceManager()
@@ -93,7 +92,7 @@ async def query_metadata(args: dict, ctx: LoopContext,
 QUERY_METADATA = ToolDefinition(
     name="query_metadata",
     description=("查看当前数据源里可以查询的表清单（表名/中文注释/字段）、已配表间关联。"
-                 "先调它了解有哪些表，再决定查哪张表。SQL 模板在系统提示词里，不用来这里找。无需参数。"),
+                 "先调它了解有哪些表，再决定查哪张表。无需参数。"),
     parameters={"type": "object", "properties": {}, "required": []},
     handler=query_metadata,
 )

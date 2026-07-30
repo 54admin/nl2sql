@@ -10,16 +10,13 @@ from src.storage.pg_client import AsyncSessionFactory
 
 
 class BusinessRuleIn(BaseModel):
-    category: str = "general"        # 旧字段保留兼容；主分层看 scope
-    scope: str = "global"            # global 通用 / table 表级
-    table_name: str | None = None    # scope=table 时填，表全限定名
+    table_name: str    # 表全限定名（必填）
     key: str
     value_json: str
     enabled: bool = True
 
 
 class BusinessRulePatch(BaseModel):
-    scope: str | None = None
     table_name: str | None = None
     value_json: str | None = None
     enabled: bool | None = None
@@ -29,14 +26,11 @@ def build_business_rules_router() -> APIRouter:
     router = APIRouter()
 
     @router.get("/api/admin/business-rules")
-    async def list_rules(category: str | None = None) -> dict:
+    async def list_rules() -> dict:
         async with AsyncSessionFactory() as s:
-            stmt = BusinessRule.__table__.select()
-            if category:
-                stmt = stmt.where(BusinessRule.category == category)
-            rows = (await s.execute(stmt)).all()
-        return {"rules": [{"id": r.id, "scope": r.scope, "table_name": r.table_name,
-                           "category": r.category, "key": r.key,
+            rows = (await s.execute(BusinessRule.__table__.select())).all()
+        return {"rules": [{"id": r.id, "table_name": r.table_name,
+                           "key": r.key,
                            "value_json": r.value_json, "enabled": r.enabled,
                            "version": r.version} for r in rows]}
 

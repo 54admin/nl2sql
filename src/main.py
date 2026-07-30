@@ -128,7 +128,9 @@ async def lifespan(app: FastAPI):
     prompts = PromptStore()
     from src.datasource.manager import DataSourceManager
     datasource_mgr = DataSourceManager()
-    reg = default_registry()
+    # 读 enabled SQL 模板清单，拼进 get_sql_template 工具的 description（LLM 看 schema 即知有哪些模板；重启生效）
+    from src.tools.sql_template import build_template_desc, list_enabled_templates
+    reg = default_registry(sql_template_desc=build_template_desc(await list_enabled_templates()))
     sess_state = SessionState(sm)
     from src.core.audit import AuditSink
     audit = AuditSink()
@@ -137,9 +139,7 @@ async def lifespan(app: FastAPI):
     loop = AgentLoop(llm, reg, sess_state,
                      **{k: v for k, v in agent_limits.items() if k.startswith("max_")},
                      session_manager=sm, audit=audit)
-    from src.core.rule_store import RuleStore
-    orch = Orchestrator(loop, sm, prompt_store=prompts, audit=audit,
-                        rule_store=RuleStore())
+    orch = Orchestrator(loop, sm, prompt_store=prompts, audit=audit)
 
     _app_state.update(
         orchestrator=orch, session_mgr=sm, llm_service=llm, prompts=prompts,

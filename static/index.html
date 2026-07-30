@@ -1030,18 +1030,14 @@ function _renderTable(elId, headers, rows, empty = "暂无") {
 // 业务规则
 async function loadRules() {
   const {rules = []} = await (await fetch("/api/admin/business-rules")).json().catch(() => ({}));
-  _renderTable("br-list", ["作用域", "名称", "内容"], rules.map(d => {
-    const tag = d.scope === "table" ? `表级：${escapeHtml(d.table_name || "")}` : "通用";
-    return `<tr><td>${tag}</td><td>${escapeHtml(d.key)}</td><td>${escapeHtml(d.value_json || "")}</td>
-      <td class="col-op"><button class="llm-edit-btn" onclick="openRuleModal(${d.id})">编辑</button><button class="li-del" onclick="delRule(${d.id})">×</button></td></tr>`;
-  }));
+  _renderTable("br-list", ["关联表", "名称", "内容"], rules.map(d =>
+    `<tr><td>${escapeHtml(d.table_name || "")}</td><td>${escapeHtml(d.key)}</td><td>${escapeHtml(d.value_json || "")}</td>
+      <td class="col-op"><button class="llm-edit-btn" onclick="openRuleModal(${d.id})">编辑</button><button class="li-del" onclick="delRule(${d.id})">×</button></td></tr>`));
 }
 function _ruleFormHTML(r) {
   r = r || {};
-  const scope = r.scope || "global";
   const val = (r.value_json || "").replace(/^"|"$/g, "");
-  return `<select id="rm-scope" onchange="document.getElementById('rm-table-row').style.display=this.value==='table'?'block':'none'"><option value="global" ${scope==='global'?'selected':''}>通用（全局，进 system prompt）</option><option value="table" ${scope==='table'?'selected':''}>表级（关联某张表）</option></select>
-    <div id="rm-table-row" style="display:${scope==='table'?'block':'none'}"><select id="rm-table"><option value="">（选参与问数的表）</option></select></div>
+  return `<select id="rm-table"><option value="">（选参与问数的表，必填）</option></select>
     <input id="rm-key" placeholder="名称（如 发电量单位）" value="${escapeHtml(r.key||'')}">
     <input id="rm-value" placeholder='内容（如 万kWh）' value="${escapeHtml(val)}">`;
 }
@@ -1065,13 +1061,12 @@ async function openRuleModal(id) {
   }
 }
 async function saveRuleFromModal(id) {
-  const scope = document.getElementById("rm-scope").value;
-  const table_name = scope === "table" ? document.getElementById("rm-table").value.trim() : null;
+  const table_name = document.getElementById("rm-table").value.trim();
   const key = document.getElementById("rm-key").value.trim();
   const value = document.getElementById("rm-value").value.trim();
   if (!key) return alert("键名必填");
-  if (scope === "table" && !table_name) return alert("表级规则要填表名");
-  const body = {scope, table_name, key, value_json: value || "{}", enabled: true};
+  if (!table_name) return alert("要选关联的表");
+  const body = {table_name, key, value_json: value || "{}", enabled: true};
   const url = "/api/admin/business-rules" + (id != null ? `/${id}` : "");
   const r = await fetch(url, {method: id != null ? "PUT" : "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   if (r.ok) { closeAdminModal(); await loadRules(); } else alert("保存失败");
@@ -1080,14 +1075,16 @@ async function delRule(id) { await fetch(`/api/admin/business-rules/${id}`, {met
 // SQL 模板（新建/编辑/删除弹框）
 async function loadSqlTemplates() {
   const {templates = []} = await (await fetch("/api/admin/sql-templates")).json().catch(() => ({}));
-  _renderTable("st-list", ["标题"], templates.map(d =>
+  _renderTable("st-list", ["标题", "使用说明"], templates.map(d =>
     `<tr><td><b>${escapeHtml(d.name || "")}</b>${d.enabled === false ? " (停用)" : ""}</td>
+      <td style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#666">${escapeHtml((d.usage||"").slice(0,60))}</td>
       <td class="col-op"><button class="llm-edit-btn" onclick="openTplModal(${d.id})">编辑</button><button class="li-del" onclick="delTpl(${d.id})">×</button></td></tr>`));
 }
 function _tplFormHTML(t) {
   t = t || {};
   return `<input id="tm-name" placeholder="标题（如 同比环比 / 行转列排名）" value="${escapeHtml(t.name||'')}">
-    <textarea id="tm-sql" placeholder="SQL 样板（含 :param 占位）" style="height:55vh;font-family:monospace;font-size:13px">${escapeHtml(t.sql_template||'')}</textarea>`;
+    <textarea id="tm-usage" placeholder="使用说明：什么场景用、参数怎么填、表名怎么改（会拼进 get_sql_template 工具说明给 LLM）" style="height:16vh;font-size:13px">${escapeHtml(t.usage||'')}</textarea>
+    <textarea id="tm-sql" placeholder="SQL 样板（含 :param 占位）" style="height:40vh;font-family:monospace;font-size:13px">${escapeHtml(t.sql_template||'')}</textarea>`;
 }
 async function openTplModal(id) {
   let t = {};
@@ -1099,9 +1096,10 @@ async function openTplModal(id) {
 }
 async function saveTplFromModal(id) {
   const name = document.getElementById("tm-name").value.trim();
+  const usage = document.getElementById("tm-usage").value.trim();
   const sql_template = document.getElementById("tm-sql").value.trim();
   if (!name || !sql_template) return alert("标题和 SQL 必填");
-  const body = {name, sql_template, enabled: true};
+  const body = {name, sql_template, usage: usage || null, enabled: true};
   const url = "/api/admin/sql-templates" + (id != null ? `/${id}` : "");
   const r = await fetch(url, {method: id != null ? "PUT" : "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   if (r.ok) { closeAdminModal(); await loadSqlTemplates(); } else alert("保存失败");

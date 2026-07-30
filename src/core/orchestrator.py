@@ -20,13 +20,11 @@ class Orchestrator:
     """编排入口。组合 agent_loop + session_manager + prompt_store(可选)。"""
 
     def __init__(self, loop, sessions: SessionManager,
-                 prompt_store=None, audit=None, rule_store=None):
+                 prompt_store=None, audit=None):
         self._loop = loop
         self._sessions = sessions
         self._prompts = prompt_store
         self._audit = audit
-        # P2 业务规则：读 enabled 规则追加到 system_prompt，让 LLM 知晓人工口径
-        self._rule_store = rule_store
 
     async def handle_message(self, user_id: str, session_id: str, text: str,
                              mode: ViewerMode, trace_id: str,
@@ -49,23 +47,7 @@ class Orchestrator:
             system_prompt = (f"【当前日期】今天 {_now.year}-{_now.month:02d}-{_now.day:02d}"
                              f"（周{_wd}），当前年月 {_ym}。用户说\"本月/上月/最近\"等相对时间时据此换算。\n\n"
                              + system_prompt)
-        # 业务规则段追加到 system_prompt（P2）：让 LLM 知晓人工录入口径
-        if system_prompt and self._rule_store is not None:
-            rules_text = await self._rule_store.all_text()
-            if rules_text:
-                system_prompt = system_prompt + "\n\n【业务规则】\n" + rules_text
-        # SQL 样板段追加（通用复杂 SQL 样板，和表结构无关，进 prompt 让 LLM 写复杂查询参考）
-        if system_prompt:
-            from src.storage.models import SqlTemplate
-            from src.storage.pg_client import AsyncSessionFactory
-            async with AsyncSessionFactory() as _s:
-                _tpls = (await _s.execute(SqlTemplate.__table__.select().where(
-                    SqlTemplate.enabled.is_(True)))).all()
-            if _tpls:
-                _tpl_text = "\n".join(f"- {t.name}：\n{t.sql_template}" for t in _tpls)
-                system_prompt = system_prompt + "\n\n【SQL 样板（复杂查询如同比/环比/行转列参考，按需改表名/参数）】\n" + _tpl_text
-
-        # 4. 迭代 loop，透传事件；异常转 ERROR 不中断流
+        # 迭代 loop，透传事件；异常转 ERROR 不中断流
         # cancel_token 由路由层注入（前端取消则置位，loop 在检查点响应）。
         if cancel_token is None:
             cancel_token = CancelToken()

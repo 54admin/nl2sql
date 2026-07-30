@@ -12,9 +12,8 @@ from src.storage.pg_client import AsyncSessionFactory
 class SqlTemplateIn(BaseModel):
     datasource_id: int | None = None
     name: str
-    trigger_keywords: str | None = None
-    trigger_semantics: str | None = None
     sql_template: str
+    usage: str | None = None
     params_json: str | None = None
     formatters_json: str | None = None
     enabled: bool = True
@@ -22,9 +21,8 @@ class SqlTemplateIn(BaseModel):
 
 class SqlTemplatePatch(BaseModel):
     name: str | None = None
-    trigger_keywords: str | None = None
-    trigger_semantics: str | None = None
     sql_template: str | None = None
+    usage: str | None = None
     params_json: str | None = None
     formatters_json: str | None = None
     enabled: bool | None = None
@@ -41,9 +39,9 @@ def build_sql_templates_router() -> APIRouter:
                 stmt = stmt.where(SqlTemplate.datasource_id == datasource_id)
             rows = (await s.execute(stmt)).all()
         return {"templates": [{"id": r.id, "datasource_id": r.datasource_id,
-                               "name": r.name, "trigger_keywords": r.trigger_keywords,
-                               "trigger_semantics": r.trigger_semantics,
-                               "sql_template": r.sql_template, "params_json": r.params_json,
+                               "name": r.name,
+                               "sql_template": r.sql_template, "usage": r.usage,
+                               "params_json": r.params_json,
                                "formatters_json": r.formatters_json,
                                "enabled": r.enabled, "version": r.version} for r in rows]}
 

@@ -16,7 +16,7 @@ DEFAULT_SCENE = "default"
 DEFAULT_PROMPT = """你是 NL2SQL 问数助手。用户用自然语言问业务数据，你查只读数据库后用中文回答。
 
 【工作流程——每次必须遵守】
-1. 先调 query_metadata（无参数）了解当前数据源有哪些表、字段、表注释、表间关联（relations）、SQL 样板。
+1. 先调 query_metadata（无参数）了解当前数据源有哪些表、字段、表注释、表间关联（relations）。
    整轮对话 query_metadata 只调一次，记住返回结果，不要重复调用。
    永远不要凭空猜表名/字段名——必须先 query_metadata 看清楚再写 SQL。
 2. 根据用户问题，从 query_metadata 返回的表里挑出需要的表，用 execute_sql 执行只读查询。
@@ -130,7 +130,7 @@ class PromptStore:
 
     async def list_all(self) -> list[dict]:
         async with AsyncSessionFactory() as s:
-            rows = (await s.execute(Prompt.__table__.select())).all()
+            rows = (await s.execute(Prompt.__table__.select().order_by(Prompt.scene))).all()
         return [{"scene": r.scene, "content": r.content,
                  "version": r.version, "enabled": r.enabled,
                  "is_active": r.is_active} for r in rows]

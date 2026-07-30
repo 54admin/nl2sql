@@ -283,11 +283,8 @@ class BusinessRule(Base):
     __tablename__ = "business_rules"
     __table_args__ = {"comment": "业务规则（人工录入口径，后续阶段消费）"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="规则ID")
-    category: Mapped[str] = mapped_column(String(32), default="general", index=True, comment="分类（旧字段，主分层看 scope）")
-    scope: Mapped[str] = mapped_column(String(16), default="global", index=True,
-                                        comment="作用域（global通用 / table表级，表级时填 table_name）")
-    table_name: Mapped[str | None] = mapped_column(String(128), nullable=True,
-                                                    comment="表级规则关联的表全限定名（scope=table 时填）")
+    table_name: Mapped[str] = mapped_column(String(128), nullable=False,
+                                            comment="规则关联的表全限定名（表级规则必填）")
     key: Mapped[str] = mapped_column(String(128), comment="键名")
     value_json: Mapped[str] = mapped_column(Text, comment="规则值（JSON）")
     enabled: Mapped[bool] = mapped_column(default=True, comment="是否启用")
@@ -300,14 +297,13 @@ class BusinessRule(Base):
 class SqlTemplate(Base):
     """SQL 模板（人工录入）。P1a 建口径，P1b 应用。"""
     __tablename__ = "sql_templates"
-    __table_args__ = {"comment": "SQL模板（人工录入，P1b按关键词/语义命中应用）"}
+    __table_args__ = {"comment": "SQL模板（人工录入，get_sql_template工具按名取用）"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="模板ID")
     datasource_id: Mapped[int | None] = mapped_column(ForeignKey("datasources.id"), index=True, nullable=True,
-                                                       comment="数据源ID（通用样板可空，SQL模板进system prompt不分数据源）")
+                                                       comment="数据源ID（通用样板可空，模板不分数据源）")
     name: Mapped[str] = mapped_column(String(128), comment="模板名")
-    trigger_keywords: Mapped[str | None] = mapped_column(Text, nullable=True, comment="触发关键词（逗号分隔）")
-    trigger_semantics: Mapped[str | None] = mapped_column(Text, nullable=True, comment="触发语义（自然语言描述）")
     sql_template: Mapped[str] = mapped_column(Text, comment="SQL模板（含:param占位）")
+    usage: Mapped[str | None] = mapped_column(Text, nullable=True, comment="使用说明：适用场景/参数/改造指引")
     params_json: Mapped[str | None] = mapped_column(Text, nullable=True, comment="参数定义（JSON）")
     formatters_json: Mapped[str | None] = mapped_column(Text, nullable=True, comment="格式化器（JSON）")
     enabled: Mapped[bool] = mapped_column(default=True, comment="是否启用")

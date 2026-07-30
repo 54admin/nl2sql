@@ -58,12 +58,12 @@ _PG_MIGRATIONS = [
     "ALTER TABLE audit_traces ADD COLUMN IF NOT EXISTS success BOOLEAN",
     "ALTER TABLE audit_traces ADD COLUMN IF NOT EXISTS final_answer TEXT",
     "DROP TABLE IF EXISTS app_config",
-    # 业务规则分层（scope 通用/表级 + table_name 关联）
-    "ALTER TABLE business_rules ADD COLUMN IF NOT EXISTS scope VARCHAR(16) DEFAULT 'global'",
+    # 业务规则表级化（通用规则已挪进系统提示词，本表只存表级规则，关联 table_name）
     "ALTER TABLE business_rules ADD COLUMN IF NOT EXISTS table_name VARCHAR(128)",
-    "CREATE INDEX IF NOT EXISTS ix_business_rules_scope ON business_rules(scope)",
-    # SQL 模板 datasource_id 可空（通用样板，SQL模板进 system prompt 不分数据源）
+    "ALTER TABLE business_rules ALTER COLUMN table_name SET NOT NULL",
+    # SQL 模板：datasource_id 可空（通用样板）；加 usage 存使用说明（get_sql_template 工具按名取用）
     "ALTER TABLE sql_templates ALTER COLUMN datasource_id DROP NOT NULL",
+    "ALTER TABLE sql_templates ADD COLUMN IF NOT EXISTS usage TEXT",
     # llm_config.id 扩容：网关__模型 的 id 较长，老表 varchar(32) 装不下
     "ALTER TABLE llm_config ALTER COLUMN id TYPE VARCHAR(128)",
     # 模型级重构：加 purposes（JSON 多选）；旧 purpose 单值先转进 purposes，聚合同模型多行→一行 由迁移脚本做
