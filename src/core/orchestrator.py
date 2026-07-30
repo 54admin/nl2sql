@@ -47,6 +47,17 @@ class Orchestrator:
             system_prompt = (f"【当前日期】今天 {_now.year}-{_now.month:02d}-{_now.day:02d}"
                              f"（周{_wd}），当前年月 {_ym}。用户说\"本月/上月/最近\"等相对时间时据此换算。\n\n"
                              + system_prompt)
+        # SQL 样板段：读 enabled 模板（带 usage 使用说明），拼进 system_prompt 让 LLM 写复杂查询时参考
+        if system_prompt:
+            from src.storage.models import SqlTemplate
+            from src.storage.pg_client import AsyncSessionFactory
+            async with AsyncSessionFactory() as _s:
+                _tpls = (await _s.execute(SqlTemplate.__table__.select().where(
+                    SqlTemplate.enabled.is_(True)))).all()
+            if _tpls:
+                _tpl_text = "\n\n".join(
+                    f"【{t.name}】\n用法：{t.usage or '（无说明）'}\nSQL：\n{t.sql_template}" for t in _tpls)
+                system_prompt = system_prompt + "\n\n【SQL 样板（复杂查询如同比/环比/行转列参考，按需改表名/参数）】\n" + _tpl_text
         # 迭代 loop，透传事件；异常转 ERROR 不中断流
         # cancel_token 由路由层注入（前端取消则置位，loop 在检查点响应）。
         if cancel_token is None:

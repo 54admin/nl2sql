@@ -61,7 +61,7 @@ _PG_MIGRATIONS = [
     # 业务规则表级化（通用规则已挪进系统提示词，本表只存表级规则，关联 table_name）
     "ALTER TABLE business_rules ADD COLUMN IF NOT EXISTS table_name VARCHAR(128)",
     "ALTER TABLE business_rules ALTER COLUMN table_name SET NOT NULL",
-    # SQL 模板：加 usage 存使用说明（get_sql_template 工具按名取用）
+    # SQL 模板：加 usage 存使用说明（拼进 system_prompt【SQL 样板】段给 LLM）
     "ALTER TABLE sql_templates ADD COLUMN IF NOT EXISTS usage TEXT",
     # llm_config.id 扩容：网关__模型 的 id 较长，老表 varchar(32) 装不下
     "ALTER TABLE llm_config ALTER COLUMN id TYPE VARCHAR(128)",

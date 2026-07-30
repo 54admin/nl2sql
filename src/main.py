@@ -128,9 +128,7 @@ async def lifespan(app: FastAPI):
     prompts = PromptStore()
     from src.datasource.manager import DataSourceManager
     datasource_mgr = DataSourceManager()
-    # 读 enabled SQL 模板清单，拼进 get_sql_template 工具的 description（LLM 看 schema 即知有哪些模板；重启生效）
-    from src.tools.sql_template import build_template_desc, list_enabled_templates
-    reg = default_registry(sql_template_desc=build_template_desc(await list_enabled_templates()))
+    reg = default_registry()
     sess_state = SessionState(sm)
     from src.core.audit import AuditSink
     audit = AuditSink()

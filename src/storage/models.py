@@ -297,7 +297,7 @@ class BusinessRule(Base):
 class SqlTemplate(Base):
     """SQL 模板（人工录入）。P1a 建口径，P1b 应用。"""
     __tablename__ = "sql_templates"
-    __table_args__ = {"comment": "SQL模板（人工录入，get_sql_template工具按名取用）"}
+    __table_args__ = {"comment": "SQL模板（人工录入，拼进 system_prompt【SQL 样板】段给 LLM）"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="模板ID")
     name: Mapped[str] = mapped_column(String(128), comment="模板名")
     sql_template: Mapped[str] = mapped_column(Text, comment="SQL模板（含:param占位）")
