@@ -173,20 +173,18 @@ class AgentLoop:
                     name = tc.get("name")
                     args = _normalize_args(tc.get("args"))
                     cid = tc.get("id")
-                    yield SSEEvent("tool_call",
-                                   {"name": name, "args": args, "id": cid}, trace_id)
-                    self._audit_event("tool_call", {"name": name, "args": args, "id": cid}, trace_id, turn)
-
+                    # 重复调用（同工具+参数）：不显示也不执行，直接回 tip 让 LLM 用已有结果——
+                    # 否则前端/飞书会看到重复的"执行查询"步骤
                     if (name, _args_key(args)) in dup_keys:
                         tip = "已调用过相同工具和参数，请基于已有结果直接作答。"
                         msgs.append({"role": "tool", "tool_call_id": cid,
                                      "content": tip})
-                        yield SSEEvent("tool_result",
-                                       {"name": name, "summary": tip,
-                                        "converged": True}, trace_id)
                         self._audit_event("tool_result", {"name": name, "summary": tip,
                                                           "converged": True}, trace_id, turn)
                         continue
+                    yield SSEEvent("tool_call",
+                                   {"name": name, "args": args, "id": cid}, trace_id)
+                    self._audit_event("tool_call", {"name": name, "args": args, "id": cid}, trace_id, turn)
 
                     if name == ASK_USER:
                         ask_count += 1
