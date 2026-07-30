@@ -1314,27 +1314,57 @@ async function deleteLlmModel(id) {
 function _llmPurpChecks() {
   return LLM_PURPOSES.map(({p,label}) => `<label style="font-size:13px;margin-right:10px"><input type="checkbox" id="lm-p-${p}"> ${label}</label>`).join("");
 }
-function openLlmGwModal(gi) {  // 编辑已添加网关的 base_url/api_key
+function openLlmGwModal(gi) {  // 编辑网关：改地址/key/协议 + 发现并勾选导入新模型
   const g = (window._llmGws || [])[gi]; if (!g) return;
+  const proto = g.models[0]?.protocol || "openai";
+  window._editGwExist = new Set(g.models.map(m => m.model));
   openAdminModal(`编辑网关：${escapeHtml(g.base_url)}`,
     `<input id="gw-base" placeholder="base_url" value="${escapeHtml(g.base_url)}">
      <input id="gw-key" type="password" placeholder="api_key" value="${escapeHtml(g.api_key)}">
-     <p style="font-size:11px;color:#888">保存后该网关下所有模型的地址/key 一并更新</p>`,
+     <select id="gw-protocol"><option value="openai" ${proto==='openai'?'selected':''}>openai</option><option value="anthropic" ${proto==='anthropic'?'selected':''}>anthropic</option></select>
+     <button class="llm-edit-btn" onclick="_discEditGw()" style="margin:8px 0">🔍 发现模型（重新拉取勾选）</button>
+     <div id="gw-disc" style="max-height:40vh;overflow:auto"></div>
+     <p style="font-size:11px;color:#888">改地址/key/协议 → 保存更新该网关所有模型；发现并勾选新模型 → 一并导入（用途按名自动识别）</p>`,
     _saveLlmGw.bind(null, gi));
+}
+async function _discEditGw() {
+  const base = document.getElementById("gw-base").value.trim();
+  const key = document.getElementById("gw-key").value.trim();
+  const box = document.getElementById("gw-disc");
+  if (!base || !key) return alert("先填 base_url 和 api_key");
+  box.innerHTML = '<p class="placeholder">拉取中…</p>';
+  try {
+    const r = await fetch("/api/admin/llm-config/discover", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({base_url:base, api_key:key})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || r.status);
+    const models = data.models || [];
+    const exist = window._editGwExist || new Set();
+    if (!models.length) { box.innerHTML = '<p class="placeholder">网关未返回模型</p>'; return; }
+    box.innerHTML = `<div style="margin-bottom:6px"><button class="llm-edit-btn" onclick="document.querySelectorAll('#gw-disc .dc').forEach(c=>c.checked=true)">全选</button></div>` +
+      models.map(m => {
+        const has = exist.has(m);
+        return `<label style="display:block;padding:4px 0;font-size:13px;color:${has?'#999':'#333'}"><input type="checkbox" class="dc" value="${escapeHtml(m)}" ${has?'disabled checked':''}> ${escapeHtml(m)}${has?' （已添加）':''}</label>`;
+      }).join("");
+  } catch(e) { box.innerHTML = `<p class="placeholder err">拉取失败: ${e.message}</p>`; }
 }
 async function _saveLlmGw(gi) {
   const g = (window._llmGws || [])[gi]; if (!g) return;
   const base = document.getElementById("gw-base").value.trim();
   const key = document.getElementById("gw-key").value.trim();
+  const protocol = document.getElementById("gw-protocol").value;
   if (!base || !key) return alert("base_url 和 api_key 必填");
   const btn = document.getElementById("admin-modal-save"); const old = btn.textContent;
   btn.disabled = true; btn.textContent = "保存中…";
   try {
-    // 该网关下每个模型都 PUT 改 base_url/api_key（其余字段保留）
+    // 1. 改地址/key/协议：该网关下每个现有模型都 PUT（其余字段保留）
     for (const c of g.models) {
       await _putLlm(c.id, base, key, c.model, c.purposes, c.enabled,
-        {protocol: c.protocol, rpm_limit: c.rpm_limit, concurrency: c.concurrency});
+        {protocol, rpm_limit: c.rpm_limit, concurrency: c.concurrency});
     }
+    // 2. 导入勾选的新模型（已存在的已 disabled 不会进 :checked）
+    const exist = new Set(g.models.map(m => m.model));
+    const picked = [...document.querySelectorAll("#gw-disc .dc:checked")].map(c => c.value).filter(m => !exist.has(m));
+    for (const m of picked) await _putLlm(_llmId(base, m), base, key, m, _autoPurposes(m), true, {protocol});
     closeAdminModal(); await loadLlm();
   } catch(e) { alert("保存失败: " + e.message); }
   finally { btn.disabled = false; btn.textContent = old; }
