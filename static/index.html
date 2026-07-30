@@ -915,7 +915,7 @@ function renderTraces(traces, total, page) {
     `<tr style="cursor:pointer" onclick="openTraceDetail('${t.trace_id}')">
        <td>${escapeHtml((t.raw_input || "").slice(0, 40))}</td>
        <td>${chBadge(t.channel)}</td>
-       <td title="${escapeHtml(t.user_id || "")}" style="max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml((t.user_id || "-").slice(0, 14))}</td>
+       <td title="${escapeHtml(t.user_id || "")}" style="max-width:130px;word-break:break-all;font-size:12px">${escapeHtml(t.user_id || "-")}</td>
        <td style="max-width:160px" title="${escapeHtml(t.session_id || "")}">
          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.session_title || "(无标题)")}</div>
          <div style="font-size:11px;color:#999;font-family:monospace">${escapeHtml((t.session_id || "").slice(0, 8))}</div>
@@ -953,7 +953,8 @@ async function openTraceDetail(tid) {
      <b>会话：</b>${escapeHtml((trace.session_id || "").slice(0, 8))}<br>
      <b>结果：</b>${trace.success ? "✓ 成功" : "✗ 失败"} · ${trace.elapsed_ms ? (trace.elapsed_ms / 1000).toFixed(1) + "s" : "-"}<br>
      <b>答案：</b>${escapeHtml((trace.final_answer || "").slice(0, 300))}</div>
-     <table class="admin-table"><thead><tr><th style="width:40px">seq</th><th style="width:130px">事件</th><th>内容</th></tr></thead><tbody>${evRows}</tbody></table>`,
+     <details style="margin-top:8px"><summary style="cursor:pointer;color:#666">完整事件流（${events.length} 条，点击展开）</summary>
+     <table class="admin-table" style="margin-top:6px"><thead><tr><th style="width:40px">seq</th><th style="width:130px">事件</th><th>内容</th></tr></thead><tbody>${evRows}</tbody></table></details>`,
     null);
 }
 function showSettingsTab(tab) {
@@ -1126,10 +1127,16 @@ function openKbModal() {
 async function uploadKbFromModal() {
   const f = document.getElementById("km-file").files[0];
   if (!f) return alert("选文件");
-  const fd = new FormData();
-  fd.append("file", f);
-  const r = await fetch("/api/admin/knowledge/upload", {method: "POST", body: fd});
-  if (r.ok) { closeAdminModal(); await loadKbDocs(); } else { const e = await r.json().catch(() => ({})); alert("上传失败: " + (e.detail || r.status)); }
+  const btn = document.getElementById("admin-modal-save");
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = "上传中…";
+  try {
+    const fd = new FormData();
+    fd.append("file", f);
+    const r = await fetch("/api/admin/knowledge/upload", {method: "POST", body: fd});
+    if (r.ok) { closeAdminModal(); await loadKbDocs(); }
+    else { const e = await r.json().catch(() => ({})); alert("上传失败: " + (e.detail || r.status)); }
+  } finally { btn.disabled = false; btn.textContent = old; }
 }
 async function delKb(id) { await fetch(`/api/admin/knowledge/docs/${id}`, {method: "DELETE"}); await loadKbDocs(); }
 async function toggleKb(id, enabled) {
