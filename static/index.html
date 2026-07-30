@@ -868,7 +868,7 @@ async function fillStatsFilters() {
   const f = await (await fetch("/api/admin/audit/filters")).json().catch(() => ({}));
   const us = document.getElementById("stats-filter-user"), curU = us.value;
   us.innerHTML = '<option value="">所有人</option>' +
-    (f.users || []).map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u.slice(0, 20))}</option>`).join("");
+    (f.users || []).map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join("");
   if (curU) us.value = curU;
   const ss = document.getElementById("stats-filter-session"), curS = ss.value;
   ss.innerHTML = '<option value="">全部会话</option>' +
