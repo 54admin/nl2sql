@@ -29,7 +29,7 @@ async def list_enabled_templates() -> list:
 
 async def get_sql_template(args: dict, ctx: LoopContext,
                            cancel_token: CancelToken) -> ToolResult:
-    """工具 handler。args: {template_name}。返回该模板的 usage + SQL + 参数 JSON。
+    """工具 handler。args: {template_name}。返回该模板的 usage + SQL。
     一次读全表（模板表极小），Python 里按名筛；找不到用同一批行拼现有模板名兜底，不抛异常。"""
     name = (args.get("template_name") or "").strip()
     if not name:
@@ -40,7 +40,7 @@ async def get_sql_template(args: dict, ctx: LoopContext,
         hint = "、".join(r.name for r in rows) if rows else "（暂无）"
         return ToolResult(summary=f"无名为「{name}」的模板。现有模板：{hint}")
     detail = {"name": row.name, "usage": row.usage or "",
-              "sql_template": row.sql_template, "params_json": row.params_json or ""}
+              "sql_template": row.sql_template}
     return ToolResult(summary=json.dumps(detail, ensure_ascii=False, default=str))
 
 

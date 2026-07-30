@@ -299,13 +299,9 @@ class SqlTemplate(Base):
     __tablename__ = "sql_templates"
     __table_args__ = {"comment": "SQL模板（人工录入，get_sql_template工具按名取用）"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="模板ID")
-    datasource_id: Mapped[int | None] = mapped_column(ForeignKey("datasources.id"), index=True, nullable=True,
-                                                       comment="数据源ID（通用样板可空，模板不分数据源）")
     name: Mapped[str] = mapped_column(String(128), comment="模板名")
     sql_template: Mapped[str] = mapped_column(Text, comment="SQL模板（含:param占位）")
     usage: Mapped[str | None] = mapped_column(Text, nullable=True, comment="使用说明：适用场景/参数/改造指引")
-    params_json: Mapped[str | None] = mapped_column(Text, nullable=True, comment="参数定义（JSON）")
-    formatters_json: Mapped[str | None] = mapped_column(Text, nullable=True, comment="格式化器（JSON）")
     enabled: Mapped[bool] = mapped_column(default=True, comment="是否启用")
     version: Mapped[int] = mapped_column(default=1, comment="版本号")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), comment="创建时间")
