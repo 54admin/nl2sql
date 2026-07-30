@@ -91,9 +91,9 @@ class CardStream:
         log.info("飞书 done：answer=%d 字符，过程=%d 步", len(self._answer), len(self._tool_lines))
         await self._cancel_and_flush()   # flush 用最终 _answer 全量 acontent，补齐打字机
         await self._close_streaming()
-        # 全量替换兜底：飞书 streaming 有平台超时，多轮对话流式态可能丢过程/丢字；
-        # 关流式后用 _tool_lines 重建确保过程+答案完整，summary 一并更新（不再卡"生成中…"）
-        await self._update_card_full(card.build_final_card(self._tool_lines, self._answer))
+        # 流式态（打字机 answer + insert 的过程步）flush 后即最终态。
+        # 不再 card.update 全量替换——它会和已渲染的流式态叠加，导致答案/过程重复两遍。
+        # ponytail: 流式超时丢字的风险先接受；若复现再用「先清空流式元素再全量」加兜底。
 
     async def on_clarify(self, question: str, options, sid: str) -> None:
         await self._cancel_and_flush()
