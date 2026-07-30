@@ -164,6 +164,22 @@ class FeishuConfigRow(Base):
                                                  onupdate=func.now(), comment="更新时间")
 
 
+class AgentLimitsRow(Base):
+    """AgentLoop 查询上限动态配置（admin 后台改，重启生效）。单行（id=default）。
+    5 个上限对应 AgentLoop.__init__ 的 max_* 参数；lifespan 启动读、构造时传入。"""
+    __tablename__ = "agent_limits"
+    __table_args__ = {"comment": "AgentLoop 查询上限动态配置（admin改，重启生效）"}
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="配置ID（default）")
+    max_turns: Mapped[int] = mapped_column(default=10, comment="agent 最大循环轮数")
+    max_ask_user: Mapped[int] = mapped_column(default=2, comment="向用户澄清次数上限")
+    max_sql: Mapped[int] = mapped_column(default=4, comment="单次对话 execute_sql 硬上限")
+    max_sql_fail_streak: Mapped[int] = mapped_column(default=2, comment="连续空/错几次提示收手")
+    max_meta_per_run: Mapped[int] = mapped_column(default=1, comment="query_metadata 每轮最多次数")
+    version: Mapped[int] = mapped_column(default=1, comment="版本号")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
+                                                 onupdate=func.now(), comment="更新时间")
+
+
 class Prompt(Base):
     """场景化系统提示词（orchestrator 按 scene 读，组装 system message）。
     场景如 default / attribution / correction；default 是兜底。

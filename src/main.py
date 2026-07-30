@@ -14,12 +14,15 @@ def _insecure_ctx(*a, **k):
     c = _orig_ctx(*a, **k); c.check_hostname = False; c.verify_mode = _ssl.CERT_NONE; return c
 _ssl.create_default_context = _insecure_ctx
 
+import hashlib
+import hmac
+import time
 from contextlib import asynccontextmanager
 from urllib.parse import quote_plus
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pathlib import Path
 
 # 首页 HTML 启动时读一次缓存（避免每次请求读磁盘 + 路径不绑 cwd）
@@ -46,6 +49,7 @@ from src.web.routes.admin_business_rules import build_business_rules_router
 from src.web.routes.admin_name_dict import build_name_dict_router
 from src.web.routes.admin_sql_templates import build_sql_templates_router
 from src.web.routes.admin_feishu import build_admin_feishu_router
+from src.web.routes.admin_agent_limits import build_agent_limits_router, load_agent_limits
 from src.web.routes.ask import build_ask_router
 from src.web.routes.result import build_result_router
 from src.web.routes.session import build_session_router
@@ -59,6 +63,43 @@ def _pg_url(pc) -> str:
     """拼 PostgreSQL asyncpg URL，用户名密码做 URL 编码。"""
     return (f"postgresql+asyncpg://{quote_plus(pc.username)}:{quote_plus(pc.password)}"
             f"@{pc.host}:{pc.port}/{pc.database}")
+
+
+_TOKEN_TTL = 7 * 24 * 3600   # token 有效期 7 天
+
+
+def _sign_token(username: str, secret: str) -> str:
+    """签名 token：username:expire:hmac(secret, username:expire)。登录返回，前端存 localStorage，
+    请求带 Authorization: Bearer <token>。无状态——服务端不存，登出靠前端丢弃。"""
+    expire = int(time.time()) + _TOKEN_TTL
+    payload = f"{username}:{expire}"
+    sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}:{sig}"
+
+
+def _verify_token(val: str | None, secret: str) -> str | None:
+    """校验 token 返回 username；格式错/签名不符/过期都返回 None。"""
+    if not val or not secret:
+        return None
+    parts = val.split(":")
+    if len(parts) != 3:
+        return None
+    username, expire, sig = parts
+    expect = hmac.new(secret.encode(), f"{username}:{expire}".encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expect):
+        return None
+    try:
+        if int(expire) < time.time():
+            return None
+    except ValueError:
+        return None
+    return username
+
+
+def _bearer(req: Request) -> str | None:
+    """从 Authorization: Bearer <token> 提取 token。"""
+    h = req.headers.get("authorization", "")
+    return h[7:].strip() if h.lower().startswith("bearer ") else None
 
 
 class _Lazy:
@@ -96,7 +137,12 @@ async def lifespan(app: FastAPI):
     sess_state = SessionState(sm)
     from src.core.audit import AuditSink
     audit = AuditSink()
-    loop = AgentLoop(llm, reg, sess_state, session_manager=sm, audit=audit)
+    agent_limits = await load_agent_limits()
+    loop = AgentLoop(llm, reg, sess_state,
+                     max_turns=agent_limits["max_turns"], max_ask_user=agent_limits["max_ask_user"],
+                     max_sql=agent_limits["max_sql"], max_sql_fail_streak=agent_limits["max_sql_fail_streak"],
+                     max_meta_per_run=agent_limits["max_meta_per_run"],
+                     session_manager=sm, audit=audit)
     from src.core.name_store import NameStore, build_llm_corrector
     from src.core.rule_store import RuleStore
     name_store = NameStore()
@@ -109,7 +155,7 @@ async def lifespan(app: FastAPI):
 
     _app_state.update(
         orchestrator=orch, session_mgr=sm, llm_service=llm, prompts=prompts,
-        datasource_mgr=datasource_mgr, sess_state=sess_state)
+        datasource_mgr=datasource_mgr, sess_state=sess_state, auth=cfg.auth)
     log.info("nl2sql 启动完成 db=postgres(%s:%s/%s) redis=%s（模型配置走数据库 llm_config）",
              cfg.postgres.host, cfg.postgres.port, cfg.postgres.database,
              "可用" if redis.available else "降级内存")
@@ -172,10 +218,6 @@ def create_app() -> FastAPI:
         CORSMiddleware, allow_origins=["*"],
         allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
 
-    @app.get("/api/health")
-    async def health():
-        return {"ok": True, "ready": "orchestrator" in _app_state}
-
     @app.get("/")
     async def index():
         # 开发期每次请求读文件：改 index.html 强刷即生效，不用重启
@@ -183,8 +225,43 @@ def create_app() -> FastAPI:
         html = (Path(__file__).resolve().parent.parent / "static" / "index.html").read_bytes()
         return Response(content=html, media_type="text/html")
 
+    # ---- 全站单账户登录（hmac 签名 token，Authorization: Bearer）----
+    @app.post("/api/login")
+    async def login(req: Request):
+        body = await req.json()
+        auth = _app_state.get("auth")
+        if not auth or not auth.password or body.get("username") != auth.username \
+                or body.get("password") != auth.password:
+            raise HTTPException(401, "账号或密码错误")
+        return {"ok": True, "token": _sign_token(auth.username, auth.password)}
+
+    @app.post("/api/logout")
+    async def logout():
+        return {"ok": True}   # token 无状态：登出靠前端丢弃 localStorage
+
+    @app.get("/api/me")
+    async def whoami(req: Request):
+        # 受中间件保护（需 Bearer token）；到这里说明已登录
+        auth = _app_state.get("auth")
+        user = _verify_token(_bearer(req), auth.password if auth else "")
+        return {"logged_in": user is not None, "username": user}
+
+    @app.middleware("http")
+    async def auth_guard(req: Request, call_next):
+        # 白名单：首页 / 登录 / 预检；其余（含 logout）验 Authorization: Bearer <token>
+        p, m = req.url.path, req.method
+        if p in ("/", "/favicon.ico") or (p == "/api/login" and m == "POST") or m == "OPTIONS":
+            return await call_next(req)
+        auth = _app_state.get("auth")
+        if not auth or not auth.password:   # 未配密码 → 不启用认证（开发兜底）
+            return await call_next(req)
+        if not _verify_token(_bearer(req), auth.password):
+            return JSONResponse({"detail": "未登录"}, status_code=401)
+        return await call_next(req)
+
     app.include_router(build_ask_router(_Lazy("orchestrator")))
     app.include_router(build_admin_feishu_router(_Lazy("feishu_adapter")))
+    app.include_router(build_agent_limits_router())   # 查询上限可配（agent_limits 表）
     app.include_router(build_session_router(_Lazy("session_mgr")))
     app.include_router(build_admin_llm_router(_Lazy("llm_service")))
     app.include_router(build_admin_prompts_router(_Lazy("prompts")))

@@ -28,7 +28,7 @@ def build_audit_router() -> APIRouter:
         返回 traces + total（前端分页用）。page_size 兜底 [1,100]。"""
         page = max(page, 1)
         page_size = min(max(page_size, 1), 100)
-        stmt = select(AuditTrace, Session.title).outerjoin(
+        stmt = select(AuditTrace, Session.title, Session.channel).outerjoin(
             Session, AuditTrace.session_id == Session.id)
         if session_id:
             stmt = stmt.where(AuditTrace.session_id == session_id)
@@ -47,14 +47,14 @@ def build_audit_router() -> APIRouter:
             "total": total, "page": page, "page_size": page_size,
             "traces": [{
                 "trace_id": r.trace_id, "session_id": r.session_id,
-                "session_title": title or "",
+                "session_title": title or "", "channel": channel or "",
                 "user_id": r.user_id, "raw_input": r.raw_input,
                 "success": r.success,
                 "final_answer": (r.final_answer or "")[:120],
                 "sql_text": (r.sql_text or "")[:200],
                 "result_id": r.result_id, "elapsed_ms": r.elapsed_ms,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
-            } for r, title in rows],
+            } for r, title, channel in rows],
         }
 
     @router.get("/api/admin/audit/trace/{trace_id}")

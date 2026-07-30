@@ -268,10 +268,20 @@
 </style>
 </head>
 <body>
-<div id="app">
+<!-- 登录页（未登录显示） -->
+<div id="login-panel" style="display:none;align-items:center;justify-content:center;min-height:100vh;background:#f4f6f8">
+  <div style="background:#fff;padding:32px 40px;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);width:300px">
+    <h2 style="margin:0 0 20px;text-align:center;color:#1976d2">AI 问数</h2>
+    <input id="login-user" placeholder="账号" value="admin" style="width:100%;box-sizing:border-box;padding:10px;margin-bottom:12px;border:1px solid #ccc;border-radius:6px;font-size:14px">
+    <input id="login-pwd" type="password" placeholder="密码" style="width:100%;box-sizing:border-box;padding:10px;margin-bottom:12px;border:1px solid #ccc;border-radius:6px;font-size:14px">
+    <button onclick="doLogin()" style="width:100%;padding:10px;background:#1976d2;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer">登录</button>
+    <div id="login-err" style="color:#e53935;font-size:12px;margin-top:8px;text-align:center;min-height:16px"></div>
+  </div>
+</div>
+<div id="app" style="display:none">
   <header>
     <h1>AI 问数</h1>
-    <nav id="chat-nav"><button class="gear" onclick="showStats(true)">📊 统计</button><button class="gear" onclick="showSettings(true)">⚙ 设置</button></nav>
+    <nav id="chat-nav"><button class="gear" onclick="showStats(true)">📊 统计</button><button class="gear" onclick="showSettings(true)">⚙ 设置</button><button class="gear" onclick="doLogout()" title="登出" style="margin-left:auto">⎋ 登出</button></nav>
     <nav id="settings-nav" style="display:none">
       <button class="stab active" data-tab="datasource" onclick="showSettingsTab('datasource')">数据源</button>
       <button class="stab" data-tab="prompt" onclick="showSettingsTab('prompt')">提示词</button>
@@ -281,6 +291,7 @@
       <button class="stab" data-tab="knowledge" onclick="showSettingsTab('knowledge')">知识库</button>
       <button class="stab" data-tab="models" onclick="showSettingsTab('models')">模型</button>
       <button class="stab" data-tab="feishu" onclick="showSettingsTab('feishu')">飞书</button>
+      <button class="stab" data-tab="limits" onclick="showSettingsTab('limits')">查询上限</button>
       <button class="back" onclick="showSettings(false)">← 返回</button>
     </nav>
   </header>
@@ -371,16 +382,23 @@
         <h3>飞书机器人通道</h3>
         <div id="feishu-cfg" style="max-width:560px"><p class="placeholder">加载中…</p></div>
       </section>
+      <section class="admin-card stab-panel" id="stab-limits">
+        <h3>查询上限（改完重启生效）</h3>
+        <div id="limits-cfg" style="max-width:560px"><p class="placeholder">加载中…</p></div>
+      </section>
     </div>
   </div>
   <div id="stats-panel" style="display:none;flex-direction:column;flex:1;min-height:0">
     <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #e0e0e0">
       <b>📊 问数统计</b>
-      <select id="stats-filter-sel" onchange="loadStats(1, this.value===''?null:this.value==='true')">
+      <select id="stats-filter-sel">
         <option value="">全部</option>
         <option value="true">仅成功</option>
         <option value="false">仅失败</option>
       </select>
+      <input id="stats-filter-user" placeholder="按人 (user/open_id)" style="padding:4px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;width:150px">
+      <input id="stats-filter-session" placeholder="按会话 id" style="padding:4px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;width:140px">
+      <button onclick="loadStats(1)" style="padding:4px 12px;background:#1976d2;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">查询</button>
       <button onclick="showStats(false)" style="margin-left:auto;padding:5px 12px;background:#fff;color:#1976d2;border:1px solid #1976d2;border-radius:6px;cursor:pointer;font-size:13px">← 返回</button>
     </div>
     <div style="padding:12px;overflow:auto;flex:1">
@@ -842,15 +860,21 @@ function showStats(enter) {
   document.getElementById("settings-nav").style.display = "none";
   document.getElementById("admin-panel").style.display = "none";
   document.getElementById("stats-panel").style.display = enter ? "flex" : "none";
-  if (enter) loadStats(1, null);
+  if (enter) loadStats(1);
 }
-async function loadStats(page, success) {
+async function loadStats(page) {
+  const sv = document.getElementById("stats-filter-sel").value;
+  const success = sv === "" ? null : sv === "true";
+  const user = document.getElementById("stats-filter-user").value.trim();
+  const session = document.getElementById("stats-filter-session").value.trim();
   const sc = await (await fetch("/api/admin/audit/stats")).json().catch(() => ({}));
   renderStatsCards(sc);
   let url = `/api/admin/audit/traces?page=${page}&page_size=20`;
   if (success !== null) url += `&success=${success}`;
+  if (user) url += `&user_id=${encodeURIComponent(user)}`;
+  if (session) url += `&session_id=${encodeURIComponent(session)}`;
   const data = await (await fetch(url)).json().catch(() => ({}));
-  renderTraces(data.traces || [], data.total || 0, data.page || 1, success);
+  renderTraces(data.traces || [], data.total || 0, data.page || 1);
 }
 function renderStatsCards(s) {
   const eb = s.events_by_type || {};
@@ -862,24 +886,27 @@ function renderStatsCards(s) {
     card("工具调用", eb.tool_call || 0, "#9c27b0") +
     card("错误/取消", (eb.error || 0) + (eb.cancelled || 0), "#e53935");
 }
-function renderTraces(traces, total, page, success) {
+function renderTraces(traces, total, page) {
   const badge = ok => ok ? '<span style="color:#4caf50">✓</span>' : '<span style="color:#e53935">✗</span>';
+  const chBadge = ch => ch ? `<span style="font-size:11px;padding:1px 6px;border-radius:8px;background:${ch === 'feishu' ? '#3370ff' : '#1976d2'};color:#fff">${ch === 'feishu' ? '飞书' : 'web'}</span>` : '-';
   const rows = traces.length ? traces.map(t =>
     `<tr style="cursor:pointer" onclick="openTraceDetail('${t.trace_id}')">
        <td>${escapeHtml((t.raw_input || "").slice(0, 40))}</td>
-       <td title="${escapeHtml(t.session_id || "")}" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.session_title || (t.session_id || "").slice(0, 8) || "-")}</td>
+       <td>${chBadge(t.channel)}</td>
+       <td title="${escapeHtml(t.user_id || "")}" style="max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml((t.user_id || "-").slice(0, 14))}</td>
+       <td title="${escapeHtml(t.session_id || "")}" style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.session_title || (t.session_id || "").slice(0, 8) || "-")}</td>
        <td>${badge(t.success)}</td>
        <td>${t.elapsed_ms ? (t.elapsed_ms / 1000).toFixed(1) + "s" : "-"}</td>
        <td>${t.created_at ? new Date(t.created_at).toLocaleString("zh-CN") : ""}</td>
      </tr>`).join("") :
-    `<tr><td colspan="5" style="text-align:center;padding:20px;color:#999">无记录</td></tr>`;
+    `<tr><td colspan="7" style="text-align:center;padding:20px;color:#999">无记录</td></tr>`;
   document.getElementById("stats-traces").innerHTML =
-    `<table class="admin-table"><thead><tr><th>问题</th><th>会话</th><th style="width:50px">成功</th><th style="width:70px">耗时</th><th style="width:150px">时间</th></tr></thead><tbody>${rows}</tbody></table>`;
+    `<table class="admin-table"><thead><tr><th>问题</th><th style="width:46px">端</th><th>人</th><th>会话</th><th style="width:40px">成功</th><th style="width:60px">耗时</th><th style="width:150px">时间</th></tr></thead><tbody>${rows}</tbody></table>`;
   const pages = Math.ceil(total / 20);
   document.getElementById("stats-pager").innerHTML = pages > 1
     ? `第 ${page}/${pages} 页 · 共 ${total} 条 `
-      + (page > 1 ? `<button onclick="loadStats(${page - 1}, ${success})">上一页</button>` : "") + " "
-      + (page < pages ? `<button onclick="loadStats(${page + 1}, ${success})">下一页</button>` : "")
+      + (page > 1 ? `<button onclick="loadStats(${page - 1})">上一页</button>` : "") + " "
+      + (page < pages ? `<button onclick="loadStats(${page + 1})">下一页</button>` : "")
     : "";
 }
 async function openTraceDetail(tid) {
@@ -896,7 +923,7 @@ async function openTraceDetail(tid) {
     else d = JSON.stringify(c).slice(0, 60);
     return `<tr><td>${e.seq}</td><td>${e.event_type}</td><td style="word-break:break-all">${escapeHtml(d)}</td></tr>`;
   }).join("");
-  openAdminModal(`trace 详情 · ${tid.slice(0, 8)}`,
+  openAdminModal(`详情：${(trace.raw_input || "").slice(0, 30) || tid.slice(0, 8)}`,
     `<div style="margin-bottom:10px;line-height:1.7"><b>问题：</b>${escapeHtml(trace.raw_input || "")}<br>
      <b>会话：</b>${escapeHtml((trace.session_id || "").slice(0, 8))}<br>
      <b>结果：</b>${trace.success ? "✓ 成功" : "✗ 失败"} · ${trace.elapsed_ms ? (trace.elapsed_ms / 1000).toFixed(1) + "s" : "-"}<br>
@@ -915,6 +942,7 @@ function showSettingsTab(tab) {
   else if (tab === "knowledge") loadKbDocs();
   else if (tab === "models") loadLlm();
   else if (tab === "feishu") loadFeishu();
+  else if (tab === "limits") loadLimits();
 }
 
 // ===== 管理后台：name-dict / 业务规则 / SQL模板 / 知识库 / 模型限流 =====
@@ -1116,6 +1144,33 @@ async function saveFeishu() {
   const r = await fetch("/api/admin/feishu-config", {method: "PUT",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   if (r.ok) { alert("已保存，飞书通道已热重连"); await loadFeishu(); }
+  else { const d = await r.json().catch(() => ({})); alert("保存失败: " + (d.detail || r.status)); }
+}
+
+// 查询上限配置（agent_limits 表，lifespan 启动读 → AgentLoop；改完重启生效）
+async function loadLimits() {
+  const cfg = await (await fetch("/api/admin/agent-limits")).json().catch(() => ({}));
+  const el = document.getElementById("limits-cfg");
+  const row = (label, id, val, hint) => `<div style="margin:10px 0"><label style="display:block;font-weight:bold">${label}</label><input id="${id}" type="number" min="1" value="${val ?? ""}" style="${FS_INPUT}"><span class="placeholder" style="font-size:11px;color:#999">${hint}</span></div>`;
+  el.innerHTML =
+    row("查询次数上限 max_sql", "lm-sql", cfg.max_sql ?? 4, "单次对话 execute_sql 最多执行次数（超了拦）") +
+    row("最大轮数 max_turns", "lm-turns", cfg.max_turns ?? 10, "agent 循环轮数上限") +
+    row("元数据每轮上限 max_meta_per_run", "lm-meta", cfg.max_meta_per_run ?? 1, "每轮 query_metadata 最多次数") +
+    row("连续失败收手 max_sql_fail_streak", "lm-fail", cfg.max_sql_fail_streak ?? 2, "连续空/错几次提示 LLM 收手") +
+    row("澄清次数上限 max_ask_user", "lm-ask", cfg.max_ask_user ?? 2, "向用户反问确认的次数上限") +
+    `<button onclick="saveLimits()">保存</button><span class="placeholder" style="font-size:11px;color:#999;margin-left:8px">改完需重启应用生效</span>`;
+}
+async function saveLimits() {
+  const body = {
+    max_sql: parseInt(document.getElementById("lm-sql").value) || 4,
+    max_turns: parseInt(document.getElementById("lm-turns").value) || 10,
+    max_meta_per_run: parseInt(document.getElementById("lm-meta").value) || 1,
+    max_sql_fail_streak: parseInt(document.getElementById("lm-fail").value) || 2,
+    max_ask_user: parseInt(document.getElementById("lm-ask").value) || 2,
+  };
+  const r = await fetch("/api/admin/agent-limits", {method: "PUT",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  if (r.ok) { alert("已保存（重启应用后生效）"); await loadLimits(); }
   else { const d = await r.json().catch(() => ({})); alert("保存失败: " + (d.detail || r.status)); }
 }
 
@@ -1732,8 +1787,48 @@ document.getElementById("dash-content").addEventListener("click", (e) => {
   if (ds && schema && table) locateTable(Number(ds), schema, table);
 });
 
-// 页面启动：拉会话列表（不自动建会话，用户发首条消息时 ensureSession 才建）
-refreshSessionList();
+// 页面启动：token 存 localStorage，请求带 Authorization: Bearer <token>
+const TOKEN_KEY = "nl2sql_token";
+async function bootstrap() {
+  if (!localStorage.getItem(TOKEN_KEY)) { showLogin(); return; }
+  try {
+    const me = await (await fetch("/api/me")).json();
+    if (me.logged_in) enterApp(); else showLogin();
+  } catch { showLogin(); }
+}
+function showLogin() {
+  localStorage.removeItem(TOKEN_KEY);
+  document.getElementById("login-panel").style.display = "flex";
+  document.getElementById("app").style.display = "none";
+}
+function enterApp() {
+  document.getElementById("login-panel").style.display = "none";
+  document.getElementById("app").style.display = "block";
+  refreshSessionList();
+}
+async function doLogin() {
+  const username = document.getElementById("login-user").value.trim();
+  const password = document.getElementById("login-pwd").value;
+  const r = await fetch("/api/login", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({username, password})});
+  if (r.ok) { localStorage.setItem(TOKEN_KEY, (await r.json()).token); enterApp(); }
+  else document.getElementById("login-err").textContent = "账号或密码错误";
+}
+async function doLogout() {
+  await fetch("/api/logout", {method: "POST"});
+  showLogin();
+}
+// 全局 fetch 拦截：自动带 Authorization: Bearer；401 → 清 token 回登录页
+const _origFetch = window.fetch;
+window.fetch = function(...args) {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (token) {
+    args[1] = args[1] || {};
+    args[1].headers = Object.assign({}, args[1].headers || {}, {"Authorization": "Bearer " + token});
+  }
+  return _origFetch.apply(this, args).then(r => { if (r.status === 401) showLogin(); return r; });
+};
+bootstrap();
 // 发送后刷新会话列表（首问填标题后侧边栏即显示标题）
 const _origOnSend = onSend;
 </script>

@@ -21,4 +21,8 @@ feishu:
   app_secret: <your_app_secret>
   whitelist: []              # open_id（ou_xxx）列表，空=不限；公网暴露前务必收紧
   card_throttle_ms: 300      # 卡片流式全量重写节流间隔（ms）
+# 全站登录（单账户，hmac 签名 cookie 认证）；复制到 application-dev.yml 填实际密码
+auth:
+  username: admin
+  password: <your_password>
 

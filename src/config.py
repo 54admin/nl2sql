@@ -65,11 +65,20 @@ class FeishuConfig:
 
 
 @dataclass
+class AuthConfig:
+    """全站单账户登录配置（hmac 签名 cookie 认证）。
+    默认 username=admin；password 必须在 application-{profile}.yml 配（文件已 gitignore，密码不入库）。"""
+    username: str = "admin"
+    password: str = ""
+
+
+@dataclass
 class ApplicationConfig:
     app: AppConfig = field(default_factory=AppConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
     postgres: PostgresConfig = field(default_factory=PostgresConfig)
     feishu: FeishuConfig = field(default_factory=FeishuConfig)
+    auth: AuthConfig = field(default_factory=AuthConfig)
     profiles: list = field(default_factory=list)
     auto_migrate: bool = False   # 顶层独立：true 才启动时建扩展/ALTER/刷注释（生产/普通账号设 false 跳）
 
@@ -99,6 +108,7 @@ def _build(d: dict) -> ApplicationConfig:
         redis=RedisConfig(**d.get("redis", {})),
         postgres=PostgresConfig(**d.get("postgres", {})),
         feishu=FeishuConfig(**d.get("feishu", {})),
+        auth=AuthConfig(**d.get("auth", {})),
         profiles=profiles,
         auto_migrate=bool(d.get("auto_migrate", False)),
     )
