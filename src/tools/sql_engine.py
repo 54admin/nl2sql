@@ -27,8 +27,9 @@ def validate_sql(sql: str) -> str | None:
     for stmt in parsed:
         if stmt is None:
             continue
-        # 非 SELECT（CTE 顶层是 Select）一律拦：CREATE/DROP/UPDATE/DELETE/INSERT/ALTER 等
-        if not isinstance(stmt, exp.Select):
+        # 只放行只读查询：SELECT / UNION / INTERSECT / EXCEPT（都是只读；CTE 顶层是 Select）
+        # 拦 DDL/DML：CREATE/DROP/UPDATE/DELETE/INSERT/ALTER 等
+        if not isinstance(stmt, (exp.Select, exp.Union, exp.Intersect, exp.Except)):
             return f"仅允许只读 SELECT 查询，拦截 {type(stmt).__name__} 操作"
     return None
 
