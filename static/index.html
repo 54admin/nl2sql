@@ -743,14 +743,13 @@ async function ask(text) {
 // ponytail: 自己写最小渲染器覆盖项目实际用的 md 子集（列表/粗体/行内码/段落），
 // 不引 marked.js——内网单页加 30KB 依赖只为渲染几行答案不划算。
 // 只在「定稿/clarification」等信任面渲染（内容来自自家 LLM，非用户跨站输入），转义前置防 XSS。
-function renderMarkdown(el, text) {
-  if (!text) { el.textContent = ""; return; }
-  // 先 HTML 转义防注入
-  let s = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  // 行内：`code` 和 **bold**
+function mdToHtml(text) {
+  // 极简 markdown → HTML 字符串（转义前置防 XSS；覆盖项目实际 md 子集：列表/粗体/行内码/段落）。
+  // ponytail: 不引 marked.js——内网单页加 30KB 依赖只为渲染几行答案不划算。内容来自自家 LLM。
+  if (!text) return "";
+  let s = String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  // 按行分段：连续同类型列表行合并成一个 ul/ol，连续普通行合并成段落
   const lines = s.split("\n");
   let out = "", para = [], ul = [], ol = [];
   const flushPara = () => { if (para.length) { out += `<p>${para.join("<br>")}</p>`; para = []; } };
@@ -760,14 +759,15 @@ function renderMarkdown(el, text) {
   for (const line of lines) {
     const m1 = line.match(/^\s*-\s+(.*)$/);       // - 项目
     const m2 = line.match(/^\s*\d+\.\s+(.*)$/);    // 1. 项目
-    if (m1) { flushPara(); flushOl(); ul.push(m1[1]); }      // 切到 ul 前先收其他类型
+    if (m1) { flushPara(); flushOl(); ul.push(m1[1]); }
     else if (m2) { flushPara(); flushUl(); ol.push(m2[1]); }
     else if (line.trim() === "") { flushAll(); }
     else { flushUl(); flushOl(); para.push(line); }
   }
   flushAll();
-  el.innerHTML = out || s;
+  return out || s;
 }
+function renderMarkdown(el, text) { el.innerHTML = mdToHtml(text); }
 
 // 在答案气泡下挂折叠 SQL 区：默认隐藏，点按钮展开/收起。
 // ponytail: 不引 highlight.js——内网单页加依赖不划算，<pre> 等宽字体够看。
@@ -874,7 +874,7 @@ async function fillStatsFilters() {
   ss.innerHTML = '<option value="">全部会话</option>' +
     (f.sessions || []).map(s => {
       const ch = s.channel ? "（" + (s.channel === "feishu" ? "飞书" : "web") + "）" : "";
-      return `<option value="${escapeHtml(s.id)}">${escapeHtml((s.title || s.id.slice(0, 8)) + ch)}</option>`;
+      return `<option value="${escapeHtml(s.id)}">${escapeHtml((s.title || s.id) + ch)}</option>`;
     }).join("");
   if (curS) ss.value = curS;
 }
@@ -913,12 +913,12 @@ function renderTraces(traces, total, page) {
   const chBadge = ch => ch ? `<span style="font-size:11px;padding:1px 6px;border-radius:8px;background:${ch === 'feishu' ? '#3370ff' : '#1976d2'};color:#fff">${ch === 'feishu' ? '飞书' : 'web'}</span>` : '-';
   const rows = traces.length ? traces.map(t =>
     `<tr style="cursor:pointer" onclick="openTraceDetail('${t.trace_id}')">
-       <td>${escapeHtml((t.raw_input || "").slice(0, 40))}</td>
+       <td style="max-width:260px;word-break:break-word">${escapeHtml(t.raw_input || "")}</td>
        <td>${chBadge(t.channel)}</td>
        <td title="${escapeHtml(t.user_id || "")}" style="max-width:130px;word-break:break-all;font-size:12px">${escapeHtml(t.user_id || "-")}</td>
        <td style="max-width:160px" title="${escapeHtml(t.session_id || "")}">
          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.session_title || "(无标题)")}</div>
-         <div style="font-size:11px;color:#999;font-family:monospace">${escapeHtml((t.session_id || "").slice(0, 8))}</div>
+         <div style="font-size:11px;color:#999;font-family:monospace;word-break:break-all">${escapeHtml(t.session_id || "")}</div>
        </td>
        <td>${badge(t.success)}</td>
        <td>${t.elapsed_ms ? (t.elapsed_ms / 1000).toFixed(1) + "s" : "-"}</td>
@@ -938,22 +938,28 @@ async function openTraceDetail(tid) {
   const r = await fetch(`/api/admin/audit/trace/${tid}`);
   if (!r.ok) { alert("加载失败"); return; }
   const {trace = {}, events = []} = await r.json();
+  // 对话气泡：user_input（用户）/ answer·clarification（AI）按 seq 排成这次问答的对答
+  const dialogue = events
+    .filter(e => ["user_input", "answer", "clarification"].includes(e.event_type))
+    .map(e => {
+      const c = e.content || {};
+      if (e.event_type === "user_input")
+        return `<div style="display:flex;justify-content:flex-end;margin:8px 0"><div style="max-width:80%;background:#1976d2;color:#fff;padding:8px 12px;border-radius:10px;word-break:break-word">${escapeHtml(c.raw || "")}</div></div>`;
+      const txt = c.text || c.question || "";
+      return `<div style="display:flex;justify-content:flex-start;margin:8px 0"><div style="max-width:85%;background:#f0f4f8;padding:8px 12px;border-radius:10px;word-break:break-word;overflow:hidden">${mdToHtml(txt)}</div></div>`;
+    }).join("");
   const evRows = events.map(e => {
     const c = e.content || {};
     let d = "";
-    if (e.event_type === "tool_call") d = c.name + (c.args && c.args.sql ? "：" + (c.args.sql.length > 50 ? c.args.sql.slice(0, 50) + "…" : c.args.sql) : "");
-    else if (e.event_type === "tool_result") d = (c.summary || "").slice(0, 80);
-    else if (e.event_type === "clarification_needed") d = c.question || "";
-    else if (e.event_type === "answer_delta") d = (c.text || "").slice(0, 40);
-    else d = JSON.stringify(c).slice(0, 60);
+    if (e.event_type === "tool_call") d = c.name + (c.args && c.args.sql ? "：" + c.args.sql : "");
+    else if (e.event_type === "tool_result") d = c.summary || "";
+    else d = JSON.stringify(c);
     return `<tr><td>${e.seq}</td><td>${e.event_type}</td><td style="word-break:break-all">${escapeHtml(d)}</td></tr>`;
   }).join("");
-  openAdminModal(`详情：${(trace.raw_input || "").slice(0, 30) || tid.slice(0, 8)}`,
-    `<div style="margin-bottom:10px;line-height:1.7"><b>问题：</b>${escapeHtml(trace.raw_input || "")}<br>
-     <b>会话：</b>${escapeHtml((trace.session_id || "").slice(0, 8))}<br>
-     <b>结果：</b>${trace.success ? "✓ 成功" : "✗ 失败"} · ${trace.elapsed_ms ? (trace.elapsed_ms / 1000).toFixed(1) + "s" : "-"}<br>
-     <b>答案：</b>${escapeHtml((trace.final_answer || "").slice(0, 300))}</div>
-     <details style="margin-top:8px"><summary style="cursor:pointer;color:#666">完整事件流（${events.length} 条，点击展开）</summary>
+  openAdminModal(`详情：${trace.raw_input || tid}`,
+    `<div style="margin-bottom:8px;font-size:12px;color:#666">会话 ${escapeHtml(trace.session_id || "")} · ${trace.success ? "✓ 成功" : "✗ 失败"} · ${trace.elapsed_ms ? (trace.elapsed_ms / 1000).toFixed(1) + "s" : "-"}</div>
+     ${dialogue || '<p class="placeholder">无对话记录</p>'}
+     <details style="margin-top:10px"><summary style="cursor:pointer;color:#666">执行过程（${events.length} 条事件，点击展开）</summary>
      <table class="admin-table" style="margin-top:6px"><thead><tr><th style="width:40px">seq</th><th style="width:130px">事件</th><th>内容</th></tr></thead><tbody>${evRows}</tbody></table></details>`,
     null);
 }
