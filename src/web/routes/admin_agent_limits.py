@@ -1,13 +1,15 @@
 """admin 查询上限配置路由：单配置 GET/PUT。配置走 agent_limits 表，
-lifespan 启动读、构造 AgentLoop 传入；改完重启生效（无热重连）。
-照 admin_feishu 单配置范式，去掉 adapter 热重连。"""
+lifespan 启动读、构造 AgentLoop 传入；PUT 后调 AgentLoop.reload_limits 热更新（无需重启）。"""
 from __future__ import annotations
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from src.logging import get_logger
 from src.storage.models import AgentLimitsRow
 from src.storage.pg_client import AsyncSessionFactory
+
+log = get_logger(__name__)
 
 DEFAULT_ID = "default"
 
@@ -40,7 +42,8 @@ async def load_agent_limits() -> dict:
             "max_meta_per_run": row.max_meta_per_run}
 
 
-def build_agent_limits_router() -> APIRouter:
+def build_agent_limits_router(loop_ref=None) -> APIRouter:
+    """loop_ref：AgentLoop 引用（_Lazy），PUT 写库后 reload_limits 热更新护栏。"""
     router = APIRouter()
 
     @router.get("/api/admin/agent-limits")
@@ -62,6 +65,12 @@ def build_agent_limits_router() -> APIRouter:
             row.version += 1
             await s.commit()
             version = row.version
-        return {"ok": True, "version": version}   # 改完重启应用生效（lifespan 读）
+        # 写库后立刻刷 AgentLoop 护栏缓存，热更新（无需重启）；失败不回滚写库，重启兜底
+        if loop_ref is not None:
+            try:
+                loop_ref.reload_limits(await load_agent_limits())
+            except Exception as e:
+                log.warning("agent_limits 热刷新失败（写库已成功，重启后生效）: %s", e)
+        return {"ok": True, "version": version}
 
     return router

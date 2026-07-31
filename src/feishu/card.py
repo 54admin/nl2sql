@@ -69,6 +69,33 @@ def build_final_card(proc_items: list[tuple[str, str]], answer: str) -> dict:
             "body": {"elements": elements}}
 
 
+def build_session_list_card(sessions: list[dict], current_sid: str | None) -> dict:
+    """会话列表卡片（非流式）：标题 + 每会话一个「进入」按钮。
+    按钮 value={kind:switch, sid}，点击触发 card.action.trigger → _on_card_sync 切会话。
+    ponytail: 最多 20 条，更多再分页；标题/时间拼进按钮文案，当前会话标 ✅ 并 primary 高亮。"""
+    actions = []
+    for s in sessions[:20]:
+        sid = s.get("id")
+        title = s.get("title") or "（未命名）"
+        is_cur = sid == current_sid
+        created = (s.get("created_at") or "")[:16].replace("T", " ")
+        actions.append({
+            "tag": "button",
+            "text": {"tag": "plain_text",
+                     "content": f"{'✅ ' if is_cur else ''}{title}（{created}）"},
+            "value": {"kind": "switch", "sid": sid},
+            "type": "primary" if is_cur else "default",
+        })
+    return {
+        "schema": "2.0",
+        "config": {"streaming_mode": False, "summary": {"content": "选择会话"}},
+        "body": {"elements": [
+            {"tag": "markdown", "content": "**📋 历史会话**——点按钮切换到对应会话："},
+            {"tag": "action", "actions": actions},
+        ]},
+    }
+
+
 if __name__ == "__main__":
     c = build_streaming_card()
     assert c["schema"] == "2.0" and c["update_multi"] is True, "update_multi 必须为 true"
@@ -78,4 +105,10 @@ if __name__ == "__main__":
     assert f["body"]["elements"][2]["tag"] == "hr"
     assert f["body"]["elements"][3]["icon"]["token"] == "succeed_filled", "答案 succeed 图标"
     assert f["config"]["summary"]["content"] == "答案是重点内容", f"summary 去markdown: {f['config']['summary']['content']}"
+    sl = build_session_list_card([{"id": "s1", "title": "t1", "created_at": "2026-07-31T10:00:00"},
+                                  {"id": "s2", "title": None, "created_at": "2026-07-30T09:00:00"}], "s1")
+    assert sl["config"]["streaming_mode"] is False, "会话列表卡片非流式"
+    btns = sl["body"]["elements"][1]["actions"]
+    assert btns[0]["value"] == {"kind": "switch", "sid": "s1"} and btns[0]["type"] == "primary", "当前会话按钮 primary+switch"
+    assert btns[1]["type"] == "default", "非当前会话按钮 default"
     print("card self-check OK ✓")

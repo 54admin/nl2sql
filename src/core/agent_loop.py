@@ -76,12 +76,16 @@ class AgentLoop:
         self._llm = llm
         self._registry = registry
         self._state = state
-        self._max_turns = max_turns
-        self._max_ask_user = max_ask_user
+        # 护栏集中存 _limits：admin 改 agent_limits 表后 reload_limits 热更新，无需重启。
         # 试错熔断（P0）：审计实证 LLM 单对话能跑 15 条 SQL 撞爆网关额度，必须拦。
-        self._max_sql = max_sql                        # 单次对话 execute_sql 硬上限
-        self._max_sql_fail_streak = max_sql_fail_streak  # 连续空/错几次就提示 LLM 收手
-        self._max_meta_per_run = max_meta_per_run        # query_metadata 每轮最多查几次
+        # max_context 不在此列——它走 LLM 配置，运行时自取（见 _context_limit）。
+        self._limits: dict[str, int] = {
+            "max_turns": max_turns,            # 最大推理轮数
+            "max_ask_user": max_ask_user,      # 单轮最多追问几次
+            "max_sql": max_sql,                # 单次对话 execute_sql 硬上限
+            "max_sql_fail_streak": max_sql_fail_streak,  # 连续空/错几次提示 LLM 收手
+            "max_meta_per_run": max_meta_per_run,        # query_metadata 每轮最多查几次
+        }
         # 压缩阈值（token，逼近即压）。对齐 Claude Code：window 即阈值，绝对值非占比。
         # None=运行时读 LLM 配置/环境变量 max_context，拿不到用 32000 兜底。
         self._max_context = max_context
@@ -89,6 +93,12 @@ class AgentLoop:
         self._sessions = session_manager
         # 审计落库器：注入则每事件落 audit_events，不注入则跳过（测试可关）
         self._audit = audit
+
+    def reload_limits(self, limits: dict) -> None:
+        """admin 改 agent_limits 表后调：只更新 max_ 开头的护栏，立即生效（不重启）。"""
+        for k, v in limits.items():
+            if k.startswith("max_") and v is not None:
+                self._limits[k] = v
 
     async def run(self, session_id: str, user_id: str, user_msg: str,
                   trace_id: str, cancel_token: CancelToken,
@@ -114,7 +124,7 @@ class AgentLoop:
         sql_fail_streak = 0
         turn = 0
         try:
-            for turn in range(self._max_turns):
+            for turn in range(self._limits["max_turns"]):
                 cancel_token.check()
                 yield SSEEvent("turn_start", {"turn": turn}, trace_id)
                 # 流式收 content（发 answer_delta 打字机）+ collect tool_calls 增量
@@ -188,7 +198,7 @@ class AgentLoop:
 
                     if name == ASK_USER:
                         ask_count += 1
-                        if ask_count > self._max_ask_user:
+                        if ask_count > self._limits["max_ask_user"]:
                             tip = "已达询问次数上限，请基于已有信息直接给出答案。"
                             msgs.append({"role": "tool", "tool_call_id": cid,
                                          "content": tip})
@@ -201,7 +211,7 @@ class AgentLoop:
                     # 防 LLM 反复试探烧光网关额度（审计实证：单对话 15 条 SQL 撞爆配额）。
                     if name == "query_metadata":
                         meta_calls += 1
-                        if meta_calls > self._max_meta_per_run:
+                        if meta_calls > self._limits["max_meta_per_run"]:
                             tip = "元数据本轮已查过，直接用上面返回的表清单，不要重复调 query_metadata。"
                             msgs.append({"role": "tool", "tool_call_id": cid, "content": tip})
                             yield SSEEvent("tool_result",
@@ -209,8 +219,9 @@ class AgentLoop:
                             self._audit_event("tool_result", {"name": name, "summary": tip}, trace_id, turn)
                             continue
                     elif name == "execute_sql":
-                        if sql_calls >= self._max_sql:
-                            tip = f"已达查询上限（{self._max_sql} 次），停止继续查，基于已有结果直接回答用户。"
+                        sql_limit = self._limits["max_sql"]
+                        if sql_calls >= sql_limit:
+                            tip = f"已达查询上限（{sql_limit} 次），停止继续查，基于已有结果直接回答用户。"
                             msgs.append({"role": "tool", "tool_call_id": cid, "content": tip})
                             yield SSEEvent("tool_result",
                                            {"name": name, "summary": tip, "converged": True}, trace_id)
@@ -224,7 +235,7 @@ class AgentLoop:
                     fail_hint = ""
                     if name == "execute_sql":
                         sql_fail_streak = sql_fail_streak + 1 if _sql_failed(result.summary) else 0
-                        if sql_fail_streak >= self._max_sql_fail_streak:
+                        if sql_fail_streak >= self._limits["max_sql_fail_streak"]:
                             fail_hint = ("\n\n【系统提示】连续多次查询无结果，很可能是筛选口径不对"
                                          "（时间范围/取值/字段名）。停止重试，基于已有信息作答"
                                          "或直接说明'未查到符合条件的数据'。")
@@ -264,12 +275,13 @@ class AgentLoop:
                 await self._maybe_compress(msgs)
             else:
                 # max_turns 用尽仍未 finish：别返回空答案——保住前面已得到的内容；全空则明确提示
+                turns_limit = self._limits["max_turns"]
                 if not last_answer.strip():
-                    last_answer = f"已达最大推理轮数（{self._max_turns} 轮），未能生成完整结论，请缩小问题范围或重试。"
+                    last_answer = f"已达最大推理轮数（{turns_limit} 轮），未能生成完整结论，请缩小问题范围或重试。"
                 yield SSEEvent("warning",
-                               {"reason": "max_turns", "max": self._max_turns},
+                               {"reason": "max_turns", "max": turns_limit},
                                trace_id)
-                self._audit_event("warning", {"reason": "max_turns", "max": self._max_turns}, trace_id, turn)
+                self._audit_event("warning", {"reason": "max_turns", "max": self._limits["max_turns"]}, trace_id, turn)
 
             # 正常结束（done）：把本轮 user + 最终答案回写会话历史，供下轮多轮记忆
             await self._persist_history(session_id, user_msg, last_answer, trace_id)

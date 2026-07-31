@@ -276,6 +276,7 @@ class FeishuAdapter:
         handler = (lark.EventDispatcherHandler.builder("", "")
                    .register_p2_im_message_receive_v1(self._on_message_sync)
                    .register_p2_card_action_trigger(self._on_card_sync)
+                   .register_p2_application_bot_menu_v6(self._on_menu_sync)
                    .build())
         self._lark_client = (lark.Client.builder()
                              .app_id(self._cfg.app_id).app_secret(self._cfg.app_secret)
@@ -317,14 +318,78 @@ class FeishuAdapter:
     def _on_card_sync(self, data) -> None:
         try:
             value = getattr(data.event.action, "value", None) or {}
+            open_id = data.event.operator.open_id
+            kind = value.get("kind")
+            if kind == "switch":
+                # 会话列表卡片按钮：切绑定，纯管理动作不触发 LLM 问数（不进 _process）
+                sid = value.get("sid")
+                if sid:
+                    asyncio.run_coroutine_threadsafe(
+                        self._switch_session(open_id, sid), self._main_loop)
+                return
+            # 默认（clarify 选项按钮）：label 当回答走原会话续上
             sid, label = value.get("sid"), value.get("label")
             if not sid or not label:
                 return
-            open_id = data.event.operator.open_id
             asyncio.run_coroutine_threadsafe(
                 self._handle_incoming(open_id, label, force_sid=sid), self._main_loop)
         except Exception:
             log.exception("feishu on_card 解析异常")
+
+    def _on_menu_sync(self, data) -> None:
+        """飞书自定义菜单点击（application.bot.menu_v6）。注意 menu 事件的 open_id 在 operator.operator_id 下。"""
+        try:
+            op = data.event.operator
+            open_id = getattr(getattr(op, "operator_id", None), "open_id", None)
+            key = data.event.event_key
+            if not open_id or not key:
+                return
+            if self._cfg.whitelist and open_id not in self._cfg.whitelist:
+                asyncio.run_coroutine_threadsafe(
+                    self._send_text(open_id, "未授权，联系管理员加白名单"), self._main_loop)
+                return
+            asyncio.run_coroutine_threadsafe(
+                self._handle_menu(open_id, key), self._main_loop)
+        except Exception:
+            log.exception("feishu on_menu 解析异常")
+
+    async def _handle_menu(self, open_id: str, key: str) -> None:
+        """菜单分流：new_session 建新会话并切过去；list_sessions 发会话列表卡片。纯管理，不进 _process。"""
+        lock = self._user_locks.get(open_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._user_locks[open_id] = lock
+        async with lock:
+            try:
+                if key == "new_session":
+                    sid = await self._sessions.create_session(open_id, "feishu", title=None)
+                    await self._switch_session(open_id, sid)
+                elif key == "list_sessions":
+                    await self._send_session_list(open_id)
+                else:
+                    log.info("未知飞书菜单 key=%s，忽略", key)
+            except Exception:
+                log.exception("飞书菜单处理异常 open_id=%s key=%s", open_id, key)
+
+    async def _switch_session(self, open_id: str, target_sid: str) -> None:
+        """切当前会话绑定到 target_sid（新建/选历史共用）+ 发确认。
+        必须更新 _BIND_KEY，否则下条消息又被 _find_or_create_session 弹回旧会话。"""
+        sess = await self._sessions.get_session(target_sid)
+        if not sess or sess.get("user_id") != open_id:
+            await self._send_text(open_id, "会话不存在或无权访问")
+            return
+        await self._redis.set(_BIND_KEY.format(open_id=open_id), target_sid, ttl=_SESSION_TTL)
+        title = sess.get("title") or "新会话"
+        await self._send_text(open_id, f"✅ 已切换到会话：{title}（直接发消息开始提问）")
+
+    async def _send_session_list(self, open_id: str) -> None:
+        """发会话列表卡片：列历史会话 + 每个一个「进入」按钮（value kind=switch，点击切会话）。"""
+        sessions = await self._sessions.list_sessions(open_id)
+        current = await self._redis.get(_BIND_KEY.format(open_id=open_id))
+        if not sessions:
+            await self._send_text(open_id, "暂无历史会话。点「🆕 新会话」开始一个新的提问。")
+            return
+        await self._create_card(open_id, card.build_session_list_card(sessions, current))
 
     @staticmethod
     def _strip_at_mention(text: str) -> str:
@@ -340,10 +405,12 @@ class FeishuAdapter:
         if not resp.success():
             log.warning("飞书发文本失败 open_id=%s code=%s", open_id, resp.code)
 
-    async def _create_card(self, open_id: str) -> str | None:
+    async def _create_card(self, open_id: str, card_json: dict | None = None) -> str | None:
+        """建 CardKit 卡片实体 + 发 interactive 消息引用 card_id。
+        默认发流式问答卡片；传 card_json 发静态卡片（如会话列表，streaming_mode=False）。"""
         from lark_oapi.api.cardkit.v1 import CreateCardRequest, CreateCardRequestBody
         from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
-        card_json = json.dumps(card.build_streaming_card(), ensure_ascii=False)
+        card_json = json.dumps(card_json or card.build_streaming_card(), ensure_ascii=False)
         req = (CreateCardRequest.builder().request_body(
             CreateCardRequestBody.builder().type("card_json").data(card_json).build()).build())
         resp = await self._lark_client.cardkit.v1.card.acreate(req)

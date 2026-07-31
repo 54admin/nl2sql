@@ -128,7 +128,9 @@ async def lifespan(app: FastAPI):
     prompts = PromptStore()
     from src.datasource.manager import DataSourceManager
     datasource_mgr = DataSourceManager()
-    reg = default_registry()
+    # 读 enabled SQL 模板清单拼进 get_sql_template 工具 description（LLM 看 schema 即知有哪些模板）
+    from src.tools.sql_template import build_template_desc, list_enabled_templates
+    reg = default_registry(sql_template_desc=build_template_desc(await list_enabled_templates()))
     sess_state = SessionState(sm)
     from src.core.audit import AuditSink
     audit = AuditSink()
@@ -140,7 +142,7 @@ async def lifespan(app: FastAPI):
     orch = Orchestrator(loop, sm, prompt_store=prompts, audit=audit)
 
     _app_state.update(
-        orchestrator=orch, session_mgr=sm, llm_service=llm, prompts=prompts,
+        orchestrator=orch, loop=loop, session_mgr=sm, llm_service=llm, prompts=prompts,
         datasource_mgr=datasource_mgr, sess_state=sess_state, auth=cfg.auth)
     log.info("nl2sql 启动完成 db=postgres(%s:%s/%s) redis=%s（模型配置走数据库 llm_config）",
              cfg.postgres.host, cfg.postgres.port, cfg.postgres.database,
@@ -247,7 +249,7 @@ def create_app() -> FastAPI:
 
     app.include_router(build_ask_router(_Lazy("orchestrator")))
     app.include_router(build_admin_feishu_router(_Lazy("feishu_adapter")))
-    app.include_router(build_agent_limits_router())   # 查询上限可配（agent_limits 表）
+    app.include_router(build_agent_limits_router(_Lazy("loop")))   # 查询上限可配（PUT 后热刷新 AgentLoop）
     app.include_router(build_session_router(_Lazy("session_mgr")))
     app.include_router(build_admin_llm_router(_Lazy("llm_service")))
     app.include_router(build_admin_prompts_router(_Lazy("prompts")))

@@ -9,6 +9,7 @@ from src.tools.knowledge_tool import KNOWLEDGE_SEARCH
 from src.tools.metadata import QUERY_METADATA
 from src.tools.registry import ToolRegistry
 from src.tools.sql_engine import EXECUTE_SQL
+from src.tools.sql_template import make_get_sql_template
 
 
 async def _echo(args: dict, ctx: LoopContext, cancel_token: CancelToken) -> ToolResult:
@@ -60,9 +61,11 @@ ASK_USER = ToolDefinition(
 )
 
 
-def default_registry() -> ToolRegistry:
-    """注册 echo / finish / ask_user + query_metadata + execute_sql + knowledge_search + do_attribution 工具。"""
+def default_registry(sql_template_desc: str | None = None) -> ToolRegistry:
+    """注册 echo / finish / ask_user + query_metadata + execute_sql + knowledge_search + do_attribution + get_sql_template。
+    sql_template_desc：启动时拼好的模板清单，注入 get_sql_template 的 description（LLM 据此预知模板）。"""
     reg = ToolRegistry()
     for td in (ECHO, FINISH, ASK_USER, QUERY_METADATA, EXECUTE_SQL, KNOWLEDGE_SEARCH, ATTRIBUTION):
         reg.register(td)
+    reg.register(make_get_sql_template(sql_template_desc))
     return reg

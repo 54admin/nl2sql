@@ -10,6 +10,7 @@ from src.storage.pg_client import AsyncSessionFactory
 log = get_logger(__name__)
 
 DEFAULT_SCENE = "default"
+_ACTIVE_KEY = "__active__"   # get_active 的缓存 key：当前 is_active 提示词内容（orchestrator 每轮调，缓存避免频繁查库）
 
 # default 场景未在后台配置时的内置兜底：教 LLM 走「query_metadata 选表 → execute_sql 查数」两步链路。
 # 后台配置了 default（enabled=True）会覆盖此兜底；attribution/correction 等非 default 场景不兜底（P3 再配）。
@@ -50,7 +51,7 @@ ask_user 尽量带 options（2-4 个候选，第一个推荐 + 简短说明）�
 - 聚合别名清晰：SUM/COUNT/AVG 别起有意义的列名，别留默认表达式列名。
 - 时间处理：注意分区列/时间字段的粒度，日期范围用合适的边界。
 - 复杂查询参考模板：同比/环比、行转列（行→列）、同行不同列指标对比排序等复杂 SQL，
-  优先看 query_metadata 返回的 templates 样板，按需改写参数/表名套用，别从零硬写。
+  优先调 get_sql_template 工具取现成样板，按 usage 改写参数/表名套用，别从零硬写。
   没有合适模板再自己写，且写完核对列名/聚合口径。
 
 【归因分析——「为什么/原因」类问题】
@@ -108,6 +109,8 @@ class PromptStore:
                              enabled=enabled, version=1))
                 new_version = 1
             await s.commit()
+        # active 缓存可能 stale（改的 scene 若是当前启用的那条），无条件清；scene 级缓存下方细粒度更新。
+        self._cache.pop(_ACTIVE_KEY, None)
         # ponytail: disabled 时清缓存而非写入，让 get miss 走 PG 看到 enabled=False 返回 None；
         # 否则缓存命中会绕过 enabled 检查。
         if enabled:
@@ -126,6 +129,7 @@ class PromptStore:
             await s.delete(row)
             await s.commit()
         self._cache.pop(scene, None)
+        self._cache.pop(_ACTIVE_KEY, None)   # 删的若是当前启用的 scene，active 缓存 stale
         return True
 
     async def list_all(self) -> list[dict]:
@@ -136,12 +140,20 @@ class PromptStore:
                  "is_active": r.is_active} for r in rows]
 
     async def get_active(self) -> str | None:
-        """读 is_active=true 的 prompt（多版本里当前启用的）。无则回退 default。"""
+        """读 is_active=true 的 prompt（多版本里当前启用的）。无则回退 default。
+        走 _ACTIVE_KEY 缓存：miss 查 PG 回填；upsert/set_active/delete 失效。
+        orchestrator 每轮调，缓存避免频繁查库（提示词低频改，失效成本可忽略）。"""
+        cached = self._cache.get(_ACTIVE_KEY)
+        if cached is not None:
+            return cached[0]
         async with AsyncSessionFactory() as s:
             row = (await s.execute(Prompt.__table__.select().where(
                 Prompt.is_active.is_(True)).limit(1))).first()
         if row is None:
-            return await self.get("default")   # 无启用项 → 回退 default（DB 记录或内置兜底）
+            value = await self.get("default")   # 无启用项 → 回退 default（DB 记录或内置兜底）
+            self._cache[_ACTIVE_KEY] = (value, 0)   # default 结果也缓存；其变更经 upsert 会清 _ACTIVE_KEY
+            return value
+        self._cache[_ACTIVE_KEY] = (row.content, row.version)
         return row.content
 
     async def set_active(self, scene: str) -> bool:
