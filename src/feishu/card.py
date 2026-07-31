@@ -42,16 +42,15 @@ def build_streaming_card() -> dict:
             "summary": {"content": "生成中..."},
         },
         "body": {"elements": [
-            {"tag": "markdown", "icon": _icon("robot_outlined", "blue"),
-             "content": "", "element_id": ANSWER_EID},
+            {"tag": "markdown", "content": "", "element_id": ANSWER_EID},
         ]},
     }
 
 
 def proc_element(eid: str, token: str, line: str) -> dict:
-    """单步过程元素：独立 markdown + 对应图标（card_element/create 的 elements 用）。"""
-    return {"tag": "markdown", "element_id": eid,
-            "icon": _icon(token), "content": line}
+    """单步过程元素：独立 markdown（card_element/create 的 elements 用）。
+    token 留作接口兼容（_tool_call_line 仍返回），当前不渲染图标——用户偏好纯文本步骤。"""
+    return {"tag": "markdown", "element_id": eid, "content": line}
 
 
 def build_final_card(proc_items: list[tuple[str, str]], answer: str) -> dict:
@@ -62,8 +61,7 @@ def build_final_card(proc_items: list[tuple[str, str]], answer: str) -> dict:
         elements.append(proc_element(f"proc_{i}", token, line))
     if proc_items:
         elements.append({"tag": "hr"})
-    elements.append({"tag": "markdown", "icon": _icon("succeed_filled", "green"),
-                     "content": answer or "(空)", "element_id": ANSWER_EID})
+    elements.append({"tag": "markdown", "content": answer or "(空)", "element_id": ANSWER_EID})
     return {"schema": "2.0", "update_multi": True,
             "config": {"streaming_mode": False, "summary": {"content": _summary_text(answer)}},
             "body": {"elements": elements}}
@@ -99,11 +97,11 @@ def build_session_list_card(sessions: list[dict], current_sid: str | None) -> di
 if __name__ == "__main__":
     c = build_streaming_card()
     assert c["schema"] == "2.0" and c["update_multi"] is True, "update_multi 必须为 true"
-    assert c["body"]["elements"][0]["icon"]["token"] == "robot_outlined", "流式 answer 带 robot 图标"
+    assert "icon" not in c["body"]["elements"][0], "answer 元素不带图标"
     f = build_final_card([("code_outlined", "**执行查询**"), ("data-sheet_outlined", "**完成**")], "答案是**重点**内容")
-    assert f["body"]["elements"][0]["icon"]["token"] == "code_outlined", "第一步独立图标"
+    assert "icon" not in f["body"]["elements"][0], "过程元素不带图标"
     assert f["body"]["elements"][2]["tag"] == "hr"
-    assert f["body"]["elements"][3]["icon"]["token"] == "succeed_filled", "答案 succeed 图标"
+    assert "icon" not in f["body"]["elements"][3], "答案元素不带图标"
     assert f["config"]["summary"]["content"] == "答案是重点内容", f"summary 去markdown: {f['config']['summary']['content']}"
     sl = build_session_list_card([{"id": "s1", "title": "t1", "created_at": "2026-07-31T10:00:00"},
                                   {"id": "s2", "title": None, "created_at": "2026-07-30T09:00:00"}], "s1")

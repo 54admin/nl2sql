@@ -62,6 +62,7 @@ class CardStream:
 
     async def on_tool(self, token: str, line: str, *, rows: int | None = None) -> None:
         """一步过程：insert_before answer 插入独立元素（带 token 图标）。"""
+        line = f"`{time.strftime('%H:%M:%S')}` " + line   # 步骤时间戳，便于复盘每步几点执行
         self._tool_lines.append((token, line))
         eid = f"proc_{self._proc_seq}"
         self._proc_seq += 1
@@ -504,29 +505,50 @@ def _tool_call_line(name, args) -> tuple[str, str]:
     if name == "query_metadata":
         return ("doc-search_outlined", "**查询元数据**（表/字段）")
     if name == "knowledge_search":
-        return ("doc_outlined", "**检索知识库**")
+        q = (args or {}).get("query", "").strip()
+        return ("doc_outlined", f"**检索知识库**：`{q}`" if q else "**检索知识库**")
     if name == "do_attribution":
         return ("insert-chart_outlined", "**归因分析**")
     return ("setting_outlined", f"**调用 {name or '工具'}**")
 
 
 def _tool_result_line(name, summary) -> tuple[str, str]:
-    """工具结果 → (图标token, 友好文本)。不同工具/状态不同图标。"""
+    """工具结果 → (图标token, 友好文本)。token 留接口兼容（当前不渲染图标，card.py 已去 icon）。"""
     if name == "execute_sql":
-        rows = _extract_rows(summary)
-        cols = _extract_cols(summary)
-        # summary 不是合法 JSON 结果 → execute_sql 执行失败（SQL 报错），别显示"返回?行"
-        if rows is None:
+        data = _parse_sql_summary(summary)
+        if data is None:
             return ("warning_outlined", "**查询失败**" + (f"：{summary[:60]}" if summary else ""))
-        if rows == 0:
+        if data["rows"] == 0:
             return ("warning_outlined", "**查询完成**：无匹配数据（0 行）")
-        return ("data-sheet_outlined", f"**查询完成**：返回 {rows} 行"
-                + (f"（{cols} 列）" if cols else ""))
+        cols = data["columns"]
+        line = f"**查询完成**：返回 {data['rows']} 行" + (f"（{len(cols)} 列）" if cols else "")
+        tbl = _preview_table(data["preview"][:3], cols)
+        if tbl:
+            line += "\n\n" + tbl
+        return ("data-sheet_outlined", line)
     if name == "query_metadata":
+        tables = _extract_tables(summary)
+        if tables:
+            names = "、".join(t for t in tables[:6] if t)
+            more = f" 等 {len(tables)} 张" if len(tables) > 6 else ""
+            return ("check_outlined", f"**元数据已获取**（{len(tables)} 张表）：{names}{more}")
         return ("check_outlined", "**元数据已获取**")
     if name == "knowledge_search":
-        return ("check_outlined", "**知识库检索完成**")
+        hits = _extract_kb_hits(summary)
+        if hits is None:
+            # summary 已是工具返回的失败描述（如"知识库检索失败：xxx"），整体加粗直接用，避免重复前缀
+            return ("warning_outlined", f"**{(summary or '知识库检索异常')[:60]}**")
+        if not hits:
+            return ("warning_outlined", "**知识库无匹配文档**")
+        snippet = (hits[0] or "")[:80].replace("\n", " ")
+        more = f"（共 {len(hits)} 段）" if len(hits) > 1 else ""
+        return ("check_outlined", f"**知识库命中**{more}：{snippet}")
     if name == "do_attribution":
+        text = (summary or "").strip()
+        if text:
+            snippet = text[:80].replace("\n", " ")
+            suffix = "…" if len(text) > 80 else ""
+            return ("insert-chart_outlined", f"**归因完成**：{snippet}{suffix}")
         return ("insert-chart_outlined", "**归因完成**")
     return ("check_outlined", f"**{name or '工具'} 完成**")
 
@@ -547,5 +569,51 @@ def _extract_rows(summary) -> int | None:
         return None
     try:
         return int(json.loads(summary).get("rows", -1))
+    except Exception:
+        return None
+
+
+def _extract_kb_hits(summary) -> list[str] | None:
+    """knowledge_search summary 是 JSON {"hits":[{"content":..,"doc_id":..}]}，提取 content 列表供展示。
+    非 JSON（失败/无匹配兜底文本）返回 None。"""
+    if not summary or not isinstance(summary, str) or not summary.startswith("{"):
+        return None
+    try:
+        hits = json.loads(summary).get("hits")
+        return [h.get("content", "") for h in hits] if hits else []
+    except Exception:
+        return None
+
+
+def _parse_sql_summary(summary) -> dict | None:
+    """execute_sql summary → {rows, columns, preview, result_id}。非 JSON（执行失败兜底文本）返回 None。"""
+    if not summary or not isinstance(summary, str) or not summary.startswith("{"):
+        return None
+    try:
+        d = json.loads(summary)
+        return {"rows": d.get("rows", 0), "columns": d.get("columns") or [],
+                "preview": d.get("preview") or [], "result_id": d.get("result_id")}
+    except Exception:
+        return None
+
+
+def _preview_table(rows: list[dict], cols: list[str]) -> str:
+    """前几行渲染成 markdown 表格（飞书 markdown 支持）。列取前 6、值截 30 字，避免过宽撑爆卡片。"""
+    if not rows or not cols:
+        return ""
+    show = cols[:6]
+    lines = ["| " + " | ".join(show) + " |",
+             "| " + " | ".join("---" for _ in show) + " |"]
+    for r in rows:
+        lines.append("| " + " | ".join(str(r.get(c, ""))[:30] for c in show) + " |")
+    return "\n".join(lines)
+
+
+def _extract_tables(summary) -> list[str] | None:
+    """query_metadata summary → table_name 列表。非 JSON 返回 None。"""
+    if not summary or not isinstance(summary, str) or not summary.startswith("{"):
+        return None
+    try:
+        return [t.get("table_name", "") for t in json.loads(summary).get("tables") or []]
     except Exception:
         return None
