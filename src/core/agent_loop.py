@@ -68,9 +68,9 @@ class AgentLoop:
     done/cancelled/error/clarification_needed 之一。"""
 
     def __init__(self, llm: LLMService, registry: ToolRegistry, state: SessionState,
-                 *, max_turns: int = 10, max_ask_user: int = 2,
+                 *, max_turns: int = 30, max_ask_user: int = 2,
                  max_context: int | None = None,
-                 max_sql: int = 4, max_sql_fail_streak: int = 2,
+                 max_sql: int = 10, max_sql_fail_streak: int = 3,
                  max_meta_per_run: int = 1,
                  session_manager=None, audit=None):
         self._llm = llm
@@ -99,6 +99,13 @@ class AgentLoop:
         for k, v in limits.items():
             if k.startswith("max_") and v is not None:
                 self._limits[k] = v
+
+    def reload_registry(self, registry: "ToolRegistry") -> None:
+        """admin 改 skill（content/enabled/tools）后调：热替换工具集，立即生效（不重启）。
+        与 reload_limits 同构——DB 改完重建 registry，替换 self._registry，下一轮 openai_tools 即新。"""
+        self._registry = registry
+        names = [td.name for td in registry.available_defs()]
+        log.info("工具集热刷新完成 active=%s", names)
 
     async def run(self, session_id: str, user_id: str, user_msg: str,
                   trace_id: str, cancel_token: CancelToken,
@@ -327,7 +334,7 @@ class AgentLoop:
         if self._audit is None:
             return
         try:
-            await self._audit.finalize(success, final_answer)
+            await self._audit.finalize(success, final_answer, trace_id)
         except Exception as ex:
             log.warning("审计落库失败（忽略）: %s", ex)
 

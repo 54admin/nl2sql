@@ -25,47 +25,55 @@ class Orchestrator:
         self._sessions = sessions
         self._prompts = prompt_store
         self._audit = audit
+        # 会话忙时闸门：正在跑的 session_id 集合。同 session 已有 run 在跑→直接拒，
+        # 不让两个 run 并发（审计 2026-08-05 实证：重复投递致 run 重叠、单例审计互相冲掉）。
+        # 不靠 DB status（RUNNING 只 resume 路径写，普通问数不置位，不可靠）——内存显式管。
+        self._running: set[str] = set()
 
     async def handle_message(self, user_id: str, session_id: str, text: str,
                              mode: ViewerMode, trace_id: str,
                              cancel_token: CancelToken | None = None
                              ) -> AsyncIterator[SSEEvent]:
-        # 查会话状态：awaiting_clarification => 断点恢复（spec 6.4）
-        sess = await self._sessions.get_session(session_id)
-        is_resume = bool(sess and sess.get("status") == "awaiting_clarification")
-        user_msg = text
-
-        # 读 system prompt（prompt_store 为空则 None）
-        system_prompt = None
-        if self._prompts is not None:
-            system_prompt = await self._prompts.get_active()
-        # 注入当前日期：LLM 据此换算"本月/上月"等相对时间，否则会瞎猜年份（审计实证猜成去年）
-        if system_prompt:
-            _now = datetime.now()
-            _wd = "一二三四五六日"[_now.weekday()]
-            _ym = f"{_now.year}-{_now.month:02d}"
-            system_prompt = (f"【当前日期】今天 {_now.year}-{_now.month:02d}-{_now.day:02d}"
-                             f"（周{_wd}），当前年月 {_ym}。用户说\"本月/上月/最近\"等相对时间时据此换算。\n\n"
-                             + system_prompt)
-        # get_sql_template 强引导：模板改走工具按需取（不再全量塞 prompt 占上下文），靠这句让 LLM 主动调
-        if system_prompt:
-            system_prompt = system_prompt + (
-                "\n\n【工具提示】写复杂查询（同比/环比/行转列/同行多指标对比排序）前，"
-                "先调 get_sql_template 工具查看现成样板，按 usage 改表名/参数后用 execute_sql 执行；"
-                "没有合适样板再自己写。")
-        # 迭代 loop，透传事件；异常转 ERROR 不中断流
-        # cancel_token 由路由层注入（前端取消则置位，loop 在检查点响应）。
-        if cancel_token is None:
-            cancel_token = CancelToken()
-        try:
-            async for evt in self._loop.run(
-                session_id=session_id, user_id=user_id,
-                user_msg=user_msg, trace_id=trace_id,
-                cancel_token=cancel_token, is_resume=is_resume,
-                system_prompt=system_prompt,
-            ):
-                yield evt
-        except Exception as e:
-            log.exception("loop 执行异常 trace=%s", trace_id)
+        # 会话忙时闸门：同一 session 已有 run 在跑 → 立即拒绝，绝不并发跑第二个。
+        # 根治"没问就再次回答/停不下来"：飞书 ACK 超时补投、用户手抖连发，都会再起一个 run；
+        # 两个 run 重叠还会让单例审计 begin() 互冲（审计丢失）。这里一闸挡死。
+        if session_id in self._running:
+            log.warning("会话忙，拒绝并发 run sid=%s trace=%s", session_id, trace_id)
             yield SSEEvent(SSEEventType.ERROR.value,
-                           {"message": str(e)}, trace_id)
+                           {"message": "上一条还在处理中，请等它完成或先取消，再发送新问题。"},
+                           trace_id)
+            return
+        self._running.add(session_id)
+        try:
+            # 查会话状态：awaiting_clarification => 断点恢复（spec 6.4）
+            sess = await self._sessions.get_session(session_id)
+            is_resume = bool(sess and sess.get("status") == "awaiting_clarification")
+            user_msg = text
+
+            # 读 system prompt：内核协议 + 所有 always-on skill（PromptStore.assemble_system_prompt 组装）。
+            system_prompt = None
+            if self._prompts is not None:
+                system_prompt = await self._prompts.assemble_system_prompt()
+            if system_prompt:
+                _now = datetime.now()
+                _wd = "一二三四五六日"[_now.weekday()]
+                _ym = f"{_now.year}-{_now.month:02d}"
+                system_prompt = system_prompt + (
+                    f"\n\n【当前日期】今天 {_now.year}-{_now.month:02d}-{_now.day}"
+                    f"（周{_wd}），当前年月 {_ym}。用户说\"本月/上月/最近\"等相对时间时据此换算。")
+            if cancel_token is None:
+                cancel_token = CancelToken()
+            try:
+                async for evt in self._loop.run(
+                    session_id=session_id, user_id=user_id,
+                    user_msg=user_msg, trace_id=trace_id,
+                    cancel_token=cancel_token, is_resume=is_resume,
+                    system_prompt=system_prompt,
+                ):
+                    yield evt
+            except Exception as e:
+                log.exception("loop 执行异常 trace=%s", trace_id)
+                yield SSEEvent(SSEEventType.ERROR.value,
+                               {"message": str(e)}, trace_id)
+        finally:
+            self._running.discard(session_id)

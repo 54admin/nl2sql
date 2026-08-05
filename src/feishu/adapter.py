@@ -87,14 +87,24 @@ class CardStream:
         return _tool_result_line(name, summary)
 
     async def on_done(self, answer: str | None = None) -> None:
-        if answer:
+        # 流式态即最终态：过程元素已 insert_before 就位，answer 已逐字 acontent 渲染。
+        # 只有当传入的最终 answer 与流式累积的 _answer 不一致（流式丢字/平台超时截断）时，
+        # 才补刷一次 + 全量重建兜底；一致就只关流式——保住打字机渲染效果，避免 done 时整段答案突然蹦出。
+        streamed = self._answer
+        need_full = False
+        if answer and answer.strip() and answer.strip() != streamed.strip():
             self._answer = answer
-        log.info("飞书 done：answer=%d 字符，过程=%d 步", len(self._answer), len(self._tool_lines))
-        # 先关流式再全量重建：流式态下 card.update 会与 acontent 叠加（答案重复两遍）；
-        # 先 _close_streaming 进入非流式态，card.update 才是真替换——过程+答案+summary 一次到位，
-        # 也兜底流式过程中可能的丢字/丢步（多轮对话飞书 streaming 有平台超时）。
-        await self._close_streaming()
-        await self._update_card_full(card.build_final_card(self._tool_lines, self._answer))
+            need_full = True
+        log.info("飞书 done：answer=%d 字符，过程=%d 步，流式=%s",
+                 len(self._answer), len(self._tool_lines), "完整" if not need_full else "丢字→全量重建")
+        if not need_full and streamed.strip():
+            # 流式已完整渲染：确保最后一批 delta 已 flush，然后只关流式态
+            await self._cancel_and_flush()
+            await self._close_streaming()
+        else:
+            # 流式丢了/没渲染过：关流式后全量重建（过程+答案一次到位，兜底飞书 streaming 超时丢字）
+            await self._close_streaming()
+            await self._update_card_full(card.build_final_card(self._tool_lines, self._answer))
 
     async def on_clarify(self, question: str, options, sid: str) -> None:
         await self._cancel_and_flush()
@@ -220,7 +230,10 @@ class FeishuAdapter:
         self._orch = orchestrator
         self._sessions = session_mgr
         self._redis = redis
-        self._user_locks: dict[str, asyncio.Lock] = {}
+        # message_id 去重表：飞书 WS ACK 超时会补投同一条消息；按 message_id 去重，
+        # TTL 内重复（含补投/手抖连发同一条）直接丢弃。不再用 per-user asyncio.Lock——
+        # 那会把第二条消息整段队列到上一个 130s run 跑完才放行，反而更糟。
+        self._seen_msg: dict[str, float] = {}
         self._thread: threading.Thread | None = None
         self._ws_loop: asyncio.AbstractEventLoop | None = None
         self._lark_client = None
@@ -301,6 +314,12 @@ class FeishuAdapter:
         try:
             msg = data.event.message
             if getattr(msg, "message_type", "") != "text":
+                return
+            # 去重：飞书 WS 在 ACK 超时（约30-60s，run 慢时极易触发）会补投同一条消息；
+            # 按 message_id 去重，直接丢弃——根治"同一问题被投递N次、跑N个run"。
+            msg_id = getattr(msg, "message_id", None)
+            if msg_id and self._is_dup_msg(msg_id):
+                log.info("飞书重复消息丢弃 msg_id=%s", msg_id)
                 return
             open_id = data.event.sender.sender_id.open_id
             content = json.loads(msg.content) if getattr(msg, "content", None) else {}
@@ -441,12 +460,21 @@ class FeishuAdapter:
 
     async def _handle_incoming(self, open_id: str, text: str,
                                *, force_sid: str | None = None) -> None:
-        lock = self._user_locks.get(open_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._user_locks[open_id] = lock
-        async with lock:
-            await self._process(open_id, text, force_sid)
+        # 并发防护两层：(1) _on_message_sync 已按 message_id 去重补投；
+        # (2) orchestrator 的会话忙时闸门保证同 session 不并发跑第二个 run。
+        # 故此处不再持有 per-user 锁（旧实现 TOCTOU 竞态会失效 + 把消息队列 130s）。
+        await self._process(open_id, text, force_sid)
+
+    def _is_dup_msg(self, msg_id: str, ttl: float = 600.0) -> bool:
+        """message_id 去重：TTL 内重复→True。顺手清过期项，防字典无限增长。"""
+        now = time.monotonic()
+        stale = [k for k, t in self._seen_msg.items() if now - t > ttl]
+        for k in stale:
+            self._seen_msg.pop(k, None)
+        if msg_id in self._seen_msg:
+            return True
+        self._seen_msg[msg_id] = now
+        return False
 
     async def _process(self, open_id: str, text: str, force_sid: str | None) -> None:
         trace_id = uuid4().hex
@@ -507,8 +535,6 @@ def _tool_call_line(name, args) -> tuple[str, str]:
     if name == "knowledge_search":
         q = (args or {}).get("query", "").strip()
         return ("doc_outlined", f"**检索知识库**：`{q}`" if q else "**检索知识库**")
-    if name == "do_attribution":
-        return ("insert-chart_outlined", "**归因分析**")
     return ("setting_outlined", f"**调用 {name or '工具'}**")
 
 
@@ -543,13 +569,6 @@ def _tool_result_line(name, summary) -> tuple[str, str]:
         snippet = (hits[0] or "")[:80].replace("\n", " ")
         more = f"（共 {len(hits)} 段）" if len(hits) > 1 else ""
         return ("check_outlined", f"**知识库命中**{more}：{snippet}")
-    if name == "do_attribution":
-        text = (summary or "").strip()
-        if text:
-            snippet = text[:80].replace("\n", " ")
-            suffix = "…" if len(text) > 80 else ""
-            return ("insert-chart_outlined", f"**归因完成**：{snippet}{suffix}")
-        return ("insert-chart_outlined", "**归因完成**")
     return ("check_outlined", f"**{name or '工具'} 完成**")
 
 
