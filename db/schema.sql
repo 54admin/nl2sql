@@ -20,7 +20,6 @@ CREATE TABLE IF NOT EXISTS agent_limits (
     max_sql INTEGER NOT NULL,
     max_sql_fail_streak INTEGER NOT NULL,
     max_meta_per_run INTEGER NOT NULL,
-    max_kb_fail_streak INTEGER NOT NULL,
     version INTEGER NOT NULL,
     updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL,
     PRIMARY KEY (id)
@@ -39,8 +38,6 @@ COMMENT ON COLUMN agent_limits."max_sql" IS '单次对话 execute_sql 硬上限'
 COMMENT ON COLUMN agent_limits."max_sql_fail_streak" IS '连续空/错几次提示收手';
 
 COMMENT ON COLUMN agent_limits."max_meta_per_run" IS 'query_metadata 每轮最多次数';
-
-COMMENT ON COLUMN agent_limits."max_kb_fail_streak" IS 'knowledge_search 连续空几次提示停';
 
 COMMENT ON COLUMN agent_limits."version" IS '版本号';
 

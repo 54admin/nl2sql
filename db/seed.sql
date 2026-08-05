@@ -60,8 +60,8 @@ ON CONFLICT (id) DO NOTHING;
 
 -- agent 运行上限 default（admin 后台可改）
 INSERT INTO agent_limits (id, max_turns, max_ask_user, max_sql,
-    max_sql_fail_streak, max_meta_per_run, max_kb_fail_streak, version)
-VALUES ('default', 30, 2, 10, 3, 1, 1, 1)
+    max_sql_fail_streak, max_meta_per_run, version)
+VALUES ('default', 30, 2, 10, 3, 1, 1)
 ON CONFLICT (id) DO NOTHING;
 
 COMMIT;

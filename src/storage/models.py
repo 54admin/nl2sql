@@ -167,7 +167,6 @@ class AgentLimitsRow(Base):
     max_sql: Mapped[int] = mapped_column(default=10, comment="单次对话 execute_sql 硬上限")
     max_sql_fail_streak: Mapped[int] = mapped_column(default=3, comment="连续空/错几次提示收手")
     max_meta_per_run: Mapped[int] = mapped_column(default=1, comment="query_metadata 每轮最多次数")
-    max_kb_fail_streak: Mapped[int] = mapped_column(default=1, comment="knowledge_search 连续空几次提示停")
     version: Mapped[int] = mapped_column(default=1, comment="版本号")
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
                                                  onupdate=func.now(), comment="更新时间")

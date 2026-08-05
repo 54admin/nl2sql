@@ -88,8 +88,8 @@ def generate() -> str:
     parts.append(
         "-- agent 运行上限 default（admin 后台可改）\n"
         "INSERT INTO agent_limits (id, max_turns, max_ask_user, max_sql,\n"
-        "    max_sql_fail_streak, max_meta_per_run, max_kb_fail_streak, version)\n"
-        "VALUES ('default', 30, 2, 10, 3, 1, 1, 1)\n"
+        "    max_sql_fail_streak, max_meta_per_run, version)\n"
+        "VALUES ('default', 30, 2, 10, 3, 1, 1)\n"
         "ON CONFLICT (id) DO NOTHING;\n")
 
     parts.append("\nCOMMIT;\n")

@@ -26,18 +26,6 @@ def _args_key(args: dict) -> str:
     return json.dumps(args, sort_keys=True, ensure_ascii=False)
 
 
-def _kb_empty(summary: str) -> bool:
-    """knowledge_search 结果是否算空（无匹配/未配置/失败/无 query）。
-    空→提示 LLM 停止再查知识库，基于已有数据作答。知识库要么有要么没有，
-    换 query 连查没意义（审计实证：空知识库被连查4次全是'未配置'）。"""
-    if not summary or not summary.startswith("{"):
-        return True   # "缺少检索 query"/"未配置或无匹配"/"检索失败" 都是纯文本
-    try:
-        return not json.loads(summary).get("hits")
-    except (ValueError, TypeError):
-        return True
-
-
 def _sql_failed(summary: str) -> bool:
     """execute_sql 结果是否算失败（空结果或报错），供试错熔断计数。
     成功时 summary 是 JSON（{"result_id":..,"rows":N,...}）；失败时是纯文本错误兜底。
@@ -84,7 +72,6 @@ class AgentLoop:
                  max_context: int | None = None,
                  max_sql: int = 10, max_sql_fail_streak: int = 3,
                  max_meta_per_run: int = 1,
-                 max_kb_fail_streak: int = 1,
                  session_manager=None, audit=None):
         self._llm = llm
         self._registry = registry
@@ -98,7 +85,6 @@ class AgentLoop:
             "max_sql": max_sql,                # 单次对话 execute_sql 硬上限
             "max_sql_fail_streak": max_sql_fail_streak,  # 连续空/错几次提示 LLM 收手
             "max_meta_per_run": max_meta_per_run,        # query_metadata 每轮最多查几次
-            "max_kb_fail_streak": max_kb_fail_streak,    # knowledge_search 连续空几次提示停
         }
         # 压缩阈值（token，逼近即压）。对齐 Claude Code：window 即阈值，绝对值非占比。
         # None=运行时读 LLM 配置/环境变量 max_context，拿不到用 32000 兜底。
@@ -143,7 +129,6 @@ class AgentLoop:
         meta_calls = 0
         sql_calls = 0
         sql_fail_streak = 0
-        kb_fail_streak = 0   # knowledge_search 连续空结果计数（未配置/无匹配→+1）
         turn = 0
         try:
             for turn in range(self._limits["max_turns"]):
@@ -262,16 +247,6 @@ class AgentLoop:
                                          "（时间范围/取值/字段名）。停止重试，基于已有信息作答"
                                          "或直接说明'未查到符合条件的数据'。")
 
-                    # knowledge_search 空结果熔断：未配置/无匹配/失败→提示 LLM 停，别换 query 连查。
-                    # 审计实证：空知识库被连查4次全"未配置"，纯烧 turn。
-                    kb_hint = ""
-                    if name == "knowledge_search":
-                        kb_fail_streak = kb_fail_streak + 1 if _kb_empty(result.summary) else 0
-                        if kb_fail_streak >= self._limits["max_kb_fail_streak"]:
-                            kb_hint = ("\n\n【系统提示】知识库无匹配/未配置，不要再调 knowledge_search。"
-                                       "归因依据改用已查回的数据（上方 execute_sql 结果）直接推理；"
-                                       "数据支撑不足的部分如实标注为'推测'，不要为了凑依据反复查空知识库。")
-
                     if result.suspended:
                         # ask_user 挂起：本轮不 append tool 消息——
                         # SessionState.resume 唯一负责注入用户回答，避免重复 tool_call_id
@@ -285,7 +260,7 @@ class AgentLoop:
                                            "options": result.options}, trace_id, turn)
                         return
 
-                    final_summary = result.summary + fail_hint + kb_hint
+                    final_summary = result.summary + fail_hint
                     msgs.append({"role": "tool", "tool_call_id": cid,
                                  "content": final_summary})
                     yield SSEEvent("tool_result",
