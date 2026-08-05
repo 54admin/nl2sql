@@ -1,20 +1,12 @@
-"""内置工具：echo(stub)/finish/ask_user（spec 6.2）。
-finish/ask_user 只置标志位，由 AgentLoop 观察后决定终止/挂起。
-工具本身不持久化，保持 tools 包零 P0a 依赖。"""
+"""内核控制流工具：finish（结束本轮）/ ask_user（澄清挂起）。
+
+二者是 ReAct loop 的终止 / 挂起出口，不属任何具体 skill——所有会话恒启用
+（见 catalog.KERNEL_TOOL_NAMES）。工具本身只置标志位，由 AgentLoop 观察后决定终止 / 挂起；
+不持久化，保持 tools 包零存储依赖。
+"""
 from __future__ import annotations
 
 from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
-from src.tools.attribution import ATTRIBUTION
-from src.tools.knowledge_tool import KNOWLEDGE_SEARCH
-from src.tools.metadata import QUERY_METADATA
-from src.tools.registry import ToolRegistry
-from src.tools.sql_engine import EXECUTE_SQL
-from src.tools.sql_template import make_get_sql_template
-
-
-async def _echo(args: dict, ctx: LoopContext, cancel_token: CancelToken) -> ToolResult:
-    """回显输入文本（测试用 stub，演示工具调用链路）。"""
-    return ToolResult(summary=f"echo: {args.get('text', '')}")
 
 
 async def _finish(args: dict, ctx: LoopContext, cancel_token: CancelToken) -> ToolResult:
@@ -26,15 +18,6 @@ async def _ask_user(args: dict, ctx: LoopContext, cancel_token: CancelToken) -> 
     """向用户提问澄清。有候选时给 options（前端渲染按钮），用户选项或自定义。"""
     return ToolResult(summary=args.get("question", ""), suspended=True, options=args.get("options"))
 
-
-ECHO = ToolDefinition(
-    name="echo",
-    description="回显输入文本（测试用 stub，演示工具调用链路）",
-    parameters={"type": "object",
-                "properties": {"text": {"type": "string", "description": "要回显的文本"}},
-                "required": ["text"]},
-    handler=_echo,
-)
 
 FINISH = ToolDefinition(
     name="finish",
@@ -59,13 +42,3 @@ ASK_USER = ToolDefinition(
                 "required": ["question"]},
     handler=_ask_user,
 )
-
-
-def default_registry(sql_template_desc: str | None = None) -> ToolRegistry:
-    """注册 echo / finish / ask_user + query_metadata + execute_sql + knowledge_search + do_attribution + get_sql_template。
-    sql_template_desc：启动时拼好的模板清单，注入 get_sql_template 的 description（LLM 据此预知模板）。"""
-    reg = ToolRegistry()
-    for td in (ECHO, FINISH, ASK_USER, QUERY_METADATA, EXECUTE_SQL, KNOWLEDGE_SEARCH, ATTRIBUTION):
-        reg.register(td)
-    reg.register(make_get_sql_template(sql_template_desc))
-    return reg

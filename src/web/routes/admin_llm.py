@@ -1,5 +1,5 @@
 """admin LLM 配置路由：模型 CRUD（列表/新建/改/删/启停）。
-一行=一个模型（base_url+key+model），用途是 purposes 多选（analysis/embedding/attribution 子集）。
+一行=一个模型（base_url+key+model），用途是 purposes 多选（analysis/attribution 子集）。
 启用互斥：启用某模型时，把它每个用途从其他 enabled 模型的 purposes 移除——同一用途同时只一个 enabled 模型覆盖。
 ponytail: 鉴权层 P5 管理后台再补。"""
 from __future__ import annotations
@@ -11,7 +11,7 @@ from sqlalchemy import select
 from src.storage.models import LlmConfigRow
 from src.storage.pg_client import AsyncSessionFactory
 
-PURPOSES = ("analysis", "embedding", "attribution")
+PURPOSES = ("analysis", "attribution")
 
 
 class LlmConfigPayload(BaseModel):

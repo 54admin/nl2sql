@@ -365,8 +365,18 @@
         <ul id="st-list" class="admin-list"></ul>
       </section>
       <section class="admin-card stab-panel" id="stab-knowledge">
-        <h3>知识库 <button class="add-btn" onclick="openKbModal()">+ 上传</button></h3>
-        <div id="kb-list" style="max-height:70vh;overflow:auto"></div>
+        <h3>知识库（RAGFlow）</h3>
+        <div id="ragflow-cfg" style="max-width:680px">
+          <p class="placeholder">加载中…</p>
+        </div>
+        <hr style="margin:16px 0;border:none;border-top:1px solid #eee">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <h3 style="margin:0">文档管理</h3>
+          <select id="rf-dataset" onchange="loadRfDocs()" style="padding:3px 8px;border:1px solid #ccc;border-radius:4px;font-size:12px"></select>
+          <button class="add-btn" onclick="rfUploadModal()">+ 上传</button>
+          <button class="llm-edit-btn" onclick="loadRfDocs()">刷新</button>
+        </div>
+        <div id="rf-docs" style="max-height:60vh;overflow:auto"></div>
       </section>
       <section class="admin-card stab-panel" id="stab-models">
         <h3>模型 &amp; 限流 <button class="add-btn" onclick="openLlmModal()">+ 新增</button></h3>
@@ -591,7 +601,7 @@ async function ask(text) {
   };
   const steps = [];   // 线性思考路径：{el, done}
   const stepLabels = {query_metadata:"查看可查的表与字段", execute_sql:"执行查询", ask_user:"向用户确认",
-    do_attribution:"归因分析", attribution:"归因分析", knowledge_search:"检索知识库", finish:"完成"};
+    knowledge_search:"检索知识库", finish:"完成"};
   function addStep(label) {
     thoughtEl.style.display = "block";
     const el = document.createElement("div");
@@ -964,7 +974,7 @@ function showSettingsTab(tab) {
   else if (tab === "prompt") loadPrompt();
   else if (tab === "rules") loadRules();
   else if (tab === "templates") loadSqlTemplates();
-  else if (tab === "knowledge") loadKbDocs();
+  else if (tab === "knowledge") loadRagflow();
   else if (tab === "models") loadLlm();
   else if (tab === "feishu") loadFeishu();
   else if (tab === "limits") loadLimits();
@@ -973,14 +983,13 @@ function showSettingsTab(tab) {
 // ===== 管理后台：业务规则 / SQL模板 / 知识库 / 模型限流 =====
 async function loadPrompt() {
   const {prompts = []} = await (await fetch("/api/admin/prompts")).json().catch(() => ({}));
-  _renderTable("prompt-list", ["场景", "启用", "内容预览"], prompts.map(p =>
+  _renderTable("prompt-list", ["场景", "状态", "内容预览"], prompts.map(p =>
     `<tr>
        <td><b>${escapeHtml(p.scene)}</b></td>
-       <td>${p.is_active ? '<span style="color:#2e7d32">● 启用中</span>' : '<span style="color:#bbb">○</span>'}</td>
+       <td>${p.enabled ? '<span style="color:#2e7d32">● 启用</span>' : '<span style="color:#bbb">○ 禁用</span>'}</td>
        <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#666">${escapeHtml((p.content||"").slice(0,60))}</td>
        <td class="col-op">
          <button class="llm-edit-btn" onclick="openPromptDetail('${escapeHtml(p.scene)}')">详情</button>
-         ${p.is_active ? "" : `<button class="llm-edit-btn" onclick="activatePrompt('${escapeHtml(p.scene)}')">启用</button>`}
          <button class="llm-edit-btn" onclick="openPromptModal('${escapeHtml(p.scene)}')">编辑</button>
          <button class="li-del" onclick="delPrompt('${escapeHtml(p.scene)}')">×</button>
        </td>
@@ -1011,10 +1020,6 @@ async function savePromptModal() {
   const r = await fetch(`/api/admin/prompts/${encodeURIComponent(scene)}`, {method: "PUT", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({scene, content, enabled: true})});
   if (r.ok) { closeAdminModal(); await loadPrompt(); } else alert("保存失败");
-}
-async function activatePrompt(scene) {
-  await fetch(`/api/admin/prompts/${encodeURIComponent(scene)}/activate`, {method: "PUT"});
-  await loadPrompt();
 }
 async function delPrompt(scene) {
   if (!confirm(`删除 prompt「${scene}」？`)) return;
@@ -1109,43 +1114,106 @@ async function delTpl(id) {
   await fetch(`/api/admin/sql-templates/${id}`, {method: "DELETE"});
   await loadSqlTemplates();
 }
-// 知识库
-async function loadKbDocs() {
-  const {docs = []} = await (await fetch("/api/admin/knowledge/docs")).json().catch(() => ({}));
-  _renderTable("kb-list", ["文件名", "分段数", "状态"], docs.map(d =>
-    `<tr><td><a onclick="openKbViewModal(${d.id})" style="color:#1976d2;cursor:pointer;text-decoration:underline">${escapeHtml(d.name)}</a></td><td>${d.chunk_count}</td><td>${d.enabled ? "启用" : "停用"}</td>
-      <td class="col-op"><button class="llm-edit-btn" onclick="openKbViewModal(${d.id})">查看</button><button class="llm-edit-btn" onclick="toggleKb(${d.id}, ${!d.enabled})">${d.enabled ? "停用" : "启用"}</button><button class="li-del" onclick="delKb(${d.id})">×</button></td></tr>`));
+// 知识库（RAGFlow：配置走库热更新 + 文档管理转发 RAGFlow）
+async function loadRagflow() {
+  await Promise.all([loadRagflowConfig(), loadRfDatasets(), loadRfDocs()]);
 }
-async function openKbViewModal(docId) {
-  const {chunks = []} = await (await fetch(`/api/admin/knowledge/docs/${docId}/chunks`)).json().catch(() => ({}));
-  const body = chunks.length
-    ? chunks.map(c => `<div style="border:1px solid #eee;border-radius:4px;padding:8px;margin-bottom:6px;font-size:12px;white-space:pre-wrap;max-height:220px;overflow:auto">${escapeHtml(c.content)}</div>`).join("")
-    : '<p class="placeholder">无分段</p>';
-  openAdminModal(`文档分段（共 ${chunks.length} 段，每段一个检索块）`, body, null);
+async function loadRagflowConfig() {
+  const cfg = await (await fetch("/api/admin/ragflow-config")).json().catch(() => ({}));
+  const el = document.getElementById("ragflow-cfg");
+  el.innerHTML = `
+    <label style="display:block;margin:6px 0">RAGFlow 地址
+      <input id="rf-base" style="width:360px" value="${escapeHtml(cfg.base_url||"")}" placeholder="http://10.x.x.x:9380（不带 /api/v1）">
+    </label>
+    <label style="display:block;margin:6px 0">API Key
+      <input id="rf-key" style="width:360px" value="${escapeHtml(cfg.api_key||"")}" placeholder="RAGFlow 平台头像 → API Key">
+    </label>
+    <div style="display:flex;gap:16px;margin:8px 0;flex-wrap:wrap">
+      <label>返回片段数 top_k <input id="rf-topk" type="number" style="width:60px" value="${cfg.top_k??5}"></label>
+      <label>相似度门槛 <input id="rf-sim" type="number" step="0.05" style="width:70px" value="${cfg.similarity_threshold??0.2}"></label>
+      <label>向量权重 <input id="rf-vw" type="number" step="0.05" style="width:70px" value="${cfg.vector_similarity_weight??0.3}"></label>
+    </div>
+    <label style="display:block;margin:8px 0"><input id="rf-enabled" type="checkbox" ${cfg.enabled?"checked":""}> 启用 RAGFlow 知识库（勾选后问数/归因可检索文档）</label>
+    <button class="llm-edit-btn" style="background:#1976d2;color:#fff;padding:4px 14px" onclick="saveRagflowConfig()">保存配置</button>
+    <span style="font-size:11px;color:#999;margin-left:8px">下方「文档管理」选 dataset 勾选参与检索</span>`;
 }
-function openKbModal() {
-  openAdminModal("上传知识库文档",
-    `<input id="km-file" type="file" accept=".txt,.md,.csv,.docx,.xlsx">
-     <p style="font-size:11px;color:#999;margin-top:4px">支持 txt/md/csv/docx/xlsx，后端自动解析分段</p>`,
-    uploadKbFromModal);
+async function saveRagflowConfig() {
+  const payload = {
+    base_url: rfVal("rf-base"), api_key: rfVal("rf-key"),
+    dataset_ids: getSelectedDatasets(),
+    top_k: +rfVal("rf-topk")||5, similarity_threshold: +rfVal("rf-sim")||0.2,
+    vector_similarity_weight: +rfVal("rf-vw")||0.3, enabled: document.getElementById("rf-enabled").checked,
+  };
+  const r = await fetch("/api/admin/ragflow-config", {method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+  if (r.ok) { alert("已保存（agent 下次检索即生效）"); }
+  else { const e = await r.json().catch(()=>({})); alert("保存失败: "+(e.detail||r.status)); }
 }
-async function uploadKbFromModal() {
-  const f = document.getElementById("km-file").files[0];
+function rfVal(id){ const el=document.getElementById(id); return el?el.value:""; }
+
+async function loadRfDatasets() {
+  const [dsRes, cfgRes] = await Promise.all([
+    (await fetch("/api/admin/ragflow/datasets")).json().catch(()=>({})),
+    (await fetch("/api/admin/ragflow-config")).json().catch(()=>({}))]);
+  const datasets = dsRes.datasets || [];
+  const sel = cfgRes.dataset_ids || [];
+  const selEl = document.getElementById("rf-dataset");
+  const cur = selEl.value;
+  selEl.innerHTML = '<option value="">（选择知识库查看文档）</option>' + datasets.map(d=>
+    `<option value="${d.id}" ${d.id===cur?"selected":""}>${escapeHtml(d.name)}（${d.document_count??0}文档/${d.chunk_count??0}分段）</option>`).join("");
+  let box = document.getElementById("rf-ds-box");
+  if (!box) { box = document.createElement("div"); box.id="rf-ds-box"; document.getElementById("ragflow-cfg").appendChild(box); }
+  box.innerHTML = '<div style="font-size:12px;color:#555;margin:10px 0 4px">勾选参与检索的知识库：</div>' +
+    (datasets.length ? datasets.map(d=>`<label style="margin-right:14px;font-size:12px"><input type="checkbox" class="rf-ds-check" value="${d.id}" ${sel.includes(d.id)?"checked":""}> ${escapeHtml(d.name)}</label>`).join("")
+     : '<p class="placeholder">未列到知识库（检查地址/Key/是否启用）</p>');
+}
+function getSelectedDatasets() {
+  return Array.from(document.querySelectorAll(".rf-ds-check:checked")).map(c=>c.value);
+}
+async function loadRfDocs() {
+  const dsId = document.getElementById("rf-dataset")?.value;
+  const el = document.getElementById("rf-docs");
+  if (!dsId) { el.innerHTML = '<p class="placeholder">先在上方选择一个知识库</p>'; return; }
+  const {documents = []} = await (await fetch(`/api/admin/ragflow/documents?dataset_id=${encodeURIComponent(dsId)}`)).json().catch(()=>({}));
+  const runText = r => ({UNSTART:"未解析",RUNNING:"解析中",DONE:"已解析",FAIL:"失败"}[r]||r||"-");
+  _renderTable("rf-docs", ["文件名","分段数","状态","操作"], documents.map(d=>
+    `<tr><td>${escapeHtml(d.name||"")}</td><td>${d.chunk_count??0}</td><td>${runText(d.run)}</td>
+      <td class="col-op">
+        ${(d.run!=="DONE"&&d.run!=="RUNNING")?`<button class="llm-edit-btn" onclick="rfParse('${dsId}','${d.id}')">解析</button>`:""}
+        <button class="li-del" onclick="rfDel('${dsId}','${d.id}')">×</button>
+      </td></tr>`));
+}
+function rfUploadModal() {
+  const dsId = document.getElementById("rf-dataset")?.value;
+  if (!dsId) return alert("先选择要上传到的知识库");
+  openAdminModal("上传文档到当前知识库",
+    `<input id="rf-file" type="file">
+     <p style="font-size:11px;color:#999;margin-top:4px">RAGFlow 自动分段；上传后点「解析」才可检索</p>`,
+    rfUploadFromModal);
+}
+async function rfUploadFromModal() {
+  const dsId = document.getElementById("rf-dataset").value;
+  const f = document.getElementById("rf-file").files[0];
   if (!f) return alert("选文件");
-  const btn = document.getElementById("admin-modal-save");
-  const old = btn.textContent;
+  const btn = document.getElementById("admin-modal-save"); const old = btn.textContent;
   btn.disabled = true; btn.textContent = "上传中…";
   try {
-    const fd = new FormData();
-    fd.append("file", f);
-    const r = await fetch("/api/admin/knowledge/upload", {method: "POST", body: fd});
-    if (r.ok) { closeAdminModal(); await loadKbDocs(); }
-    else { const e = await r.json().catch(() => ({})); alert("上传失败: " + (e.detail || r.status)); }
+    const fd = new FormData(); fd.append("dataset_id", dsId); fd.append("file", f);
+    const r = await fetch("/api/admin/ragflow/documents", {method:"POST", body:fd});
+    if (r.ok) { closeAdminModal(); await loadRfDocs(); }
+    else { const e = await r.json().catch(()=>({})); alert("上传失败: "+(e.detail||r.status)); }
   } finally { btn.disabled = false; btn.textContent = old; }
 }
-async function delKb(id) { await fetch(`/api/admin/knowledge/docs/${id}`, {method: "DELETE"}); await loadKbDocs(); }
-async function toggleKb(id, enabled) {
-  await fetch(`/api/admin/knowledge/docs/${id}?enabled=${enabled}`, {method: "PUT"}); await loadKbDocs();
+async function rfParse(dsId, docId) {
+  const r = await fetch("/api/admin/ragflow/parse", {method:"POST",
+    body:new URLSearchParams({dataset_id:dsId, document_ids:docId})});
+  if (r.ok) { alert("已触发解析（分段+embedding，稍候刷新看状态）"); await loadRfDocs(); }
+  else { const e = await r.json().catch(()=>({})); alert("解析失败: "+(e.detail||r.status)); }
+}
+async function rfDel(dsId, docId) {
+  if (!confirm("删除该文档？")) return;
+  await fetch(`/api/admin/ragflow/documents?dataset_id=${encodeURIComponent(dsId)}`, {method:"DELETE",
+    headers:{"Content-Type":"application/json"}, body:JSON.stringify([docId])});
+  await loadRfDocs();
 }
 // 飞书机器人通道（动态配置：admin 改 + 保存即热重连，凭证走库不入 yml）
 const FS_INPUT = "display:block;width:100%;margin:6px 0;padding:6px;border:1px solid #d0d0d0;border-radius:4px;box-sizing:border-box";

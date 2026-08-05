@@ -58,10 +58,15 @@ def build_template_desc(tpls) -> str:
         usage = (t.usage or "").strip()
         first = usage.split("\n")[0].split("。")[0] if usage else "（无说明）"
         lines.append(f"- {t.name}：{first}")
-    return ("查复杂查询的现成 SQL 样板（同比/环比/行转列等）。写这类查询前先调本工具。现有模板：\n"
+    return ("查复杂查询的现成 SQL 样板。遇到以下场景【必须先调本工具取样板，不要自己从零写】：\n"
+            "- 多指标里找最值/排名/对比（宽表每个指标一列，如『哪个指标最差/最好』）→ 宽表列转行(unpivot)\n"
+            "- 两期对比/环比/综合分变化/排名升降 → 环比对比+指标拆解\n"
+            "- 本期有上期没有（或退出）→ 两期差集\n"
+            "- 全局最优下钻到明细 TopN → 跨层级钻取\n"
+            "现有模板：\n"
             + "\n".join(lines)
             + "\n调时传 template_name 取该模板的完整 SQL + 参数 + 改造说明，"
-              "按 usage 改表名/参数后用 execute_sql 执行。")
+              "按 usage 改表名/参数后用 execute_sql 执行。一条样板能搞定的别拆成多条 SELECT。")
 
 
 def make_get_sql_template(desc: str | None = None) -> ToolDefinition:

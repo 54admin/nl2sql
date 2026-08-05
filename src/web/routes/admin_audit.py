@@ -71,10 +71,9 @@ def build_audit_router() -> APIRouter:
             "trace": {
                 "trace_id": t.trace_id, "session_id": t.session_id,
                 "user_id": t.user_id, "raw_input": t.raw_input,
-                "normalized_input": t.normalized_input,
                 "success": t.success, "final_answer": t.final_answer,
                 "sql_text": t.sql_text, "result_id": t.result_id,
-                "elapsed_ms": t.elapsed_ms, "cost_tokens": t.cost_tokens,
+                "elapsed_ms": t.elapsed_ms,
                 "created_at": t.created_at.isoformat() if t.created_at else None,
             },
             "events": [{

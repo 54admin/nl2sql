@@ -18,7 +18,6 @@ import hashlib
 import hmac
 import time
 from contextlib import asynccontextmanager
-from urllib.parse import quote_plus
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,15 +37,15 @@ from src.logging import get_logger, setup_logging
 from src.memory.session import SessionManager
 from src.storage.pg_client import init_db
 from src.storage.redis_client import RedisClient
-from src.tools.builtins import default_registry
+from src.tools.catalog import build_registry
 from src.web.routes.admin_llm import build_admin_llm_router
 from src.web.routes.admin_prompts import build_admin_prompts_router
 from src.web.routes.admin_datasource import build_datasource_router
-from src.web.routes.admin_knowledge import build_knowledge_router
 from src.web.routes.admin_metadata import build_metadata_router
 from src.web.routes.admin_business_rules import build_business_rules_router
 from src.web.routes.admin_sql_templates import build_sql_templates_router
 from src.web.routes.admin_feishu import build_admin_feishu_router
+from src.web.routes.admin_ragflow import build_admin_ragflow_router
 from src.web.routes.admin_agent_limits import build_agent_limits_router, load_agent_limits
 from src.web.routes.ask import build_ask_router
 from src.web.routes.result import build_result_router
@@ -55,12 +54,6 @@ from src.web.routes.admin_audit import build_audit_router
 
 # 全局组件（lifespan 初始化，路由通过 _Lazy 延迟引用）
 _app_state: dict = {}
-
-
-def _pg_url(pc) -> str:
-    """拼 PostgreSQL asyncpg URL，用户名密码做 URL 编码。"""
-    return (f"postgresql+asyncpg://{quote_plus(pc.username)}:{quote_plus(pc.password)}"
-            f"@{pc.host}:{pc.port}/{pc.database}")
 
 
 _TOKEN_TTL = 7 * 24 * 3600   # token 有效期 7 天
@@ -119,7 +112,7 @@ async def lifespan(app: FastAPI):
     import asyncio
     # PG + Redis 并行连接（各自都是连华为云的网络耗时，并行省掉串行等待）
     await asyncio.gather(
-        init_db(_pg_url(cfg.postgres), auto_migrate=cfg.auto_migrate),
+        init_db(cfg.postgres),
         redis.connect(),
     )
 
@@ -130,7 +123,8 @@ async def lifespan(app: FastAPI):
     datasource_mgr = DataSourceManager()
     # 读 enabled SQL 模板清单拼进 get_sql_template 工具 description（LLM 看 schema 即知有哪些模板）
     from src.tools.sql_template import build_template_desc, list_enabled_templates
-    reg = default_registry(sql_template_desc=build_template_desc(await list_enabled_templates()))
+    reg = await build_registry(sql_template_desc=build_template_desc(await list_enabled_templates()),
+                                  prompt_store=prompts)
     sess_state = SessionState(sm)
     from src.core.audit import AuditSink
     audit = AuditSink()
@@ -198,6 +192,9 @@ async def lifespan(app: FastAPI):
     from src.storage import pg_client
     if pg_client._engine is not None:
         await pg_client._engine.dispose()
+    # 关 RAGFlow httpx 连接池（P1：进程级单例，启动复用、关闭释放）
+    from src.ragflow.client import close_http_client
+    await close_http_client()
 
 
 def create_app() -> FastAPI:
@@ -249,13 +246,13 @@ def create_app() -> FastAPI:
 
     app.include_router(build_ask_router(_Lazy("orchestrator")))
     app.include_router(build_admin_feishu_router(_Lazy("feishu_adapter")))
+    app.include_router(build_admin_ragflow_router())  # P3：RAGFlow 知识库配置+文档管理
     app.include_router(build_agent_limits_router(_Lazy("loop")))   # 查询上限可配（PUT 后热刷新 AgentLoop）
     app.include_router(build_session_router(_Lazy("session_mgr")))
     app.include_router(build_admin_llm_router(_Lazy("llm_service")))
-    app.include_router(build_admin_prompts_router(_Lazy("prompts")))
+    app.include_router(build_admin_prompts_router(_Lazy("prompts"), _Lazy("loop")))
     # P1a 新增 4 个 admin 路由：datasource 要 manager（_Lazy 延迟解析），其余 3 个纯 PG 无参
     app.include_router(build_datasource_router(_Lazy("datasource_mgr")))
-    app.include_router(build_knowledge_router())   # P3b 知识库上传/检索管理
     app.include_router(build_metadata_router())
     app.include_router(build_business_rules_router())
     app.include_router(build_sql_templates_router())

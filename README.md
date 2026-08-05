@@ -2,16 +2,16 @@
 
 用自然语言问业务数据：用户提问 → Agent 自主查元数据 → 生成只读 SQL → 在**业务库**执行 → 结果摘要回灌 LLM → 流式回答。对话全程 SSE 推送（思考过程 / SQL / 表格分区），支持多轮、澄清、取消、上下文压缩。
 
-> 内网单租户工具平台。技术栈：FastAPI + SQLAlchemy 2.0(async) + asyncpg + Redis + pgvector + openai SDK（直连，去 langchain）+ sqlglot。
+> 内网单租户工具平台。技术栈：FastAPI + SQLAlchemy 2.0(async) + asyncpg + Redis + openai SDK（直连，去 langchain）+ sqlglot + RAGFlow（外部知识库）。
 
 ## 功能特性
 
 - **NL2SQL 问数**：自然语言 → 只读 SQL → 业务库查询 → 表格 + 文字摘要
 - **自主 ReAct 循环**：LLM 查元数据 → 执行 SQL → 摘要回灌 → 多轮，带试错熔断（防反复查烧网关额度）
 - **多轮对话 + 上下文压缩**：对齐 Claude Code auto-compact（按 group 摘要）
-- **名称纠错前置**：dict 精确 → fuzzy → LLM 兜底
+- **窄内核 + skill 架构**：内核纯协议（角色+ReAct+时间），领域方法论（问数 nl2sql / 归因 attribution）以 always-on skill 注入稳定前缀；无 load_skill、无分类器，意图靠工具描述区分度涌现
 - **澄清挂起**：缺关键信息用 ask_user 挂起，用户回答后断点恢复
-- **知识库 + 归因**：pgvector 向量检索 + 归因分析（「为什么」类问题）
+- **知识库（RAGFlow）+ 归因**：文档检索转发外部 RAGFlow；归因复用 execute_sql+knowledge_search，方法论以 skill 常驻（不另起胖工具）
 - **SQL 护栏**：sqlglot 只读校验（禁 DDL/DML/危险函数）
 - **管理后台**：数据源 / 元数据 / 模型配置 / 业务规则 / SQL 模板 / 知识库 / 问数统计
 - **模型配置**：网关分组 + 模型发现（调 `/v1/models`）+ 一键导入 + 用途程序识别 + 限流
@@ -68,7 +68,7 @@ python3 -m uvicorn src.main:app --reload --port 8000
 
 ```
 src/
-  core/          编排：orchestrator / agent_loop / normalizer / session / audit / *_store
+  core/          编排：orchestrator / agent_loop / session / audit / prompt_store(skill 装配)
   llm/           LLM 服务（双协议 openai/anthropic + 限流 + 重试）
   tools/         Agent 工具 + registry（schema 重建 / 参数强转 / 熔断）
   storage/       平台库 ORM（models.py 是表结构单一事实源）+ pg/redis 客户端

@@ -1,4 +1,4 @@
-"""业务规则 CRUD（人工录入口径，后续阶段消费）。P1a。
+"""业务规则 CRUD（人工录入，表级）。运行时由 query_metadata 按表附给 LLM。
 纯 PG 操作，不依赖 DataSourceManager。"""
 from __future__ import annotations
 

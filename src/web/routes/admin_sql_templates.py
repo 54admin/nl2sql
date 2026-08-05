@@ -1,4 +1,4 @@
-"""SQL 模板 CRUD（人工录入口径，P1b 应用）。P1a。
+"""SQL 模板 CRUD（人工录入）。清单拼进 get_sql_template 工具 description，LLM 按需调工具取。
 纯 PG 操作，不依赖 DataSourceManager。"""
 from __future__ import annotations
 

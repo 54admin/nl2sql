@@ -1,16 +1,14 @@
 """ORM 模型。对应 spec 第 12 章核心表。
 
-列/表级 comment= 会进 DDL（create_all 建表时发 COMMENT ON TABLE/COLUMN）；
+列/表级 comment= 进 DDL（db/schema.sql 带 COMMENT ON TABLE/COLUMN，由 gen_schema.py 编译）；
 已存在的表靠 pg_client.apply_table_comments() 把模型注释刷进 PG，单一事实源=本文件，不维护第二份 SQL。"""
 from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import (JSON, String, Text, DateTime, Integer, Boolean,
-                        ForeignKey, TypeDecorator, UniqueConstraint, func)
+                        ForeignKey, UniqueConstraint, func)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-# 注意：pgvector 的 Vector 不在顶层 import——pgvector 0.3 顶层 import 会注册 sqlite
-# event listener（load_extension('vector')），让 sqlite 测试连接卡死。延迟到 Embedding.load_dialect_impl
-# 的 PG 分支内 import（sqlite 测试根本不进那分支），sqlite 测试才不 hang。
+# 知识库统一由外部 RAGFlow 负责（文档管理/分段/检索），本系统不存向量。
 
 
 class Base(DeclarativeBase):
@@ -51,20 +49,15 @@ class Message(Base):
 class AuditTrace(Base):
     """审计追溯：全链路记录。"""
     __tablename__ = "audit_traces"
-    __table_args__ = {"comment": "审计追溯：输入→工具→SQL→结果→归因全链路"}
+    __table_args__ = {"comment": "审计追溯：一次问数从输入到答案的全链路（汇总行+事件流）"}
     trace_id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="追踪ID")
     session_id: Mapped[str] = mapped_column(String(64), index=True, comment="会话ID")
     user_id: Mapped[str] = mapped_column(String(64), index=True, comment="用户ID")
     raw_input: Mapped[str] = mapped_column(Text, comment="原始输入")
-    normalized_input: Mapped[str | None] = mapped_column(Text, nullable=True, comment="纠错后输入")
     tool_calls_json: Mapped[str | None] = mapped_column(Text, nullable=True, comment="工具调用记录（JSON）")
     sql_text: Mapped[str | None] = mapped_column(Text, nullable=True, comment="生成的SQL")
     result_id: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="结果旁路ID")
-    knowledge_hits_json: Mapped[str | None] = mapped_column(Text, nullable=True, comment="知识库命中（JSON）")
-    attribution_json: Mapped[str | None] = mapped_column(Text, nullable=True, comment="归因结论（JSON）")
-    sse_log_json: Mapped[str | None] = mapped_column(Text, nullable=True, comment="SSE流式日志（JSON）")
     elapsed_ms: Mapped[int | None] = mapped_column(nullable=True, comment="耗时（毫秒）")
-    cost_tokens: Mapped[int | None] = mapped_column(nullable=True, comment="token消耗")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), comment="创建时间")
     # 成败标记（细粒度统计用）：done=True，error/cancelled/max_turns=False
     success: Mapped[bool | None] = mapped_column(Boolean, nullable=True,
@@ -116,14 +109,14 @@ class QueryResult(Base):
 
 class LlmConfigRow(Base):
     """动态 LLM 配置（admin 后台可改，热更新）。按用途 id 多行 + 启停：
-    analysis（对话查询 chat）/ embedding（知识库向量）/ attribution（归因推理）。
+    analysis（对话查询 chat）/ attribution（归因推理）。
     LLMService 按 id=用途 取 enabled 配置。"""
     __tablename__ = "llm_config"
-    __table_args__ = {"comment": "动态LLM配置（按用途多行analysis/embedding/attribution+启停）"}
+    __table_args__ = {"comment": "动态LLM配置（按用途多行analysis/attribution+启停）"}
     id: Mapped[str] = mapped_column(String(128), primary_key=True,
                                      comment="配置ID（自定义名，如 qwen-chat）")
     purposes: Mapped[list] = mapped_column(JSON, default=list,
-                                           comment="用途列表（analysis/embedding/attribution 子集，可多选）")
+                                           comment="用途列表（analysis/attribution 子集，可多选）")
     model: Mapped[str] = mapped_column(String(128), comment="模型名")
     base_url: Mapped[str] = mapped_column(String(256), comment="API地址")
     api_key: Mapped[str] = mapped_column(String(256), comment="密钥")
@@ -169,27 +162,32 @@ class AgentLimitsRow(Base):
     __tablename__ = "agent_limits"
     __table_args__ = {"comment": "AgentLoop 查询上限动态配置（admin改，重启生效）"}
     id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="配置ID（default）")
-    max_turns: Mapped[int] = mapped_column(default=10, comment="agent 最大循环轮数")
+    max_turns: Mapped[int] = mapped_column(default=30, comment="agent 最大循环轮数")
     max_ask_user: Mapped[int] = mapped_column(default=2, comment="向用户澄清次数上限")
-    max_sql: Mapped[int] = mapped_column(default=4, comment="单次对话 execute_sql 硬上限")
-    max_sql_fail_streak: Mapped[int] = mapped_column(default=2, comment="连续空/错几次提示收手")
+    max_sql: Mapped[int] = mapped_column(default=10, comment="单次对话 execute_sql 硬上限")
+    max_sql_fail_streak: Mapped[int] = mapped_column(default=3, comment="连续空/错几次提示收手")
     max_meta_per_run: Mapped[int] = mapped_column(default=1, comment="query_metadata 每轮最多次数")
+    max_kb_fail_streak: Mapped[int] = mapped_column(default=1, comment="knowledge_search 连续空几次提示停")
     version: Mapped[int] = mapped_column(default=1, comment="版本号")
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
                                                  onupdate=func.now(), comment="更新时间")
 
 
 class Prompt(Base):
-    """场景化系统提示词（orchestrator 按 scene 读，组装 system message）。
-    场景如 default / attribution / correction；default 是兜底。
-    admin 后台 CRUD，热更新（PromptStore 缓存刷新）。"""
+    """skill 单一真相源：提示词内容 + 开关 + 工具声明全在一行（DB 即权威，seed 由 gen_seed.py 灌入）。
+    admin 后台 CRUD，热更新（PromptStore 缓存刷新 + AgentLoop.reload_registry）。"""
     __tablename__ = "prompts"
-    __table_args__ = {"comment": "场景化系统提示词（按scene读，default兜底，admin热更新）"}
-    scene: Mapped[str] = mapped_column(String(32), primary_key=True, comment="场景（default/attribution/correction）")
-    content: Mapped[str] = mapped_column(Text, comment="提示词内容")
+    __table_args__ = {"comment": "skill单一真相源（DB权威，seed由gen_seed灌入）"}
+    scene: Mapped[str] = mapped_column(String(32), primary_key=True, comment="skill名，主键")
+    content: Mapped[str] = mapped_column(Text, comment="提示词内容（admin在线改，热生效）")
+    tools: Mapped[list] = mapped_column(JSON, default=list,
+        comment="依赖工具名数组，与enabled联动装配（关skill→工具摘）")
+    mode: Mapped[str] = mapped_column(String(16), default="always_on",
+        comment="always_on=启动自动注入；on_demand=按需加载（保留位）")
+    order: Mapped[int] = mapped_column(Integer, default=99, comment="注入顺序（小在前）")
     version: Mapped[int] = mapped_column(default=1, comment="版本号")
-    enabled: Mapped[bool] = mapped_column(default=True, comment="是否启用")
-    is_active: Mapped[bool] = mapped_column(default=False, comment="是否当前生效（多版本选一，orchestrator 读 is_active=true 的）")
+    enabled: Mapped[bool] = mapped_column(default=True,
+        comment="skill总开关：false=整skill关（提示词不注入+工具摘除）")
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
                                                  onupdate=func.now(), comment="更新时间")
 
@@ -263,9 +261,9 @@ class MetadataColumn(Base):
 
 
 class TableRelation(Base):
-    """逻辑主外键关系（人工录入）。P1a 建口径，P1c JOIN 消费。"""
+    """逻辑主外键关系（人工录入）。query_metadata 返回给 LLM，跨表 JOIN 时按此关联口径。"""
     __tablename__ = "table_relations"
-    __table_args__ = {"comment": "逻辑主外键关系（人工录入，P1c JOIN消费）"}
+    __table_args__ = {"comment": "逻辑主外键关系（人工录入）；query_metadata 返回，跨表 JOIN 按 this 口径"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="关系ID")
     datasource_id: Mapped[int] = mapped_column(ForeignKey("datasources.id"), index=True, comment="数据源ID")
     main_table: Mapped[str] = mapped_column(String(128), comment="主表")
@@ -279,9 +277,9 @@ class TableRelation(Base):
 
 
 class BusinessRule(Base):
-    """业务规则（人工录入）。P1a 建口径，后续阶段消费。"""
+    """业务规则（人工录入，表级）。query_metadata 返回时按 table_name 附在对应表上，LLM 查到该表才见。"""
     __tablename__ = "business_rules"
-    __table_args__ = {"comment": "业务规则（人工录入口径，后续阶段消费）"}
+    __table_args__ = {"comment": "业务规则（人工录入，表级；query_metadata 按表附给 LLM）"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="规则ID")
     table_name: Mapped[str] = mapped_column(String(128), nullable=False,
                                             comment="规则关联的表全限定名（表级规则必填）")
@@ -295,9 +293,9 @@ class BusinessRule(Base):
 
 
 class SqlTemplate(Base):
-    """SQL 模板（人工录入）。P1a 建口径，P1b 应用。"""
+    """SQL 模板（人工录入）。清单拼进 get_sql_template 工具 description，LLM 复杂查询时调工具按 usage 套用。"""
     __tablename__ = "sql_templates"
-    __table_args__ = {"comment": "SQL模板（人工录入，拼进 system_prompt【SQL 样板】段给 LLM）"}
+    __table_args__ = {"comment": "SQL模板（人工录入，拼进 get_sql_template 工具 description，LLM 按需调工具取）"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="模板ID")
     name: Mapped[str] = mapped_column(String(128), comment="模板名")
     sql_template: Mapped[str] = mapped_column(Text, comment="SQL模板（含:param占位）")
@@ -309,55 +307,28 @@ class SqlTemplate(Base):
                                                  onupdate=func.now(), comment="更新时间")
 
 
-# Qwen3-Embedding-4B 输出维度（建表固定；换 embedding 模型需同步改 + 重建 knowledge_chunks）
-EMBEDDING_DIM = 2560
-
-
-class Embedding(TypeDecorator):
-    """向量列：PG 用 pgvector Vector（cosine 距离检索）；sqlite 降级 JSON 存 list（测试兼容，
-    否则 create_all 因 pgvector sqlite 扩展缺失而 hang）。
-    检索走原生 SQL（PG: embedding <=> :q 余弦距离；sqlite: Python cosine），不依赖列 comparator。"""
-    impl = JSON
-    cache_ok = True
-
-    def __init__(self, dim: int = EMBEDDING_DIM):
-        self.dim = dim
-        super().__init__()
-
-    def load_dialect_impl(self, dialect):
-        if dialect.name == "sqlite":
-            return dialect.type_descriptor(JSON())
-        # 延迟 import（见模块顶部注释）：PG 用真 pgvector Vector
-        from pgvector.sqlalchemy import Vector
-        return dialect.type_descriptor(Vector(self.dim))
-
-
-class KnowledgeDoc(Base):
-    """知识库文档（P3b）：上传的 TXT/MD，分段后逐 chunk embedding 入 knowledge_chunks。
-    admin CRUD + 启停；归因/答疑检索 enabled 文档的 chunks。"""
-    __tablename__ = "knowledge_docs"
-    __table_args__ = {"comment": "知识库文档（上传TXT/MD，分段embedding入库，归因/答疑检索）"}
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="文档ID")
-    name: Mapped[str] = mapped_column(String(256), comment="文档名（含扩展名）")
-    category: Mapped[str] = mapped_column(String(64), default="general", comment="分类（manual/policy/case/general）")
-    enabled: Mapped[bool] = mapped_column(default=True, comment="是否启用")
-    chunk_count: Mapped[int] = mapped_column(default=0, comment="分段数")
+# RAGFlow 外部知识库配置（admin 后台改，热更新）。
+# 知识库统一挪到外部 RAGFlow：文档上传/解析/分段/向量检索全由 RAGFlow 负责，
+# 本系统只调 RAGFlow 的 retrieval API 取片段 + 用本系统 LLM 生成答案。
+# 单行有效（id=default）：base_url + api_key 连 RAGFlow；dataset_ids 勾选参与检索的知识库。
+# enabled=false 或未配置时 knowledge_search/归因 工具优雅降级（提示未配置）。凭证明文存沿用内网工具惯例。
+class RagflowConfigRow(Base):
+    """RAGFlow 外部知识库动态配置（admin 改，热更新）。单行（id=default）。"""
+    __tablename__ = "ragflow_config"
+    __table_args__ = {"comment": "RAGFlow外部知识库配置（base_url+api_key+参与检索的dataset_ids，热更新）"}
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="配置ID（default）")
+    base_url: Mapped[str] = mapped_column(String(256), default="",
+                                          comment="RAGFlow 地址（如 http://10.x.x.x:9380，不带/api/v1）")
+    api_key: Mapped[str] = mapped_column(String(256), default="", comment="RAGFlow API Key（平台头像→API Key 生成）")
+    # 参与检索的知识库 dataset_id 列表（RAGFlow 一个实例下可建多个 dataset，勾选哪些参与问知识库）
+    dataset_ids: Mapped[list] = mapped_column(JSON, default=list,
+                                              comment="参与检索的知识库ID列表（RAGFlow dataset_id，多选）")
+    # 检索参数：top_k 取几条片段；similarity_threshold 相似度门槛；向量/关键词权重
+    top_k: Mapped[int] = mapped_column(default=5, comment="检索返回片段数")
+    similarity_threshold: Mapped[float] = mapped_column(default=0.2, comment="相似度门槛（低于不计）")
+    vector_similarity_weight: Mapped[float] = mapped_column(default=0.3,
+                                                            comment="向量相似度权重（1-x=关键词权重）")
+    enabled: Mapped[bool] = mapped_column(default=False, comment="是否启用 RAGFlow 知识库")
     version: Mapped[int] = mapped_column(default=1, comment="版本号")
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), comment="创建时间")
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
-                                                 onupdate=func.now(), comment="更新时间")
-
-
-class KnowledgeChunk(Base):
-    """知识库分段（P3b）：chunk 文本 + embedding 向量。
-    embedding 列 PG 用 pgvector Vector(EMBEDDING_DIM)，sqlite 降级 JSON（测试）。
-    检索按 enabled doc 过滤 + 向量近邻（PG: embedding <=> :q；sqlite: Python cosine）。"""
-    __tablename__ = "knowledge_chunks"
-    __table_args__ = {"comment": "知识库分段（embedding向量，PG用pgvector/sqlite降级JSON）"}
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="分段ID")
-    doc_id: Mapped[int] = mapped_column(ForeignKey("knowledge_docs.id"), index=True, comment="所属文档ID")
-    chunk_index: Mapped[int] = mapped_column(comment="段内序号")
-    content: Mapped[str] = mapped_column(Text, comment="分段文本")
-    embedding: Mapped[list[float]] = mapped_column(Embedding(EMBEDDING_DIM), comment="向量（cosine检索）")
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(),
                                                  onupdate=func.now(), comment="更新时间")

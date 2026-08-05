@@ -26,8 +26,6 @@ class LLMConfig:
     # 限流（P2 主动节流，防撞网关限流）。None=该维度不限（只重试不限速）。
     rpm_limit: int | None = None
     concurrency: int | None = None
-    # embedding 模型（P3b 知识库）：走 openai /v1/embeddings 端点，与 chat 协议无关。
-    embedding_model: str | None = "Qwen3-Embedding-4B"
 
 
 @dataclass
@@ -80,7 +78,6 @@ class ApplicationConfig:
     feishu: FeishuConfig = field(default_factory=FeishuConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
     profiles: list = field(default_factory=list)
-    auto_migrate: bool = False   # 顶层独立：true 才启动时建扩展/ALTER/刷注释（生产/普通账号设 false 跳）
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -110,7 +107,6 @@ def _build(d: dict) -> ApplicationConfig:
         feishu=FeishuConfig(**d.get("feishu", {})),
         auth=AuthConfig(**d.get("auth", {})),
         profiles=profiles,
-        auto_migrate=bool(d.get("auto_migrate", False)),
     )
 
 

@@ -1,124 +1,93 @@
-"""场景化 prompt 存储 + 内存缓存（页面配置模型基础）。
-orchestrator 组装 system message 时按 scene 读，默认场景 'default'。
+"""skill 单一真相源：DB prompts 表即权威，运行时只读 DB。
+seed 由 scripts/gen_seed.py 的 SEED_SKILLS 常量灌库（首次部署），之后运行时只读 DB。
+orchestrator 调 assemble_system_prompt 装配（KERNEL + enabled 的 always_on skill）。
+admin 改 content/enabled/tools 后失效缓存 + reload_registry 热生效。
 ponytail: 单进程内存缓存；跨进程广播 P5 改 Redis pub/sub。"""
 from __future__ import annotations
 
+# 注意：load_skills 仅 scripts/gen_seed.py 用，运行时不读 md（DB 即真相源）
 from src.logging import get_logger
 from src.storage.models import Prompt
 from src.storage.pg_client import AsyncSessionFactory
 
 log = get_logger(__name__)
 
-DEFAULT_SCENE = "default"
-_ACTIVE_KEY = "__active__"   # get_active 的缓存 key：当前 is_active 提示词内容（orchestrator 每轮调，缓存避免频繁查库）
+_ASSEMBLED_KEY = "__assembled__"  # assemble_system_prompt 缓存 key（orchestrator 每轮调）
 
-# default 场景未在后台配置时的内置兜底：教 LLM 走「query_metadata 选表 → execute_sql 查数」两步链路。
-# 后台配置了 default（enabled=True）会覆盖此兜底；attribution/correction 等非 default 场景不兜底（P3 再配）。
-DEFAULT_PROMPT = """你是 NL2SQL 问数助手。用户用自然语言问业务数据，你查只读数据库后用中文回答。
+# ============================================================================
+# 内核协议（KERNEL）：纯 agent 协议——角色 + ReAct 运行规则，零业务方法论。
+# 永远在最前（稳定缓存前缀的一部分），不随业务变动。新能力不进这里，走 skill。
+# ============================================================================
+KERNEL_PROMPT = """你是企业数据问数与归因助手。用户用自然语言提问，你通过调用工具获取真实数据或文档依据后，用中文准确回答。
 
-【工作流程——每次必须遵守】
-1. 先调 query_metadata（无参数）了解当前数据源有哪些表、字段、表注释、表间关联（relations）。
-   整轮对话 query_metadata 只调一次，记住返回结果，不要重复调用。
-   永远不要凭空猜表名/字段名——必须先 query_metadata 看清楚再写 SQL。
-2. 根据用户问题，从 query_metadata 返回的表里挑出需要的表，用 execute_sql 执行只读查询。
-   字段取值不确定时（如某标记字段是 0/1 还是 是/否、时间字段是什么格式），先 SELECT DISTINCT 查一次取值，再写主查询——不要瞎猜取值导致查空。
-3. 拿到结果后用自然语言回答用户，调 finish 结束本轮。
-   execute_sql 不要反复试错：一次写对最好；连续查不到就如实说明，不要换着条件硬试。
+你是 ReAct 智能体：思考 → 调用工具 → 查看返回 → 再思考，循环到能给出可信回答为止。
+运行铁律：
+- 一切数据/结论必须来自工具返回，绝不凭印象编造数值、字段名或结论。
+- 查不到就如实说明，不凑数、不猜测、不用「大概/约」。
+- 用对工具：查业务数据用 execute_sql（只读 SELECT）；查文档/政策/口径/说明/规定用 knowledge_search；写 SQL 前先 query_metadata 看清表与字段。
+- 工具拿到的才是事实，回答里每个数值/结论都要有工具结果支撑。
+- 缺关键信息无法可靠行动时，调 ask_user 向用户澄清（尽量给 2-4 个候选 options，别硬猜）；用户已明确给的不重复问。
+- 拿到可信结果就调 finish 给出最终回答、结束本轮——不无限循环、不堆砌无关内容。
 
-【澄清——候选从数据查、动态给，别写死也别默认】
-用户问题缺关键信息时先 ask_user 澄清，别默认、别瞎猜：
-- 缺时间：先 SELECT DISTINCT 查时间字段（如 years）的真实取值，把最近的几个作为 options 让用户选（第一个=最新值，标推荐），不要自作主张用当前月。
-- 缺主体/筛选对象：SELECT DISTINCT 查主体字段（如省分公司/项目字段）的实际值，作为 options。
-- 实体名对不上：把 query_metadata 里相近的表/字段列给用户选。
-用户已明确给出的信息不重复问。统计口径、对比基准不追问——按最常见口径直接查、回答里说明。
-ask_user 尽量带 options（2-4 个候选，第一个推荐 + 简短说明）。候选**一律从数据查真实取值**（SELECT DISTINCT），不要凭空编、不要写死「本月/上月」这种。只有数据里真查不到候选（纯开放信息）才只传 question。
+下面各段是具体能力的方法论，结合用户问题按需遵循。"""
 
-【回答原则——必读】
-- 直接回答问题本身，只给用户问的那些数据，不要自作主张做"要点总结/分点罗列/额外建议"。
-- 表格必须列全所有结果行，禁止只列前 5/前 N 名截断——查回几行就列几行（除非用户明确说"前几名/top N"）。
-- 问一个数就给一个数，问一张表的数据就给那批数据，不要扩展成报告。
-- 结果为空如实说「没有查到符合条件的数据」，不要编造。
-- 回答里提到的时间范围、口径、数值必须与实际查询用到的一致，不要凭印象编造（尤其月份、统计范围）。先简述查了什么（表/口径/行数），再给数据。
-
-【SQL 原则——必读】
-- 全程只读：只写 SELECT。禁止 DDL（建表/改表/删表）、DML（增删改数据）、危险函数。
-- 字段名用原始英文：SELECT/WHERE/ORDER BY/GROUP BY 里引用的字段，必须用 query_metadata 返回的原始字段名（英文，如 code/swdl/operation_area）。`AS 中文别名`仅用于让结果列头友好，绝不能在 WHERE/ORDER BY 或后续 SQL 里当字段名引用——中文别名不是真字段，拿来查必报错。
-- 全限定名：表名用 query_metadata 返回的原始写法（可能是 schema.table 全限定名），不要自己改写。
-- JOIN 优先：跨表查用 JOIN，优先按 query_metadata 返回的 relations 关联口径写连接条件；
-  relations 为空时按字段注释推导主外键，用 INNER/LEFT JOIN，别用一堆子查询硬套。
-- UNION / UNION ALL：合并多个结构相同的结果集时用 UNION（去重）或 UNION ALL（保留重复，更快优先用）。
-- WITH / CTE：查询步骤多、有中间结果复用时，用 WITH 把子查询拆成命名 CTE，SQL 清晰可调试。
-- 聚合别名清晰：SUM/COUNT/AVG 别起有意义的列名，别留默认表达式列名。
-- 时间处理：注意分区列/时间字段的粒度，日期范围用合适的边界。
-- 复杂查询参考模板：同比/环比、行转列（行→列）、同行不同列指标对比排序等复杂 SQL，
-  优先调 get_sql_template 工具取现成样板，按 usage 改写参数/表名套用，别从零硬写。
-  没有合适模板再自己写，且写完核对列名/聚合口径。
-
-【归因分析——「为什么/原因」类问题】
-- 问题里事实部分（哪个最差/最好、数值多少、排名、对比）先用 execute_sql 查清。
-- 只有原因部分（为什么会这样）才调 do_attribution(topic=...) 解释，且 topic 要带上前面查到的具体指标名。
-- 顺序：execute_sql 定位事实 → do_attribution 解释原因 → finish 综合输出（主因/次因/依据）。
-- 不要上来就 do_attribution——没有量化事实，归因是空的。某维度无数据/文档支撑时如实说明，不编造。
-- 指标口径/调度政策（非归因）：调 knowledge_search 检索文档取依据，
-  有匹配引用片段，无匹配如实说「知识库无相关文档」，不编造。
-"""
-
+# Skills（领域方法论）存 DB prompts 表；seed 由 gen_seed.py 的 SEED_SKILLS 常量灌入。
+# 每个 skill 自包含（frontmatter 元数据 + 提示词正文）；DB prompts 表可覆盖正文（admin 热改）。
 
 class PromptStore:
-    """场景化 prompt：内存缓存 + PG 持久。
-    get 内存缓存优先，miss 读 PG 回填；upsert 写 PG + bump version + 刷新缓存。
-    default 场景「从未配置过」时回退内置 DEFAULT_PROMPT；但后台显式禁用(enabled=False)/删除后返回 None（管理员主动关闭引导）。"""
+    """skill 提示词：内存缓存 + PG 持久。
+    get 内存缓存优先，miss 读 PG 回填；upsert 写 PG + bump version + 刷新缓存。"""
 
     def __init__(self) -> None:
         # value 存 None 表示「已查过 PG 确认无记录」，和「未查过」区分开
         self._cache: dict[str, tuple[str | None, int] | None] = {}
 
-    async def get(self, scene: str = DEFAULT_SCENE) -> str | None:
-        """读场景 prompt。PG 无记录返回 None；enabled=False 返回 None。
-        default 场景额外兜底：PG 从未配置过该记录（被删/禁后 cache 标记，不再兜底）。"""
+    async def get(self, scene: str) -> str | None:
+        """读 DB 原始 content（admin 编辑/预览用，不过滤 enabled）。
+        有行就返 content（哪怕 enabled=False，admin 要看见存的啥才能编辑/重新启用）；无行返 None。"""
         cached = self._cache.get(scene)
         if cached is not None:
-            # cache 命中：直接拿缓存值（可能是 None=管理员禁用/删除后的标记）
             return cached[0]
         async with AsyncSessionFactory() as s:
             row = await s.get(Prompt, scene)
-            if row is None or not row.enabled:
-                # default 场景：PG 无记录 → 兜底内置 prompt；有记录但禁用 → 不兜底(返 None)
-                if scene == DEFAULT_SCENE and row is None:
-                    value: str | None = DEFAULT_PROMPT
-                else:
-                    value = None
-                # 缓存标记：default 禁用/删除后不再兜底（value=None 进缓存）
-                self._cache[scene] = (value, 0)
-                return value
-            value = row.content
-            self._cache[scene] = (value, row.version)
-            return value
+        value = row.content if row else None
+        self._cache[scene] = (value, row.version if row else 0)
+        return value
 
-    async def upsert(self, scene: str, content: str,
-                     enabled: bool = True) -> int:
+    async def upsert(self, scene: str, content: str, *,
+                     tools: list[str] | None = None,
+                     mode: str | None = None,
+                     order: int | None = None,
+                     enabled: bool | None = None) -> int:
+        """改 skill（DB 单一真相源）。content 必填；tools/mode/order/enabled 不传=不动。
+        写库后失效装配缓存；caller（admin 路由）负责 reload_registry 热刷工具。"""
         async with AsyncSessionFactory() as s:
             row = await s.get(Prompt, scene)
             if row:
                 row.content = content
-                row.enabled = enabled
+                if tools is not None:
+                    row.tools = tools
+                if mode is not None:
+                    row.mode = mode
+                if order is not None:
+                    row.order = order
+                if enabled is not None:
+                    row.enabled = enabled
                 row.version += 1
                 new_version = row.version
             else:
                 s.add(Prompt(scene=scene, content=content,
-                             enabled=enabled, version=1))
+                             tools=tools if tools is not None else [],
+                             mode=mode or "always_on",
+                             order=order if order is not None else 99,
+                             enabled=True if enabled is None else enabled,
+                             version=1))
                 new_version = 1
             await s.commit()
-        # active 缓存可能 stale（改的 scene 若是当前启用的那条），无条件清；scene 级缓存下方细粒度更新。
-        self._cache.pop(_ACTIVE_KEY, None)
-        # ponytail: disabled 时清缓存而非写入，让 get miss 走 PG 看到 enabled=False 返回 None；
-        # 否则缓存命中会绕过 enabled 检查。
-        if enabled:
-            self._cache[scene] = (content, new_version)
-        else:
-            self._cache.pop(scene, None)
-        log.info("prompt 更新 scene=%s version=%s enabled=%s",
-                 scene, new_version, enabled)
+        self._cache.pop(_ASSEMBLED_KEY, None)  # 装配缓存 stale
+        self._cache.pop(scene, None)            # 单 skill raw 缓存 stale
+        log.info("skill 更新 scene=%s version=%s tools=%s mode=%s enabled=%s",
+                 scene, new_version, tools, mode, enabled)
         return new_version
 
     async def delete(self, scene: str) -> bool:
@@ -129,44 +98,44 @@ class PromptStore:
             await s.delete(row)
             await s.commit()
         self._cache.pop(scene, None)
-        self._cache.pop(_ACTIVE_KEY, None)   # 删的若是当前启用的 scene，active 缓存 stale
+        self._cache.pop(_ASSEMBLED_KEY, None)  # 装配缓存 stale
         return True
 
     async def list_all(self) -> list[dict]:
         async with AsyncSessionFactory() as s:
             rows = (await s.execute(Prompt.__table__.select().order_by(Prompt.scene))).all()
-        return [{"scene": r.scene, "content": r.content,
-                 "version": r.version, "enabled": r.enabled,
-                 "is_active": r.is_active} for r in rows]
+        return [{"scene": r.scene, "content": r.content, "tools": r.tools,
+                 "mode": r.mode, "order": r.order,
+                 "version": r.version, "enabled": r.enabled} for r in rows]
 
-    async def get_active(self) -> str | None:
-        """读 is_active=true 的 prompt（多版本里当前启用的）。无则回退 default。
-        走 _ACTIVE_KEY 缓存：miss 查 PG 回填；upsert/set_active/delete 失效。
-        orchestrator 每轮调，缓存避免频繁查库（提示词低频改，失效成本可忽略）。"""
-        cached = self._cache.get(_ACTIVE_KEY)
+    async def list_active_skills(self) -> list[dict]:
+        """DB 唯一真相源：返回所有 enabled=True 且 mode=always_on 的 skill 行（按 order 排序）。
+        orchestrator 装配 system prompt、catalog 装配工具都调它——单一数据源，不再回退 md。"""
+        async with AsyncSessionFactory() as s:
+            rows = (await s.execute(
+                Prompt.__table__.select()
+                .where(Prompt.enabled.is_(True))
+                .where(Prompt.mode == "always_on")
+                .order_by(Prompt.order)
+            )).all()
+        return [{"scene": r.scene, "content": r.content, "tools": r.tools,
+                 "order": r.order} for r in rows]
+
+    async def assemble_system_prompt(self) -> str:
+        """组装 system prompt：内核协议 + 所有 enabled 的 always_on skill（按 order 顺序拼接）。
+        DB 唯一真相源——直接遍历 list_active_skills()。
+        orchestrator 每轮调，走 _ASSEMBLED_KEY 缓存（miss 才查库）；upsert/delete 失效。
+        顺序固定 → 内核+skills 构成稳定缓存前缀，日期等可变项由 orchestrator 追加在尾部。"""
+        cached = self._cache.get(_ASSEMBLED_KEY)
         if cached is not None:
             return cached[0]
-        async with AsyncSessionFactory() as s:
-            row = (await s.execute(Prompt.__table__.select().where(
-                Prompt.is_active.is_(True)).limit(1))).first()
-        if row is None:
-            value = await self.get("default")   # 无启用项 → 回退 default（DB 记录或内置兜底）
-            self._cache[_ACTIVE_KEY] = (value, 0)   # default 结果也缓存；其变更经 upsert 会清 _ACTIVE_KEY
-            return value
-        self._cache[_ACTIVE_KEY] = (row.content, row.version)
-        return row.content
-
-    async def set_active(self, scene: str) -> bool:
-        """把 scene 设为当前启用（is_active=true），其余置 false。事务 + 清缓存。"""
-        async with AsyncSessionFactory() as s:
-            if await s.get(Prompt, scene) is None:
-                return False
-            await s.execute(Prompt.__table__.update().values(is_active=False))
-            await s.execute(Prompt.__table__.update().where(
-                Prompt.scene == scene).values(is_active=True))
-            await s.commit()
-        self._cache.clear()
-        return True
+        parts = [KERNEL_PROMPT]
+        for sk in await self.list_active_skills():
+            if sk["content"]:
+                parts.append(sk["content"])
+        assembled = "\n\n".join(parts)
+        self._cache[_ASSEMBLED_KEY] = (assembled, 0)
+        return assembled
 
     async def refresh(self) -> None:
         scenes = list(self._cache.keys())

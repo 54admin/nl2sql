@@ -15,11 +15,12 @@ DEFAULT_ID = "default"
 
 
 class AgentLimitsPayload(BaseModel):
-    max_turns: int = 10
+    max_turns: int = 30
     max_ask_user: int = 2
-    max_sql: int = 4
-    max_sql_fail_streak: int = 2
+    max_sql: int = 10
+    max_sql_fail_streak: int = 3
     max_meta_per_run: int = 1
+    max_kb_fail_streak: int = 1
 
 
 def _defaults() -> dict:
@@ -39,7 +40,7 @@ async def load_agent_limits() -> dict:
     return {"id": row.id, "version": row.version,
             "max_turns": row.max_turns, "max_ask_user": row.max_ask_user,
             "max_sql": row.max_sql, "max_sql_fail_streak": row.max_sql_fail_streak,
-            "max_meta_per_run": row.max_meta_per_run}
+            "max_meta_per_run": row.max_meta_per_run, "max_kb_fail_streak": row.max_kb_fail_streak}
 
 
 def build_agent_limits_router(loop_ref=None) -> APIRouter:
@@ -62,6 +63,7 @@ def build_agent_limits_router(loop_ref=None) -> APIRouter:
             row.max_sql = payload.max_sql
             row.max_sql_fail_streak = payload.max_sql_fail_streak
             row.max_meta_per_run = payload.max_meta_per_run
+            row.max_kb_fail_streak = payload.max_kb_fail_streak
             row.version += 1
             await s.commit()
             version = row.version

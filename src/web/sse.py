@@ -24,7 +24,6 @@ class SSEEventType(str, Enum):
     METADATA_LOOKUP = "metadata_lookup"      # 4 类技术细节之一
     SQL_GENERATED = "sql_generated"
     KNOWLEDGE_HIT = "knowledge_hit"
-    ATTRIBUTION_STEP = "attribution_step"
     # AgentLoop 内部技术事件（admin 可见，user 隐藏）
     TURN_START = "turn_start"
     ASSISTANT = "assistant"

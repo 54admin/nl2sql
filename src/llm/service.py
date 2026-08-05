@@ -11,7 +11,7 @@ from typing import AsyncIterator
 
 from src.config import LLMConfig
 from src.logging import get_logger
-from src.storage.models import EMBEDDING_DIM, LlmConfigRow
+from src.storage.models import LlmConfigRow
 from src.storage.pg_client import AsyncSessionFactory
 
 log = get_logger(__name__)
@@ -41,7 +41,7 @@ class LLMService:
 
     def __init__(self):
         self._clients: dict[str, object] = {}   # purpose|protocol → client，按用途/协议各自缓存
-        self._dynamic: dict[str, dict] = {}      # 用途 → 配置缓存（analysis/embedding/attribution）
+        self._dynamic: dict[str, dict] = {}      # 用途 → 配置缓存（analysis/attribution）
         # 限流（P2 主动节流，防撞网关限流）：全局闸，按 analysis 用途的 rpm/concurrency 配置
         self._sem: asyncio.Semaphore | None = None
         self._req_times: deque = deque()
@@ -111,7 +111,7 @@ class LLMService:
 
     async def chat_stream(self, messages: list[dict], tools: list | None = None,
                           purpose: str = "analysis") -> AsyncIterator[_Chunk]:
-        """流式生成，yield _Chunk。purpose=用途（analysis 对话查询/embedding 向量/attribution 归因），
+        """流式生成，yield _Chunk。purpose=用途（analysis 对话查询/attribution 归因），
         按用途取配置。入口主动限速（RPM 窗+并发闸）；建立 stream 阶段可恢复错误指数退避+jitter+retry-after；
         流中途断不重试（避免重复输出），交 loop 错误自愈。"""
         cfg = await self._resolve_config(purpose)
@@ -249,7 +249,7 @@ class LLMService:
 
     async def chat(self, messages: list[dict], tools: list | None = None,
                    purpose: str = "analysis"):
-        """非流式一次调用（收集 chat_stream 成 _Resp）。备用/测试用；do_attribution 归因整合调 purpose='attribution'。"""
+        """非流式一次调用（收集 chat_stream 成 _Resp）。备用/测试用。"""
         content = ""
         tc_acc: dict = {}
         async for chunk in self.chat_stream(messages, tools, purpose):
@@ -280,39 +280,6 @@ class LLMService:
                 args = {}
             tool_calls.append({"id": v["id"], "name": v["name"], "args": args})
         return _Resp(content=content, tool_calls=tool_calls)
-
-    async def embed(self, texts: list[str]) -> list[list[float]]:
-        """批量文本 → 向量（P3b 知识库）。走 openai /v1/embeddings 端点（即使 chat 走 anthropic），
-        用 cfg.embedding_model。复用 _call_with_retry 限流重试。维度不符抛清晰错误（防 pgvector 插入模糊报错）。"""
-        if not texts:
-            return []
-        cfg = await self._resolve_config("embedding")
-        client = self._embed_client(cfg)
-
-        async def _create():
-            return await client.embeddings.create(model=cfg.model, input=texts)
-        resp = await _call_with_retry(_create)
-        vecs = [d.embedding for d in resp.data]
-        if vecs and len(vecs[0]) != EMBEDDING_DIM:
-            raise RuntimeError(
-                f"embedding 维度 {len(vecs[0])} ≠ 建表维度 {EMBEDDING_DIM}：改 src/storage/models.py "
-                "的 EMBEDDING_DIM 或换 embedding 模型，并重建 knowledge_chunks 表")
-        return vecs
-
-    def _embed_client(self, cfg: LLMConfig):
-        """embedding 固定走 openai 协议（/v1/embeddings 端点），与 chat protocol 无关。
-        复用同一 base_url/key，单独缓存 openai client（reset_dynamic 清 _clients 时一并清）。"""
-        if "embed_openai" in self._clients:
-            return self._clients["embed_openai"]
-        from openai import AsyncOpenAI
-        # openai SDK 的 base_url 要含 /v1：chat 走 anthropic 时 cfg.api_base 常不含 /v1
-        # （anthropic SDK 自己加），openai SDK 不加 → 会请求 /embeddings 而非 /v1/embeddings → 404。
-        base = cfg.api_base.rstrip("/")
-        if not base.endswith("/v1"):
-            base += "/v1"
-        client = AsyncOpenAI(api_key=cfg.api_key, base_url=base, timeout=cfg.timeout)
-        self._clients["embed_openai"] = client
-        return client
 
 
 @dataclass

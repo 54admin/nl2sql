@@ -55,7 +55,7 @@ async def _list_relations(datasource_id: int) -> list[dict]:
 async def _list_table_rules() -> dict[str, list[str]]:
     """读表级业务规则（enabled），按 table_name 分组返回文本列表。
     供 query_metadata 附在对应表上——查该表时 LLM 才看到，不污染全局 prompt。
-    （通用规则已挪进系统提示词，本表只存表级规则。）"""
+    本表只存表级规则（table_name 必填）；通用业务口径如需进提示词，直接在 admin 后台改对应 skill 提示词（DB prompts 表）。"""
     async with AsyncSessionFactory() as s:
         rows = (await s.execute(BusinessRule.__table__.select().where(
             BusinessRule.enabled.is_(True)))).all()
@@ -67,7 +67,7 @@ async def _list_table_rules() -> dict[str, list[str]]:
 
 async def query_metadata(args: dict, ctx: LoopContext,
                          cancel_token: CancelToken) -> ToolResult:
-    """工具 handler。args 可带 datasource_id；缺省取第一个数据源（单源场景，多源绑源留 P1c）。
+    """工具 handler。args 可带 datasource_id；缺省取第一个数据源（单源场景；多源选择留后续）。
     返回 {tables:[...], relations:[...]}：tables=白名单表（字段实时拉），relations=已配 JOIN 口径。"""
     from src.datasource.manager import DataSourceManager
     ds_id = args.get("datasource_id")
@@ -92,7 +92,8 @@ async def query_metadata(args: dict, ctx: LoopContext,
 QUERY_METADATA = ToolDefinition(
     name="query_metadata",
     description=("查看当前数据源里可以查询的表清单（表名/中文注释/字段）、已配表间关联。"
-                 "先调它了解有哪些表，再决定查哪张表。无需参数。"),
+                 "先调它了解有哪些表，再决定查哪张表。无需参数。"
+                 "只服务于 execute_sql 查业务数据前的结构准备；查知识库文档不需要调本工具。"),
     parameters={"type": "object", "properties": {}, "required": []},
     handler=query_metadata,
 )
