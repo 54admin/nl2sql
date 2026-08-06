@@ -36,11 +36,12 @@ _SESSION_TTL = 3600
 
 
 class CardStream:
-    """一张流式卡片：每步过程独立元素 insert_before answer（各带图标），answer
-    单元素 acontent 打字机。done 只关流式——流式态即最终态，每步独立图标已就位。
-
-    顺序：每个过程元素 insert_before 到 answer 前，新元素紧贴 answer → 过程按
-    到达顺序排列、answer 永远在末尾，与事件时序无关。
+    """一张流式卡片：『操作过程清单』+『答案』两个固定顶级元素。
+    - 过程清单(PROC_EID)：on_tool 每步往里 acontent 追加一条 ✓（全程只更新这一个元素，
+      不再每步 insert 折叠框——避免过程期一堆框堆叠）。飞书顶级 markdown 的 acontent 可靠。
+    - 答案(ANSWER_EID)：acontent 全量打字机。
+    - done：关流式 + build_final_card 全量重建，把全部步骤(+思考)折进一个 collapsible_panel，
+      答案在面板外可见。流式态即"清单流水"，done 后即"折叠汇总"，无中间多框状态。
     """
 
     def __init__(self, lark_client, card_id: str, throttle_s: float):
@@ -48,10 +49,11 @@ class CardStream:
         self._card_id = card_id
         self._throttle = throttle_s
         self._answer = ""
+        self._reasoning = ""    # 思考链全文（reasoning_delta 累积，done 时折进折叠面板）
         self._tool_lines: list[tuple[str, str]] = []   # [(icon_token, line)] 仅日志/诊断
         self._last_call_sig: str | None = None          # 重复调用去重（LLM 试错重发同 SQL）
         self._skip_next_result = False                   # 上一次 call 因重复跳过 → 对应 result 也跳过
-        self._proc_seq = 0          # 过程元素 element_id 自增（保证唯一，避开 300301）
+        self._proc_titles: list[str] = []   # 流式态操作过程清单（短标题），实时 acontent 到 PROC_EID
         self._seq = 0               # 卡片操作 sequence（严格递增，避开 300317）
         self._last_flush = 0.0
         self._flush_task: asyncio.Task | None = None
@@ -60,13 +62,22 @@ class CardStream:
         self._answer += text
         self._schedule_flush()   # 流式打字机：节流 acontent 全量 _answer，平台逐字渲染
 
+    def on_reasoning_delta(self, text: str) -> None:
+        if not text:
+            return
+        self._reasoning += text
+        # 不触发 flush：流式打字进折叠面板在真实链路不可靠（占位符"(思考中…)"不更新），
+        # 思考留到 done 全量重建时折进"操作过程"面板
+
     async def on_tool(self, token: str, line: str, *, rows: int | None = None) -> None:
-        """一步过程：insert_before answer 插入独立元素（带 token 图标）。"""
+        """一步过程：往【唯一的操作过程清单】acontent 追加一条 ✓。
+        全程只更新一个元素（不再每步 insert 一个折叠框），过程像流水往上长；done 后
+        build_final_card 再把全部步骤(+思考)折进一个 collapsible_panel。"""
         line = f"`{time.strftime('%H:%M:%S')}` " + line   # 步骤时间戳，便于复盘每步几点执行
         self._tool_lines.append((token, line))
-        eid = f"proc_{self._proc_seq}"
-        self._proc_seq += 1
-        await self._add_element(card.proc_element(eid, token, line))
+        title = re.sub(r"[`*#]", "", line.split("\n")[0]).strip()[:46] or "操作步骤"
+        self._proc_titles.append(title)
+        await self._stream_text(card.PROC_EID, card.progress_markdown(self._proc_titles))
         log.info("飞书 tool：%s%s", line, f" → {rows} 行" if rows is not None else "")
 
     def on_tool_call(self, name: str, args) -> tuple[str, str] | None:
@@ -87,24 +98,24 @@ class CardStream:
         return _tool_result_line(name, summary)
 
     async def on_done(self, answer: str | None = None) -> None:
-        # 流式态即最终态：过程元素已 insert_before 就位，answer 已逐字 acontent 渲染。
-        # 只有当传入的最终 answer 与流式累积的 _answer 不一致（流式丢字/平台超时截断）时，
-        # 才补刷一次 + 全量重建兜底；一致就只关流式——保住打字机渲染效果，避免 done 时整段答案突然蹦出。
-        streamed = self._answer
-        need_full = False
-        if answer and answer.strip() and answer.strip() != streamed.strip():
+        # 防卡死铁律：无论后面成不成功，先 flush 末批 + 关流式 + 更新 summary（"生成中..."→答案摘要），
+        # 这样即使全量重建失败卡片也不会停在"生成中"。然后有过程/思考才全量重建——把 11 步工具折进
+        # collapsible_panel；纯答案回复保留打字机效果只关流式即可。重建失败则兜底 acontent 答案。
+        if answer and answer.strip():
             self._answer = answer
-            need_full = True
-        log.info("飞书 done：answer=%d 字符，过程=%d 步，流式=%s",
-                 len(self._answer), len(self._tool_lines), "完整" if not need_full else "丢字→全量重建")
-        if not need_full and streamed.strip():
-            # 流式已完整渲染：确保最后一批 delta 已 flush，然后只关流式态
-            await self._cancel_and_flush()
-            await self._close_streaming()
-        else:
-            # 流式丢了/没渲染过：关流式后全量重建（过程+答案一次到位，兜底飞书 streaming 超时丢字）
-            await self._close_streaming()
-            await self._update_card_full(card.build_final_card(self._tool_lines, self._answer))
+        has_steps = bool(self._tool_lines)
+        has_reasoning = bool(self._reasoning.strip())
+        log.info("飞书 done：answer=%d 字符，思考=%d 字符，过程=%d 步，%s",
+                 len(self._answer), len(self._reasoning), len(self._tool_lines),
+                 "折叠重建" if (has_steps or has_reasoning) else "仅关流式(纯答案)")
+        await self._cancel_and_flush()
+        await self._close_streaming(self._answer)
+        if has_steps or has_reasoning:
+            ok = await self._update_card_full(
+                card.build_final_card(self._tool_lines, self._answer, self._reasoning))
+            if not ok:
+                log.warning("飞书 done 全量重建失败，兜底 acontent 答案（过程保留流式态展开）")
+                await self._stream_text(card.ANSWER_EID, self._answer)
 
     async def on_clarify(self, question: str, options, sid: str) -> None:
         await self._cancel_and_flush()
@@ -143,7 +154,7 @@ class CardStream:
         await self._flush()
 
     async def _flush(self) -> None:
-        # answer 单元素流式（过程步骤已各自独立元素 insert_before，不拼这里）
+        # 只打字 answer（流式打字进折叠面板不可靠，已废弃）；过程步骤各自独立元素，思考留到 done 后折进面板
         if not self._answer:
             return
         await self._stream_text(card.ANSWER_EID, self._answer)
@@ -180,23 +191,6 @@ class CardStream:
                 log.warning("飞书关流式失败 card=%s code=%s msg=%s", self._card_id, resp.code, resp.msg)
         except Exception as e:
             log.warning("飞书关流式异常/超时 card=%s: %s", self._card_id, e)
-
-    async def _add_element(self, element: dict) -> None:
-        """card_element/create：insert_before answer 插入独立过程元素（带图标）。
-        elements 是 JSON 序列化的组件数组（JSON 2.0）；uuid 幂等防重复插入。"""
-        from lark_oapi.api.cardkit.v1 import CreateCardElementRequest, CreateCardElementRequestBody
-        req = (CreateCardElementRequest.builder().card_id(self._card_id)
-               .request_body(CreateCardElementRequestBody.builder()
-                             .type("insert_before").target_element_id(card.ANSWER_EID)
-                             .uuid(uuid4().hex).sequence(self._next_seq())
-                             .elements(json.dumps([element], ensure_ascii=False)).build()).build())
-        try:
-            resp = await self._lark.cardkit.v1.card_element.acreate(req)
-            if not resp.success():
-                log.warning("飞书插入过程元素失败 card=%s code=%s msg=%s",
-                            self._card_id, resp.code, resp.msg)
-        except Exception as e:
-            log.warning("飞书插入过程元素异常/超时 card=%s: %s", self._card_id, e)
 
     async def _update_card_full(self, card_json: dict) -> bool:
         """全量替换卡片（card.update）：done 后，过程+答案+summary+关流式一次到位。
@@ -374,22 +368,18 @@ class FeishuAdapter:
             log.exception("feishu on_menu 解析异常")
 
     async def _handle_menu(self, open_id: str, key: str) -> None:
-        """菜单分流：new_session 建新会话并切过去；list_sessions 发会话列表卡片。纯管理，不进 _process。"""
-        lock = self._user_locks.get(open_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._user_locks[open_id] = lock
-        async with lock:
-            try:
-                if key == "new_session":
-                    sid = await self._sessions.create_session(open_id, "feishu", title=None)
-                    await self._switch_session(open_id, sid)
-                elif key == "list_sessions":
-                    await self._send_session_list(open_id)
-                else:
-                    log.info("未知飞书菜单 key=%s，忽略", key)
-            except Exception:
-                log.exception("飞书菜单处理异常 open_id=%s key=%s", open_id, key)
+        """菜单分流：new_session 建新会话并切过去；list_sessions 发会话列表卡片。纯管理，不进 _process。
+        菜单是纯管理动作（建会话/列表），无需 per-user 锁——并发由 orchestrator 会话忙闸门兜底。"""
+        try:
+            if key == "new_session":
+                sid = await self._sessions.create_session(open_id, "feishu", title=None)
+                await self._switch_session(open_id, sid)
+            elif key == "list_sessions":
+                await self._send_session_list(open_id)
+            else:
+                log.info("未知飞书菜单 key=%s，忽略", key)
+        except Exception:
+            log.exception("飞书菜单处理异常 open_id=%s key=%s", open_id, key)
 
     async def _switch_session(self, open_id: str, target_sid: str) -> None:
         """切当前会话绑定到 target_sid（新建/选历史共用）+ 发确认。
@@ -496,6 +486,8 @@ class FeishuAdapter:
                 t = evt.type
                 if t == "answer_delta":
                     stream.on_answer_delta(evt.data.get("text", ""))
+                elif t == "reasoning_delta":
+                    stream.on_reasoning_delta(evt.data.get("text", ""))
                 elif t == "tool_call":
                     item = stream.on_tool_call(evt.data.get("name", ""), evt.data.get("args"))
                     if item:
@@ -543,7 +535,7 @@ def _tool_result_line(name, summary) -> tuple[str, str]:
     if name == "execute_sql":
         data = _parse_sql_summary(summary)
         if data is None:
-            return ("warning_outlined", "**查询失败**" + (f"：{summary[:60]}" if summary else ""))
+            return ("warning_outlined", f"**❌ 查询失败**\n```\n{_short_sql_error(summary)}\n```")
         if data["rows"] == 0:
             return ("warning_outlined", "**查询完成**：无匹配数据（0 行）")
         cols = data["columns"]
@@ -563,7 +555,7 @@ def _tool_result_line(name, summary) -> tuple[str, str]:
         hits = _extract_kb_hits(summary)
         if hits is None:
             # summary 已是工具返回的失败描述（如"知识库检索失败：xxx"），整体加粗直接用，避免重复前缀
-            return ("warning_outlined", f"**{(summary or '知识库检索异常')[:60]}**")
+            return ("warning_outlined", f"**{summary or '知识库检索异常'}**")
         if not hits:
             return ("warning_outlined", "**知识库无匹配文档**")
         snippet = (hits[0] or "")[:80].replace("\n", " ")
@@ -614,6 +606,18 @@ def _parse_sql_summary(summary) -> dict | None:
                 "preview": d.get("preview") or [], "result_id": d.get("result_id")}
     except Exception:
         return None
+
+def _short_sql_error(summary: str) -> str:
+    """SQL 报错精简成单行（配代码块横向滚动展示）：去 pymysql 附的 [SQL:...] 重复（tool_call 已显示过 SQL）、
+    字段校验拦截只留"不存在字段：xxx"，其余压缩空白、超长截断。原始 summary 照旧回灌 LLM 自愈，此处只管卡片展示。"""
+    s = summary or ""
+    s = re.sub(r"\[SQL:.*", "", s, flags=re.S).strip()
+    if "不存在字段" in s:
+        m = re.search(r"不存在字段：([^\n]+)", s)
+        if m:
+            return f"字段不存在：{m.group(1).strip()}（已要求用真实字段改写）"
+    s = re.sub(r"\s+", " ", s)
+    return s[:300]
 
 
 def _preview_table(rows: list[dict], cols: list[str]) -> str:

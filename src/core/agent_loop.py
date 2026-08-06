@@ -40,6 +40,52 @@ def _sql_failed(summary: str) -> bool:
     return True
 
 
+def _sql_extract(sql: str) -> tuple[frozenset, frozenset, frozenset]:
+    """从 SQL 抽 (tables, where_predicates, base_cols)。
+    where_predicates: AND 连接的 WHERE 条件拆成集合（顺序无关，规范化空格），
+    比对字符串更稳——同条件不同顺序/空格不漏判。
+    base_cols: 引用的 业务表.列（排除 CROSS JOIN 指标字典列 ind.*）。解析失败返空集。"""
+    import sqlglot
+    from sqlglot import exp
+    try:
+        st = sqlglot.parse(sql)[0]
+    except Exception:
+        return frozenset(), frozenset(), frozenset()
+    if not isinstance(st, (exp.Select, exp.Union, exp.Intersect, exp.Except)):
+        return frozenset(), frozenset(), frozenset()
+    tables = frozenset(t.name for t in st.find_all(exp.Table))
+    preds = set()
+    wh = st.find(exp.Where)
+    if wh and wh.this:
+        def walk(e):
+            if isinstance(e, exp.And):
+                walk(e.left)
+                walk(e.right)
+            else:
+                preds.add(" ".join(e.sql().split()))
+        walk(wh.this)
+    cols = set()
+    for col in st.find_all(exp.Column):
+        tbl = col.table or ""
+        name = col.name or ""
+        if tbl and tbl != "ind":
+            cols.add(f"{tbl}.{name}")
+    return tables, frozenset(preds), frozenset(cols)
+
+
+def _sql_redundant(sql: str, prev: list[tuple[frozenset, frozenset, frozenset]]) -> bool:
+    """检测 execute_sql 是否冗余：查的表 + WHERE 谓词集 完全等于已执行过的一条，
+    且本次引用的业务列 ⊆ 那条已查回的列 → 覆盖，判定冗余。
+    WHERE 用谓词集比对（顺序无关）；列用子集判定。解析失败/无列不判（宁漏不误杀）。"""
+    tables, preds, cols = _sql_extract(sql)
+    if not tables or not cols:
+        return False
+    for (pt, pp, pc) in prev:
+        if tables == pt and preds == pp and cols <= pc:
+            return True
+    return False
+
+
 def _normalize_args(raw) -> dict:
     """LLM 返回的 args 可能是 str，归一化成 dict。None/list/int 等兜底成 {}。"""
     if isinstance(raw, dict):
@@ -125,6 +171,7 @@ class AgentLoop:
         last_answer = ""
         ask_count = 0
         prev_keys: set[tuple[str, str]] = set()
+        prev_sql: list[tuple[frozenset, frozenset, frozenset]] = []  # 已执行 SQL 的 (表,WHERE谓词,列)，查重用
         # 试错熔断计数器（P0）：单 run 内 query_metadata/execute_sql 调用数与连续失败统计
         meta_calls = 0
         sql_calls = 0
@@ -143,6 +190,11 @@ class AgentLoop:
                         content += chunk.content
                         yield SSEEvent("answer_delta", {"text": chunk.content}, trace_id)
                         self._audit_event("answer_delta", {"text": chunk.content}, trace_id, turn)
+                    # 思考链：推理模型在工具决策轮吐 reasoning_content（content 为空）。
+                    # 单独发 reasoning_delta——飞书侧流式打字进专属"思考"元素，破除工具阶段静默。
+                    if chunk.reasoning:
+                        yield SSEEvent("reasoning_delta", {"text": chunk.reasoning}, trace_id)
+                        self._audit_event("reasoning_delta", {"text": chunk.reasoning}, trace_id, turn)
                     for tc in chunk.tool_call_delta:
                         idx = getattr(tc, "index", None)
                         idx = idx if idx is not None else 0
@@ -190,6 +242,7 @@ class AgentLoop:
                     name = tc.get("name")
                     args = _normalize_args(tc.get("args"))
                     cid = tc.get("id")
+                    sql_text = args.get("sql", "") if name == "execute_sql" else ""
                     # 重复调用（同工具+参数）：不显示也不执行，直接回 tip 让 LLM 用已有结果——
                     # 否则前端/飞书会看到重复的"执行查询"步骤
                     if (name, _args_key(args)) in dup_keys:
@@ -235,8 +288,23 @@ class AgentLoop:
                             self._audit_event("tool_result", {"name": name, "summary": tip}, trace_id, turn)
                             continue
                         sql_calls += 1
+                        # 冗余查询检测：同表+同WHERE+列已被覆盖 → 不执行，回灌复用提示。
+                        # 防 LLM 查完得分又 SELECT 同行同批列、或把 unpivot 原样重跑一遍。
+                        if sql_text and _sql_redundant(sql_text, prev_sql):
+                            tip = ("这条 SQL 查的表和筛选条件与上面已执行过的完全相同，所需列也已在上方结果里。"
+                                   "不要重查——直接读上方已有的工具结果作答。")
+                            msgs.append({"role": "tool", "tool_call_id": cid, "content": tip})
+                            yield SSEEvent("tool_result",
+                                           {"name": name, "summary": tip, "converged": True}, trace_id)
+                            self._audit_event("tool_result", {"name": name, "summary": tip}, trace_id, turn)
+                            continue
 
                     result = await self._registry.execute(name, args, ctx, cancel_token)
+                    # 记录本次 SQL 的 (表,WHERE谓词,列) 供后续冗余检测（只记成功的）
+                    if name == "execute_sql" and not _sql_failed(result.summary):
+                        _t, _p, _c = _sql_extract(sql_text)
+                        if _t and _c:
+                            prev_sql.append((_t, _p, _c))
 
                     # execute_sql 连续空/错熔断（P0）：提示 LLM 收手，别闷头试到口径都乱。
                     fail_hint = ""

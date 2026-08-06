@@ -6,7 +6,9 @@ PG metadata_tables 只存勾选白名单（enabled=true）+ 手写注释（sourc
 from __future__ import annotations
 
 import json
+import re
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
@@ -28,11 +30,11 @@ async def _list_enabled_tables(datasource_id: int, engine: AsyncEngine) -> list[
     for t in tables:
         cols = await fetch_table_columns(engine, t.table_name, t.schema_name)
         full_name = f"{t.schema_name}.{t.table_name}" if t.schema_name else t.table_name
+        cols = await _enrich_columns(engine, t.schema_name, t.table_name, cols)
         out.append({
             "table_name": full_name,
             "table_comment": t.table_comment or "",
-            "columns": [{"name": c["name"], "comment": c["comment"], "type": c["type"]}
-                        for c in cols],
+            "columns": cols,
         })
     return out
 
@@ -65,6 +67,85 @@ async def _list_table_rules() -> dict[str, list[str]]:
     return out
 
 
+# ---- 列分类（指标/维度）+ 维度抽样 ----
+# 维度列抽样真实取值，让 LLM 不必再 SELECT DISTINCT 试探（审计实证：一次问数会因此多跑 3 次 SQL）。
+_DIM_NUMERIC_HINT = re.compile(
+    r"(year|month|quarter|week|period|rank|flag|category|kind|level|status|"
+    r"类型|状态|级别|等级|排名|期|类别|分类|是否)", re.I)
+_ID_HINT = re.compile(r"(^id$|_id$|_no$|^code$|guid$|uuid)", re.I)
+_FREE_TEXT_LEN = 200     # varchar 长度>=此值视为自由文本，不抽样（基数太高无意义）
+_SAMPLE_LIMIT = 10
+
+
+def _base_type_and_len(type_str: str) -> tuple[str, int | None]:
+    """varchar(50)->('varchar',50)；decimal(18,6)->('decimal',18)；datetime->('datetime',None)。"""
+    m = re.match(r"\s*([A-Za-z]+)(?:\s*\((\d+))?", type_str or "")
+    if not m:
+        return (type_str or "").lower(), None
+    return m.group(1).lower(), (int(m.group(2)) if m.group(2) else None)
+
+
+def _classify(name: str, comment: str, type_str: str) -> tuple[str, bool]:
+    """列 -> (role, 是否抽样)。role: metric(指标)/dimension(维度)。
+    只有「短分类列」抽样：id/长文本/时间戳是维度但不抽样（高基数或无意义）。"""
+    base, length = _base_type_and_len(type_str)
+    nl = (name or "").lower()
+    is_int = base in ("int", "bigint", "smallint", "tinyint", "mediumint")
+    is_float = base in ("decimal", "numeric", "float", "double", "real", "number")
+    is_str = base in ("varchar", "char", "text", "string", "enum", "set",
+                      "longtext", "mediumtext", "tinytext")
+    is_time = base in ("datetime", "timestamp", "date", "time", "year")
+    if _ID_HINT.search(nl):
+        return "dimension", False          # 标识符，抽样无意义
+    if is_time:
+        return "dimension", False          # 时间戳类（多为 ETL 审计列）
+    if is_str:
+        if base == "text" or (length and length >= _FREE_TEXT_LEN):
+            return "dimension", False      # 自由文本，基数太高
+        return "dimension", True           # 短分类列 -> 抽样
+    if is_float:
+        return "metric", False             # 小数=连续度量，恒为指标（不可能是分类维度）
+    if is_int:
+        if _DIM_NUMERIC_HINT.search(name) or _DIM_NUMERIC_HINT.search(comment or ""):
+            return "dimension", True       # 整数型分类码：年/月/类型码/排名位次（如 rank=1..5）
+        return "metric", False
+    return "dimension", False
+
+
+async def _enrich_columns(engine: AsyncEngine, schema: str | None, table: str,
+                          cols: list[dict]) -> list[dict]:
+    """给每列打 role(metric/dimension)，并对维度短分类列抽样真实取值(samples)。
+    抽样失败的单列不影响整体。标识符按 dialect 正确引用（mysql 反引号/pg 双引号）。"""
+    preparer = engine.dialect.identifier_preparer
+    tq = preparer.quote_identifier(table)
+    if schema:
+        tq = preparer.quote_identifier(schema) + "." + tq
+    enriched: list[dict] = []
+    to_sample: list[str] = []
+    for c in cols:
+        role, sample_it = _classify(c["name"], c.get("comment", ""), c.get("type", ""))
+        enriched.append({"name": c["name"], "comment": c.get("comment", ""),
+                         "type": c.get("type", ""), "role": role})
+        if sample_it:
+            to_sample.append(c["name"])
+    if to_sample:
+        async with engine.connect() as conn:
+            for col in to_sample:
+                try:
+                    r = await conn.execute(text(
+                        f"SELECT DISTINCT {preparer.quote_identifier(col)} FROM {tq} "
+                        f"WHERE {preparer.quote_identifier(col)} IS NOT NULL "
+                        f"ORDER BY {preparer.quote_identifier(col)} LIMIT {_SAMPLE_LIMIT}"))
+                    # 过滤 None/空串（NULL 已排除，空串兜底），转 str 统一类型
+                    vals = [str(v) for v in (row[0] for row in r.fetchall()) if v not in (None, "")]
+
+                except Exception:
+                    vals = None     # 抽样失败就略过，不阻塞元数据返回
+                if vals is not None:
+                    next(e for e in enriched if e["name"] == col)["samples"] = vals
+    return enriched
+
+
 async def query_metadata(args: dict, ctx: LoopContext,
                          cancel_token: CancelToken) -> ToolResult:
     """工具 handler。args 可带 datasource_id；缺省取第一个数据源（单源场景；多源选择留后续）。
@@ -93,6 +174,8 @@ QUERY_METADATA = ToolDefinition(
     name="query_metadata",
     description=("查看当前数据源里可以查询的表清单（表名/中文注释/字段）、已配表间关联。"
                  "先调它了解有哪些表，再决定查哪张表。无需参数。"
+                 "每列带 role(metric指标/dimension维度)；维度短分类列已附 samples 真实取值，"
+                 "直接用、别再 SELECT DISTINCT 试探。"
                  "只服务于 execute_sql 查业务数据前的结构准备；查知识库文档不需要调本工具。"),
     parameters={"type": "object", "properties": {}, "required": []},
     handler=query_metadata,

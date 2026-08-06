@@ -4,6 +4,8 @@
 ponytail: 鉴权层 P5 管理后台再补。"""
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -12,6 +14,14 @@ from src.storage.models import LlmConfigRow
 from src.storage.pg_client import AsyncSessionFactory
 
 PURPOSES = ("analysis", "attribution")
+
+# 向量模型过滤：本系统不做 embedding（知识库走外部 RAGFlow，自带向量化），
+# embed 类模型不能做对话/归因，发现时直接过滤掉，不返回给前端。
+_EMBED_RE = re.compile(r"embed", re.I)
+
+
+def _is_embed_model(model_id: str) -> bool:
+    return bool(_EMBED_RE.search(model_id or ""))
 
 
 class LlmConfigPayload(BaseModel):
@@ -74,19 +84,22 @@ def build_admin_llm_router(llm_service=None) -> APIRouter:
 
     @router.put("/api/admin/llm-config/{cfg_id}")
     async def upsert_config(cfg_id: str, payload: LlmConfigPayload) -> dict:
-        """新建/更新（upsert by id）。启用互斥：启用本模型时，把它用途从其他 enabled 模型的 purposes 移除（模型不删，只移除冲突用途）。
-        purposes 允许空（空=暂不参与任何场景，配置保留，如编辑网关地址时）——前端 toggle 仍拦「至少留一个」防误清空。"""
+        """新建/更新（upsert by id）。用途互斥：本模型用途变更时，把它的新用途从其他模型的 purposes 移除（模型不删，只移除冲突用途）。
+        purposes 允许空（空=暂不参与任何场景，配置保留，如编辑网关地址时）——前端 toggle 仍拦「至少留一个」防误清空。
+        只在用途真变了才跑互斥：编辑网关地址/key/协议（用途未变）不动其他模型，否则会误清别的网关模型的用途。"""
         if not all(p in PURPOSES for p in payload.purposes):
             raise HTTPException(400, f"purposes 必须是 {PURPOSES} 的子集")
         async with AsyncSessionFactory() as s:
-            # 互斥（一 purpose 一模型）：把本模型每个用途从其他模型的 purposes 移除（配置即启用，不看 enabled）
-            others = (await s.execute(select(LlmConfigRow).where(
-                LlmConfigRow.id != cfg_id))).scalars().all()
-            for o in others:
-                overlap = set(o.purposes or []) & set(payload.purposes)
-                if overlap:
-                    o.purposes = [p for p in (o.purposes or []) if p not in overlap]
             row = await s.get(LlmConfigRow, cfg_id)
+            purposes_changed = row is None or set(row.purposes or []) != set(payload.purposes)
+            if purposes_changed:
+                # 用途互斥（一 purpose 一模型）：把本模型新用途从其他模型的 purposes 移除
+                others = (await s.execute(select(LlmConfigRow).where(
+                    LlmConfigRow.id != cfg_id))).scalars().all()
+                for o in others:
+                    overlap = set(o.purposes or []) & set(payload.purposes)
+                    if overlap:
+                        o.purposes = [p for p in (o.purposes or []) if p not in overlap]
             if row is None:
                 row = LlmConfigRow(id=cfg_id, version=0)
                 _apply_payload(row, payload)
@@ -124,7 +137,9 @@ def build_admin_llm_router(llm_service=None) -> APIRouter:
         try:
             client = AsyncOpenAI(api_key=req.api_key, base_url=base, timeout=15)
             resp = await client.models.list()
-            return {"models": sorted({m.id for m in resp.data})}
+            # 过滤向量模型：本系统不做 embedding（知识库走外部 RAGFlow），embed 模型不能做对话/归因
+            models = sorted({m.id for m in resp.data if not _is_embed_model(m.id)})
+            return {"models": models}
         except Exception as e:
             raise HTTPException(400, f"拉模型列表失败: {e}")
 

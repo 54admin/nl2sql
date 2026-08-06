@@ -151,7 +151,6 @@
   .add-btn { float: right; padding: 4px 12px; background: #1976d2; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
   .llm-tag { font-size: 10px; padding: 2px 8px; border-radius: 10px; color: #fff; }
   .llm-tag-analysis { background: #1976d2; }
-  .llm-tag-embedding { background: #7b1fa2; }
   .llm-tag-attribution { background: #e65100; }
   .llm-edit-btn { background: #fafafa; border: 1px solid #ccc; border-radius: 3px; cursor: pointer; font-size: 11px; padding: 2px 8px; }
   #btn-dashboard { padding: 4px 10px; font-size: 12px; border: 1px solid #1976d2; background: #fff; color: #1976d2; border-radius: 4px; cursor: pointer; white-space: nowrap; }
@@ -1280,14 +1279,14 @@ async function saveLimits() {
 }
 
 // 模型配置（model 级：一行=一个模型，purposes 多选；网关分组展示；发现+导入）
-const LLM_PURPOSES = [{p:"analysis",label:"对话问数"},{p:"embedding",label:"向量"},{p:"attribution",label:"归因"}];
+const LLM_PURPOSES = [{p:"analysis",label:"对话问数"},{p:"attribution",label:"归因"}];
 function _llmId(base, model) {
   const host = (base.match(/:\/\/([^/]+)/) || [,"gw"])[1].replace(/[^a-zA-Z0-9]/g,"_");
   return (host + "__" + model).replace(/[^a-zA-Z0-9_]/g,"_");
 }
-// 用途程序识别：模型名含 embed → 向量；其他 → 对话+归因
+// 用途：所有模型按对话问数+归因导入（本系统不做向量，embed 模型发现时已过滤）
 function _autoPurposes(model) {
-  return /embed/i.test(model) ? ["embedding"] : ["analysis", "attribution"];
+  return ["analysis", "attribution"];
 }
 async function _putLlm(id, base, key, model, purposes, enabled, extra) {
   extra = extra || {};
@@ -1334,11 +1333,9 @@ function renderLlmGateways() {
   }).join("");
 }
 function _renderLlmModel(c) {
-  const isEmbed = /embed/i.test(c.model);
   const checks = LLM_PURPOSES.map(({p,label}) => {
     const has = (c.purposes || []).includes(p);
-    const dis = isEmbed ? (p !== "embedding") : (p === "embedding");   // embed 模型只能向量；非 embed 不能向量
-    return `<label style="font-size:12px;margin-right:10px;color:${dis?'#ccc':(has?'#2e7d32':'#888')}"><input type="checkbox" ${has?"checked":""} ${dis?"disabled":""} onchange="toggleModelPurpose('${escapeHtml(c.id)}','${p}')"> ${label}</label>`;
+    return `<label style="font-size:12px;margin-right:10px;color:${has?'#2e7d32':'#888'}"><input type="checkbox" ${has?"checked":""} onchange="toggleModelPurpose('${escapeHtml(c.id)}','${p}')"> ${label}</label>`;
   }).join("");
   return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f0f0f0;flex-wrap:wrap">
     <b style="min-width:170px;font-family:Menlo,Monaco,monospace;font-size:13px">${escapeHtml(c.model)}</b>
@@ -1477,7 +1474,7 @@ async function _saveNewGwModels() {
 async function openLlmModelModal(gi) {  // 已有网关加模型
   const g = window._llmGws[gi]; if (!g) return;
   openAdminModal(`加模型（${g.base_url}）`,
-    `<input id="lm-model" placeholder="模型名（含 embed→向量，其他→对话+归因）">
+    `<input id="lm-model" placeholder="模型名">
      <p style="font-size:11px;color:#888">网关：${escapeHtml(g.base_url)}（key ${escapeHtml(g.api_key?g.api_key.slice(0,5)+"…":"无")}）· 用途按名自动识别</p>`,
     () => saveLlmModel(gi));
 }
@@ -1509,7 +1506,7 @@ async function discoverModels(gi) {
   if (!models.length) { body.innerHTML = '<p class="placeholder">网关未返回模型</p>'; return; }
   body.innerHTML = `<div style="display:flex;gap:6px;margin-bottom:8px"><button class="llm-edit-btn" onclick="document.querySelectorAll('#admin-modal-body .dc').forEach(c=>c.checked=true)">全选</button><button class="llm-edit-btn" onclick="document.querySelectorAll('#admin-modal-body .dc').forEach(c=>c.checked=false)">清空</button></div>
     <div style="max-height:45vh;overflow:auto">${models.map(m=>`<label style="display:block;padding:4px 0;font-size:13px"><input type="checkbox" class="dc" value="${escapeHtml(m)}" checked> ${escapeHtml(m)}</label>`).join("")}</div>
-    <p style="font-size:11px;color:#888;margin-top:8px">用途自动识别：含 embed → 向量；其他 → 对话+归因。导入即启用（同用途互斥，重复的被顶掉）</p>`;
+    <p style="font-size:11px;color:#888;margin-top:8px">导入即启用（同用途互斥，重复的被顶掉）</p>`;
   const saveBtn = document.getElementById("admin-modal-save");
   saveBtn.style.display = "";
   saveBtn.onclick = async () => {
@@ -1518,7 +1515,7 @@ async function discoverModels(gi) {
     const existing = new Set(g.models.map(m => m.model));
     const fresh = picked.filter(m => !existing.has(m));
     try {
-      // 用途程序识别（embed→向量，其他→对话+归因），导入即启用（同用途互斥，重复的会被新导入的顶掉）
+      // 导入即启用（同用途互斥，重复的会被新导入的顶掉）
       for (const m of fresh) {
         await _putLlm(_llmId(g.base_url, m), g.base_url, g.api_key, m, _autoPurposes(m), true, {});
       }

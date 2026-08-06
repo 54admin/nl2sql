@@ -26,9 +26,12 @@ class _Resp:
 
 @dataclass
 class _Chunk:
-    """流式分片：content 文本片段 + tool_call 增量（openai delta 原生对象列表）。"""
+    """流式分片：content 文本片段 + tool_call 增量（openai delta 原生对象列表）。
+    reasoning：模型思考链（reasoning_content/thinking），工具决策轮 content 为空时它非空——
+    原来被丢弃→工具阶段全程静默；现在透传给 agent_loop 发 reasoning_delta 打字机。"""
     content: str = ""
     tool_call_delta: list = field(default_factory=list)
+    reasoning: str = ""
 
 
 class LLMService:
@@ -181,8 +184,12 @@ class LLMService:
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
+            # reasoning_content：思考链（deepseek-r1/glm/qwen 等推理模型才有）。
+            # 工具决策轮 content 为空但 reasoning 非空——捕获后下游打字机，破除工具阶段静默。
+            reasoning = getattr(delta, "reasoning_content", None) or ""
             yield _Chunk(content=delta.content or "",
-                         tool_call_delta=list(delta.tool_calls or []))
+                         tool_call_delta=list(delta.tool_calls or []),
+                         reasoning=reasoning)
 
     async def _stream_anthropic(self, cfg: LLMConfig, messages: list[dict],
                                 tools: list | None) -> AsyncIterator[_Chunk]:
@@ -233,6 +240,9 @@ class LLMService:
                     dtype = getattr(delta, "type", "")
                     if dtype == "text_delta":
                         yield _Chunk(content=getattr(delta, "text", "") or "")
+                    elif dtype == "thinking_delta":
+                        # anthropic 扩展思考：thinking 块的增量，映射到 reasoning（同 openai reasoning_content）
+                        yield _Chunk(reasoning=getattr(delta, "thinking", "") or "")
                     elif dtype == "input_json_delta":
                         m = block_id_map.get(idx)
                         if m:

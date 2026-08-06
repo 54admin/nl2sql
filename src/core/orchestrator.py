@@ -26,7 +26,7 @@ class Orchestrator:
         self._prompts = prompt_store
         self._audit = audit
         # 会话忙时闸门：正在跑的 session_id 集合。同 session 已有 run 在跑→直接拒，
-        # 不让两个 run 并发（审计 2026-08-05 实证：重复投递致 run 重叠、单例审计互相冲掉）。
+        # 防两个 run 重叠（重叠会冲掉审计、白费算力）。真正的并发防护在这，不靠消息级去重。
         # 不靠 DB status（RUNNING 只 resume 路径写，普通问数不置位，不可靠）——内存显式管。
         self._running: set[str] = set()
 
@@ -35,8 +35,7 @@ class Orchestrator:
                              cancel_token: CancelToken | None = None
                              ) -> AsyncIterator[SSEEvent]:
         # 会话忙时闸门：同一 session 已有 run 在跑 → 立即拒绝，绝不并发跑第二个。
-        # 根治"没问就再次回答/停不下来"：飞书 ACK 超时补投、用户手抖连发，都会再起一个 run；
-        # 两个 run 重叠还会让单例审计 begin() 互冲（审计丢失）。这里一闸挡死。
+        # 防两个 run 重叠（重叠会让审计 begin() 互冲丢记录、并白费算力）。
         if session_id in self._running:
             log.warning("会话忙，拒绝并发 run sid=%s trace=%s", session_id, trace_id)
             yield SSEEvent(SSEEventType.ERROR.value,

@@ -17,6 +17,7 @@ class SSEEventType(str, Enum):
     TODO_UPDATE = "todo_update"
     INTERMEDIATE = "intermediate"
     ANSWER_DELTA = "answer_delta"
+    REASONING_DELTA = "reasoning_delta"   # 推理模型思考链（飞书流式打字进专属"思考"元素）
     DONE = "done"
     ERROR = "error"
     # 技术事件

@@ -59,7 +59,7 @@ class FeishuConfig:
     app_id: str = ""
     app_secret: str = ""
     whitelist: list = field(default_factory=list)
-    card_throttle_ms: int = 300   # 卡片流式节流间隔（全量重写，远低于飞书 ~10QPS 限流）
+    card_throttle_ms: int = 120   # answer acontent 节流间隔（流式不计卡片 QPS，越小越顺；120ms 平衡）
 
 
 @dataclass
