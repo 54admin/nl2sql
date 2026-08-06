@@ -68,12 +68,13 @@ python3 -m uvicorn src.main:app --reload --port 8000
 
 ```
 src/
-  core/          编排：orchestrator / agent_loop / session / audit / prompt_store(skill 装配)
-  llm/           LLM 服务（双协议 openai/anthropic + 限流 + 重试）
-  tools/         Agent 工具 + registry（schema 重建 / 参数强转 / 熔断）
-  storage/       平台库 ORM（models.py 是表结构单一事实源）+ pg/redis 客户端
-  datasource/    业务数据源管理 + 元数据反向同步
-  knowledge/     知识库解析 + 向量存储
+  core/          编排内核：orchestrator / agent_loop / session / audit / prompt_store / types
+  llm/           LLM 服务（双协议 openai/anthropic + 限流 + 重试 + 思考链透传）
+  tools/         Agent 工具 + registry（schema 重建 / 参数强转 / 列校验 / 可恢复重试）
+  storage/       平台库 ORM（models.py=表结构单一事实源）+ pg/redis 客户端 + 结果旁路
+  datasource/    业务数据源管理 + 元数据反向同步（只同步表名，列 live 取）
+  ragflow/       RAGFlow 外部知识库 HTTP 客户端（检索/文档管理）
+  memory/        会话管理（Redis 热态 + PG 持久）
   web/routes/    对话侧（ask/session/result）+ admin_* CRUD
 config/          application.yml + profile（application-dev.yml 本地配置，不入库）
 static/          前端单页（index.html）

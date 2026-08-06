@@ -117,10 +117,11 @@ class DataSourceManager:
 
     async def delete_datasource(self, ds_id: int) -> bool:
         # 级联删关联元数据：外键无 ON DELETE CASCADE，应用层显式删干净，
-        # 否则删源后留 metadata_tables/columns/relations/sql_templates 孤儿。
+        # 否则删源后留 metadata_tables/columns/relations 孤儿。
+        # 注意：sql_templates 是全局表（无 datasource_id），删源时不应级联删模板。
         from sqlalchemy import delete as sa_delete, select
         from src.storage.models import (MetadataColumn, MetadataTable,
-                                        TableRelation, SqlTemplate)
+                                        TableRelation)
         async with AsyncSessionFactory() as s:
             row = await s.get(Datasource, ds_id)
             if row is None:
@@ -135,8 +136,6 @@ class DataSourceManager:
                 MetadataTable.datasource_id == ds_id))
             await s.execute(sa_delete(TableRelation).where(
                 TableRelation.datasource_id == ds_id))
-            await s.execute(sa_delete(SqlTemplate).where(
-                SqlTemplate.datasource_id == ds_id))
             await s.delete(row)
             await s.commit()
         log.info("数据源删除 id=%s（级联清元数据/关系/模板）", ds_id)
