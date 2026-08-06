@@ -75,7 +75,12 @@ class CardStream:
         build_final_card 再把全部步骤(+思考)折进一个 collapsible_panel。"""
         line = f"`{time.strftime('%H:%M:%S')}` " + line   # 步骤时间戳，便于复盘每步几点执行
         self._tool_lines.append((token, line))
-        title = re.sub(r"[`*#]", "", line.split("\n")[0]).strip()[:46] or "操作步骤"
+        # 流式清单标题：去 markdown 符号后取首行。飞书卡片一行能容纳远超 46 字，
+        # 早先 [:46] 会把表名/关键信息砍在中段（如 vw_ods_ranking_with_…）。放宽到 120 字，
+        # 绝大多数步骤一行显示完整；超长的尾部省略，不硬砍中段。
+        first = re.sub(r"[`*#]", "", line.split("\n")[0]).strip()
+        title = (first[:117] + "…") if len(first) > 120 else first
+        title = title or "操作步骤"
         self._proc_titles.append(title)
         await self._stream_text(card.PROC_EID, card.progress_markdown(self._proc_titles))
         log.info("飞书 tool：%s%s", line, f" → {rows} 行" if rows is not None else "")
