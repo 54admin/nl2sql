@@ -151,9 +151,21 @@ class RagflowClient:
         return body
 
     # ---------- 知识库(dataset)管理 ----------
+    async def _require_base(self) -> RagflowConfig:
+        """轻量校验：仅需启用 + 地址/密钥（不要求 dataset_ids）。
+        list_datasets 等管理操作用——列出所有库给 admin 勾选，此时 dataset_ids
+        尚未配置（勾选结果才有值），不能用 _require（它会因 dataset_ids 空而拒绝，
+        形成「要勾选必须先勾选」的鸡生蛋死锁）。
+        """
+        cfg = await self.load_config()
+        if cfg is None or not cfg.enabled or not cfg.base_url or not cfg.api_key:
+            raise RagflowError("RAGFlow 未配置或未启用：请先在管理后台填写地址/API Key。")
+        return cfg
+
     async def list_datasets(self) -> list[dict]:
-        """列出 RAGFlow 所有知识库（含解析状态计数）。admin 后台勾选用。"""
-        cfg = await self._require()
+        """列出 RAGFlow 所有知识库（含解析状态计数）。admin 后台勾选用。
+        只需地址/密钥即可列库（dataset_ids 尚未勾选时也要能列出供勾选）。"""
+        cfg = await self._require_base()
         body = await self._request(
             cfg, "GET", "/datasets",
             params={"page": 1, "page_size": 200, "include_parsing_status": "true"})
