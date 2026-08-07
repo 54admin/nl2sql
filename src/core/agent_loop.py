@@ -10,6 +10,7 @@ import asyncio
 import json
 from typing import AsyncIterator
 
+from src.core.intent import is_doc_question
 from src.core.session import SessionState, SessionStatus
 from src.core.types import CancelToken, LoopContext, SSEEvent, ToolResult
 from src.llm.service import LLMService
@@ -176,6 +177,8 @@ class AgentLoop:
         meta_calls = 0
         sql_calls = 0
         sql_fail_streak = 0
+        kb_searched = False   # 本轮是否已调过 knowledge_search（文档类护栏用）
+        _doc_intent = is_doc_question(user_msg)  # 用户问题是否文档类（只判一次）
         turn = 0
         try:
             for turn in range(self._limits["max_turns"]):
@@ -279,6 +282,22 @@ class AgentLoop:
                             self._audit_event("tool_result", {"name": name, "summary": tip}, trace_id, turn)
                             continue
                     elif name == "execute_sql":
+                        # 文档类护栏（代码层硬保障，不赌 LLM 判断）：
+                        # 用户问的是文档/制度/资料/移交缺陷等（is_doc_question），但 LLM 却去查数据表，
+                        # 且本轮还没调过 knowledge_search → 拦下 execute_sql，强制先查知识库。
+                        # 审计实证：trace 2ef130f57334，"禾枫移交生产的缺陷"被当项目名模糊匹配 11 次。
+                        # 拦一次即可（LLM 看到提示会改调 knowledge_search）；若 LLM 仍执意查数据，
+                        # 下面的 max_sql 护栏兜底，不会无限跑。
+                        if _doc_intent and not kb_searched:
+                            tip = ("这是文档/资料类问题，不该查业务数据表。"
+                                   "请先调 knowledge_search 查相关文档（如移交资料/验收文档/缺陷清单），"
+                                   "基于文档片段回答；不要用 execute_sql 模糊匹配实体名。")
+                            msgs.append({"role": "tool", "tool_call_id": cid, "content": tip})
+                            yield SSEEvent("tool_result",
+                                           {"name": name, "summary": tip, "converged": True}, trace_id)
+                            self._audit_event("tool_result", {"name": name, "summary": tip,
+                                                              "converged": True, "guard": "doc_intent"}, trace_id, turn)
+                            continue
                         sql_limit = self._limits["max_sql"]
                         if sql_calls >= sql_limit:
                             tip = f"已达查询上限（{sql_limit} 次），停止继续查，基于已有结果直接回答用户。"
@@ -300,6 +319,9 @@ class AgentLoop:
                             continue
 
                     result = await self._registry.execute(name, args, ctx, cancel_token)
+                    # 文档类护栏：标记本轮已查过知识库（解上面的 execute_sql 拦截）
+                    if name == "knowledge_search":
+                        kb_searched = True
                     # 记录本次 SQL 的 (表,WHERE谓词,列) 供后续冗余检测（只记成功的）
                     if name == "execute_sql" and not _sql_failed(result.summary):
                         _t, _p, _c = _sql_extract(sql_text)
