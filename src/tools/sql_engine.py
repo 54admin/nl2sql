@@ -211,25 +211,17 @@ async def execute_sql(args: dict, ctx: LoopContext,
 EXECUTE_SQL = ToolDefinition(
     name="execute_sql",
     description=(
-        "在业务库执行只读 SQL 查询，返回结果摘要（行数/列名/前 5 行预览）+ result_id。"
-        "写 SQL 必须依据对话里已有的 query_metadata 结果（表名/字段类型/格式/表级规则）；"
-        "上下文里没有该表元数据时再 query_metadata 查一次，已有就不必重复查。"
-        "禁止凭印象猜字段格式——YYYY-MM 年月字符串字段用 = / IN / 范围，不得用 LIKE。"
-        "只查业务数据（数值/统计/对比/明细/趋势）；查文档/政策/口径走 knowledge_search。"
+        "【查业务数据表的数值/统计/排名——不是查文档】用户要的是「具体数值」时用本工具："
+        "多少/完成率/排名/偏差/得分/环比/同比/明细/汇总/趋势。"
+        "只读 SELECT；依据 query_metadata 返回的真实表名/字段名写，不猜。"
         "\n"
-        "【宽表多指标·一次查完，禁止逐列反复 SELECT】当问题涉及多个指标里找最值/排名/对比/"
-        "表现最差最好（如「各省分公司哪个指标完成率最低」「哪个指标得分最差」），表是宽表"
-        "（每个指标一列，如 swdl_score/xdl_score/issu_score…），必须用 CROSS JOIN 指标字典 + CASE "
-        "把宽表列转行(unpivot)，一条 SQL 拉成一行一指标再排序取最值。示例："
-        "SELECT t.主体, ind.指标, CASE ind.指标 WHEN 'A' THEN t.A列 WHEN 'B' THEN t.B列 END AS 值 "
-        "FROM 宽表 t CROSS JOIN (VALUES ('A'),('B'),…) AS ind(指标) WHERE … ORDER BY 值。"
-        "先调 get_sql_template 取「宽表列转行(unpivot)」完整样板按 usage 改。"
-        "严禁对每个指标分别 SELECT 一遍——那会跑十几条查询、极慢且口径不一致。"
+        "不适用：文档/制度/口径/移交资料/缺陷清单/会议纪要 等走 knowledge_search，"
+        "别拿本工具对实体名做模糊匹配去找『某项目/某单位』。"
         "\n"
-        "【禁止重查已有数据】写新 SQL 前先看上方对话：本对话已 execute_sql 查回的列/行（preview + "
-        "result_id 对应全量行）就是事实来源。归因/解释阶段需要实际值/计划值/完成率等列时，"
-        "优先复用已查回的结果（上面没有的列才需要新查）；已在上方查回整行的，禁止再 SELECT 同一行同一批列重查一遍。"
-        "一次查询就把后续归因要用的列（实际/计划/完成率/得分）一起带出来，别查完得分再补查明细。"
+        "宽表找最值/排名（各省分公司哪个指标完成率最低）：用 CROSS JOIN 指标字典 + CASE 列转行(unpivot)"
+        "一条 SQL 拉成一行一指标再排序，先 get_sql_template 取样板——禁止逐指标分别 SELECT 十几次。"
+        "归因要用的列（实际/计划/完成率/得分）一次查全，已查回的列不重查。"
+        "YYYY-MM 年月字符串字段用 = / IN / 范围，不用 LIKE。"
     ),
     parameters={"type": "object",
                 "properties": {"sql": {"type": "string", "description": "要执行的只读 SQL"},
