@@ -168,7 +168,7 @@ class RagflowClient:
         cfg = await self._require_base()
         body = await self._request(
             cfg, "GET", "/datasets",
-            params={"page": 1, "page_size": 200, "include_parsing_status": "true"})
+            params={"page": 1, "page_size": 100, "include_parsing_status": "true"})
         return body.get("data", []) or []
 
     async def create_dataset(self, name: str, description: str = "",
@@ -209,7 +209,7 @@ class RagflowClient:
                             json={"document_ids": document_ids})
 
     async def list_documents(self, dataset_id: str,
-                             page: int = 1, page_size: int = 200) -> list[dict]:
+                             page: int = 1, page_size: int = 100) -> list[dict]:
         """列出某知识库的文档（含解析状态 run/chunk_count）。"""
         cfg = await self._require()
         body = await self._request(
