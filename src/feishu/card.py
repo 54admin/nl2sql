@@ -41,27 +41,27 @@ def _panel(header: str, elements: list[dict]) -> dict:
 
 
 def progress_markdown(titles: list[str]) -> str:
-    """流式态『操作过程』清单内容：已发生的步骤逐条 ✓，单调增长。
+    """流式态『思考过程』清单内容：已发生的步骤逐条 ✓，单调增长。
     每个已展示步骤都是『已发生』（工具 call 已发出 / result 已返回）→ 全部 ✓；
     『正在跑』的（LLM 思考/工具执行中）还没产生事件，不在清单里——
     故无需 ⏳ 猜测，清单即『已完成』流水，干净准确。done 后再折进 collapsible_panel。"""
     if not titles:
-        return "🔧 操作过程…"
-    return "🔧 操作过程\n" + "\n".join(f"✓ {t}" for t in titles)
+        return "🔧 思考过程…"
+    return "🔧 思考过程\n" + "\n".join(f"✓ {t}" for t in titles)
 
 
 def _proc_panel(proc_items: list[tuple[str, str]], reasoning: str = "") -> dict:
-    """done 后汇总折叠面板：所有工具步骤(+思考)折进一个默认收起面板，答案在面板外可见。"""
+    """done 后汇总折叠面板：所有工具步骤(+思考)折进一个默认收起面板（标题=思考过程），答案在面板外可见。"""
     inner: list[dict] = []
     if reasoning and reasoning.strip():
         inner.append({"tag": "markdown", "content": "**💭 思考过程**\n\n" + reasoning.strip()})
     for _token, line in proc_items:
         inner.append({"tag": "markdown", "content": line})
-    return _panel(f"🔧 操作过程（{len(proc_items)} 步）", inner)
+    return _panel(f"🔧 思考过程（{len(proc_items)} 步）", inner)
 
 
 def build_streaming_card() -> dict:
-    """创建卡片实体：streaming_mode=true，body = [操作过程清单 PROC_EID, 答案 ANSWER_EID]。
+    """创建卡片实体：streaming_mode=true，body = [思考过程清单 PROC_EID, 答案 ANSWER_EID]。
     过程清单全程就地 acontent 追加 ✓（不再每步 insert 折叠框）；答案 acontent 打字机。
     update_multi=true 是 card_element 操作的硬性要求。"""
     return {
@@ -77,7 +77,7 @@ def build_streaming_card() -> dict:
             "summary": {"content": "生成中..."},
         },
         "body": {"elements": [
-            {"tag": "markdown", "content": "🔧 操作过程…", "element_id": PROC_EID},
+            {"tag": "markdown", "content": "🔧 思考过程…", "element_id": PROC_EID},
             {"tag": "markdown", "content": "", "element_id": ANSWER_EID},
         ]},
     }
@@ -85,7 +85,7 @@ def build_streaming_card() -> dict:
 
 def build_final_card(proc_items: list[tuple[str, str]], answer: str,
                      reasoning: str = "") -> dict:
-    """done 后全量替换兜底：操作过程(+思考)折进 collapsible_panel（默认收起）+ hr + 答案。
+    """done 后全量替换兜底：思考过程(+推理)折进 collapsible_panel（默认收起）+ hr + 答案。
     答案始终在面板下方可见；过程多(11步)也只占一个折叠框。summary 用答案摘要。
     proc_items: [(icon_token, line), ...]；reasoning 非空时一并折进面板顶部。"""
     elements: list[dict] = []
@@ -129,12 +129,12 @@ if __name__ == "__main__":
     # 流式卡片：只有一个 answer 元素（无折叠面板——思考不再流式展示）
     c = build_streaming_card()
     assert c["schema"] == "2.0" and c["update_multi"] is True, "update_multi 必须为 true"
-    assert len(c["body"]["elements"]) == 2, "流式卡片=操作过程清单+answer 两个元素"
-    assert c["body"]["elements"][0]["element_id"] == PROC_EID, "首元素是操作过程清单"
+    assert len(c["body"]["elements"]) == 2, "流式卡片=思考过程清单+answer 两个元素"
+    assert c["body"]["elements"][0]["element_id"] == PROC_EID, "首元素是思考过程清单"
     assert c["body"]["elements"][1]["element_id"] == ANSWER_EID, "末元素是 answer"
     assert c["config"]["streaming_mode"] is True, "流式态"
     # progress_markdown：空=占位；有步骤=逐条 ✓
-    assert progress_markdown([]) == "🔧 操作过程…", "空清单占位"
+    assert progress_markdown([]) == "🔧 思考过程…", "空清单占位"
     assert progress_markdown(["查询元数据", "执行查询"]).count("✓") == 2, "每步一个 ✓"
     # 最终卡片：有步骤+思考 → 折叠面板放全部步骤，答案在面板下方
     steps = [("code_outlined", "`14:01:02` **执行查询**\n\n```sql\nSELECT 1\n```"),

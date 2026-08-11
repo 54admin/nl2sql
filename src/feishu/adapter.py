@@ -36,7 +36,7 @@ _SESSION_TTL = 3600
 
 
 class CardStream:
-    """一张流式卡片：『操作过程清单』+『答案』两个固定顶级元素。
+    """一张流式卡片：『思考过程清单』+『答案』两个固定顶级元素。
     - 过程清单(PROC_EID)：on_tool 每步往里 acontent 追加一条 ✓（全程只更新这一个元素，
       不再每步 insert 折叠框——避免过程期一堆框堆叠）。飞书顶级 markdown 的 acontent 可靠。
     - 答案(ANSWER_EID)：acontent 全量打字机。
@@ -53,7 +53,7 @@ class CardStream:
         self._tool_lines: list[tuple[str, str]] = []   # [(icon_token, line)] 仅日志/诊断
         self._last_call_sig: str | None = None          # 重复调用去重（LLM 试错重发同 SQL）
         self._skip_next_result = False                   # 上一次 call 因重复跳过 → 对应 result 也跳过
-        self._proc_titles: list[str] = []   # 流式态操作过程清单（短标题），实时 acontent 到 PROC_EID
+        self._proc_titles: list[str] = []   # 流式态思考过程清单（短标题），实时 acontent 到 PROC_EID
         self._seq = 0               # 卡片操作 sequence（严格递增，避开 300317）
         self._last_flush = 0.0
         self._flush_task: asyncio.Task | None = None
@@ -67,10 +67,10 @@ class CardStream:
             return
         self._reasoning += text
         # 不触发 flush：流式打字进折叠面板在真实链路不可靠（占位符"(思考中…)"不更新），
-        # 思考留到 done 全量重建时折进"操作过程"面板
+        # 思考留到 done 全量重建时折进"思考过程"面板
 
     async def on_tool(self, token: str, line: str, *, rows: int | None = None) -> None:
-        """一步过程：往【唯一的操作过程清单】acontent 追加一条 ✓。
+        """一步过程：往【唯一的思考过程清单】acontent 追加一条 ✓。
         全程只更新一个元素（不再每步 insert 一个折叠框），过程像流水往上长；done 后
         build_final_card 再把全部步骤(+思考)折进一个 collapsible_panel。"""
         line = f"`{time.strftime('%H:%M:%S')}` " + line   # 步骤时间戳，便于复盘每步几点执行
