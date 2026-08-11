@@ -48,6 +48,7 @@ class ToolResult:
     finished: bool = False
     suspended: bool = False
     options: list | None = None   # ask_user 候选（[{label, description}]），前端渲染成按钮让用户选
+    references: list = field(default_factory=list)   # 知识库引用来源：[{document, similarity, document_id, dataset_id, url}]，done 时聚合成 citations 供两端渲染
 
 
 @dataclass

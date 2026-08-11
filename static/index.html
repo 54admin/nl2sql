@@ -257,6 +257,12 @@
   .msg-table th { background: #4a5568; color: #fff; padding: 6px 10px; text-align: left; position: sticky; top: 0; }
   .msg-table td { padding: 5px 10px; border-bottom: 1px solid #eee; }
   .msg-table tbody tr:nth-child(even) { background: #fafafa; }
+  /* 参考来源区（知识库命中文档，可跳 RAGFlow）*/
+  .citations-wrap { margin-top: 8px; }
+  .citations-title { font-size: 12px; color: #888; margin-bottom: 4px; }
+  .citation-link { display: block; color: #1565c0; font-size: 13px; padding: 2px 0; text-decoration: none; word-break: break-all; }
+  .citation-link:hover { text-decoration: underline; }
+  .citation-link.nolink { color: #888; pointer-events: none; }
   .sql-wrap { margin-top: 6px; }
   .sql-code { background: #2d2d2d; color: #e6e6e6; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; }
   .sql-code { background: #1e1e1e; color: #d4d4d4; padding: 10px 12px; border-radius: 6px; overflow-x: auto; font-family: Menlo, Monaco, monospace; font-size: 12px; line-height: 1.5; margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
@@ -621,6 +627,7 @@ async function ask(text) {
   bubble.append(thoughtEl, answerEl, tableEl);
   // 收集本轮 execute_sql 的 SQL（可能多段），done 后在答案下挂折叠按钮默认隐藏。
   const sqls = [];
+  let finalCitations = [];   // done 带的知识库引用，done 后在答案下渲染参考来源区
   function step() {
     if (stopped) return;
     if (!queue) {                       // 队列空：停 tick；流已结束则用 finalText 全文渲染 md
@@ -696,7 +703,7 @@ async function ask(text) {
           const rid = evt.data.result_id;
           if (rid) renderResultTable(tableEl, rid);
         }
-        else if (evt.type === "done") finish(evt.data.answer || "");
+        else if (evt.type === "done") { finalCitations = evt.data.citations || []; finish(evt.data.answer || ""); }
         else if (evt.type === "cancelled") {
           stopTyper();
           if (!finalText) bubble.textContent = "（已停止）";
@@ -729,6 +736,7 @@ async function ask(text) {
     }
     if (!got) { stopTyper(); bubble.textContent = "（无回复）"; }
     // done 后：有 SQL 就在答案下挂折叠按钮（默认隐藏，点开看 SQL）
+    if (finalCitations.length) appendCitations(bubble, finalCitations);
     if (sqls.length) appendSqlToggle(bubble, sqls);
   } catch (e) {
     stopTyper();
@@ -788,6 +796,27 @@ function appendSqlToggle(bubble, sqls) {
     btn.textContent = show ? `收起 SQL（${sqls.length}）` : `查看 SQL（${sqls.length}）`;
   };
   wrap.append(btn, pre);
+  bubble.appendChild(wrap);
+}
+
+// 答案下挂「参考来源」区：命中的知识库文档，可点跳 RAGFlow 原文（target=_blank）。无 url 降级纯文本。
+function appendCitations(bubble, citations) {
+  const wrap = document.createElement("div");
+  wrap.className = "citations-wrap";
+  const title = document.createElement("div");
+  title.className = "citations-title";
+  title.textContent = "📎 参考来源";
+  wrap.appendChild(title);
+  citations.forEach(c => {
+    const a = document.createElement("a");
+    a.className = "citation-link";
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    const sim = (c.similarity !== undefined && c.similarity !== null) ? `（相似度 ${c.similarity}）` : "";
+    a.textContent = (c.document || "未知文档") + sim;
+    if (c.url) { a.href = c.url; } else { a.className = "citation-link nolink"; }
+    wrap.appendChild(a);
+  });
   bubble.appendChild(wrap);
 }
 

@@ -99,6 +99,19 @@ def _normalize_args(raw) -> dict:
     return {}
 
 
+def _dedupe_citations(citations: list[dict]) -> list[dict]:
+    """按 document 去重（一次 run 可能多次 knowledge_search 命中同一文档），保留相似度最高的一条，降序。"""
+    best: dict[str, dict] = {}
+    for c in citations:
+        doc = c.get("document")
+        if not doc:
+            continue
+        prev = best.get(doc)
+        if prev is None or c.get("similarity", 0.0) > prev.get("similarity", 0.0):
+            best[doc] = c
+    return sorted(best.values(), key=lambda x: x.get("similarity", 0.0), reverse=True)
+
+
 def _to_openai_tool_calls(tool_calls: list[dict]) -> list[dict]:
     """把 langchain 格式 [{name,args,id}] 转成 OpenAI 消息格式，供下一轮 langchain 识别。"""
     return [
@@ -177,6 +190,7 @@ class AgentLoop:
         sql_calls = 0
         sql_fail_streak = 0
         turn = 0
+        citations: list[dict] = []   # 本轮 knowledge_search 的文档引用，done 时去重随答案下发
         try:
             for turn in range(self._limits["max_turns"]):
                 cancel_token.check()
@@ -300,6 +314,9 @@ class AgentLoop:
                             continue
 
                     result = await self._registry.execute(name, args, ctx, cancel_token)
+                    # 收集知识库引用（knowledge_search 挂在 references），done 时聚合成 citations 下发
+                    if getattr(result, "references", None):
+                        citations += result.references
                     # 记录本次 SQL 的 (表,WHERE谓词,列) 供后续冗余检测（只记成功的）
                     if name == "execute_sql" and not _sql_failed(result.summary):
                         _t, _p, _c = _sql_extract(sql_text)
@@ -363,7 +380,9 @@ class AgentLoop:
             await self._audit_finalize(True, last_answer, trace_id)
 
             await self._state.transition(session_id, SessionStatus.DONE)
-            yield SSEEvent("done", {"answer": last_answer}, trace_id)
+            citations = _dedupe_citations(citations)
+            yield SSEEvent("done", {"answer": last_answer, "citations": citations}, trace_id)
+            self._audit_event("done", {"answer": last_answer, "citations": citations}, trace_id, turn)
         except asyncio.CancelledError:
             log.info("agent loop 被取消 sid=%s turn=%s", session_id, turn)
             await self._state.transition(session_id, SessionStatus.IDLE)

@@ -7,9 +7,56 @@
 from __future__ import annotations
 
 import json
+import os
 
 from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
 from src.ragflow.client import get_ragflow_client
+
+
+# RAGFlow v0.26.x 文档预览页 URL 模板：路由 /document/:id（路径参数 = document_id），
+# ext(query) 决定预览器（pdf/docx/xlsx/md/...），不需要 dataset_id。
+# 已按 v0.26.4 前端路由 web/src/routes.tsx 校准；RAGFlow 版本升级后需复核。
+DOC_PREVIEW_PATH = "/document/{document_id}"
+
+
+def _ext_from_name(name: str) -> str:
+    """从文档名提取扩展名（小写、去前导点）。RAGFlow document_keyword 即文件名。"""
+    _, ext = os.path.splitext(name or "")
+    return ext.lstrip(".").lower()
+
+
+def build_doc_url(base_url: str, document_id: str, document_name: str = "") -> str:
+    """拼 RAGFlow 文档预览页跳转链接：{base}/document/{document_id}?ext={扩展名}。
+    ext 从文档名提取，取不到则不带 query（页面可能空白，但 URL 可见可调）。
+    base_url/document_id 任一缺失返回 ""（前端降级为不可点）。"""
+    base = (base_url or "").strip().rstrip("/")
+    if not base or not document_id:
+        return ""
+    path = DOC_PREVIEW_PATH.format(document_id=document_id)
+    ext = _ext_from_name(document_name)
+    return f"{base}{path}?ext={ext}" if ext else f"{base}{path}"
+
+
+def _build_references(rows: list[dict], base_url: str) -> list[dict]:
+    """把检索片段聚合成文档级引用（同一文档多片段只留相似度最高的一条），带跳转 URL。
+    按 similarity 降序。供 ToolResult.references，done 时再聚合成 citations。"""
+    best: dict[str, dict] = {}
+    for r in rows:
+        doc = r.get("document", "")
+        if not doc:
+            continue
+        sim = r.get("similarity", 0.0)
+        prev = best.get(doc)
+        if prev is None or sim > prev.get("similarity", 0.0):
+            best[doc] = {
+                "document": doc,
+                "similarity": round(sim, 3),
+                "document_id": r.get("document_id", ""),
+                "dataset_id": r.get("dataset_id", ""),
+                "url": build_doc_url(base_url, r.get("document_id", ""),
+                                     r.get("document", "")),
+            }
+    return sorted(best.values(), key=lambda x: x["similarity"], reverse=True)
 
 
 async def knowledge_search(args: dict, ctx: LoopContext,
@@ -34,7 +81,16 @@ async def knowledge_search(args: dict, ctx: LoopContext,
         "document": r.get("document", ""),
         "similarity": round(r.get("similarity", 0.0), 3),
     } for r in rows]
-    return ToolResult(summary=json.dumps({"hits": hits}, ensure_ascii=False))
+    # references：结构化引用来源（文档级去重 + 跳转 URL），不回灌 LLM，只供 done 聚合后两端渲染
+    base_url = ""
+    try:
+        cfg = await get_ragflow_client().load_config()
+        base_url = (cfg.base_url if cfg else "")
+    except Exception:
+        base_url = ""
+    references = _build_references(rows, base_url)
+    return ToolResult(summary=json.dumps({"hits": hits}, ensure_ascii=False),
+                      references=references)
 
 
 KNOWLEDGE_SEARCH = ToolDefinition(

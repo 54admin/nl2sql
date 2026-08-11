@@ -83,16 +83,32 @@ def build_streaming_card() -> dict:
     }
 
 
+def _citations_element(citations: list[dict]) -> dict:
+    """参考来源元素：命中的知识库文档（文档级），markdown 链接可跳 RAGFlow 原文；无 url 纯文本。"""
+    lines = ["**📎 参考来源**"]
+    for c in citations:
+        doc = c.get("document", "未知文档")
+        sim = c.get("similarity")
+        sim_str = f"（相似度 {sim}）" if sim is not None else ""
+        url = c.get("url", "")
+        lines.append(f"- [{doc}]({url}){sim_str}" if url else f"- {doc}{sim_str}")
+    return {"tag": "markdown", "content": "\n".join(lines)}
+
+
 def build_final_card(proc_items: list[tuple[str, str]], answer: str,
-                     reasoning: str = "") -> dict:
-    """done 后全量替换兜底：思考过程(+推理)折进 collapsible_panel（默认收起）+ hr + 答案。
+                     reasoning: str = "", citations: list | None = None) -> dict:
+    """done 后全量替换兜底：思考过程(+推理)折进 collapsible_panel（默认收起）+ hr + 答案 + 参考来源。
     答案始终在面板下方可见；过程多(11步)也只占一个折叠框。summary 用答案摘要。
-    proc_items: [(icon_token, line), ...]；reasoning 非空时一并折进面板顶部。"""
+    proc_items: [(icon_token, line), ...]；reasoning 非空时折进面板顶部；citations 非空时答案下追加参考来源。"""
+    citations = citations or []
     elements: list[dict] = []
     if proc_items or (reasoning and reasoning.strip()):
         elements.append(_proc_panel(proc_items, reasoning))
         elements.append({"tag": "hr"})
     elements.append({"tag": "markdown", "content": answer or "(空)", "element_id": ANSWER_EID})
+    if citations:
+        elements.append({"tag": "hr"})
+        elements.append(_citations_element(citations))
     return {"schema": "2.0", "update_multi": True,
             "config": {"streaming_mode": False, "summary": {"content": _summary_text(answer)}},
             "body": {"elements": elements}}
@@ -163,4 +179,18 @@ if __name__ == "__main__":
     btns = sl["body"]["elements"][1]["actions"]
     assert btns[0]["value"] == {"kind": "switch", "sid": "s1"} and btns[0]["type"] == "primary", "当前会话按钮 primary+switch"
     assert btns[1]["type"] == "default", "非当前会话按钮 default"
+    # 带参考来源的最终卡片：纯答案+引用 → 答案后追加 hr + 参考来源元素
+    cit = [{"document": "运维手册.pdf", "similarity": 0.82,
+            "document_id": "d1", "dataset_id": "ds1", "url": "http://x/d1"}]
+    fc = build_final_card([], "纯答案", reasoning="", citations=cit)
+    fe = fc["body"]["elements"]
+    assert fe[0].get("element_id") == ANSWER_EID, "纯答案+引用：首元素仍是答案"
+    assert fe[-1]["tag"] == "markdown" and "📎 参考来源" in fe[-1]["content"], "末元素是参考来源"
+    assert fe[-2]["tag"] == "hr", "答案与参考来源间有 hr"
+    assert "[运维手册.pdf](http://x/d1)" in fe[-1]["content"], "参考来源含可点链接"
+    # 有步骤+引用：折叠面板 + hr + 答案 + hr + 参考来源
+    fc2 = build_final_card(steps, "答案", reasoning="想……", citations=cit)
+    fe2 = fc2["body"]["elements"]
+    assert fe2[0]["tag"] == "collapsible_panel", "步骤+引用：首元素是折叠面板"
+    assert fe2[-1]["content"].startswith("**📎 参考来源"), "步骤+引用：末元素是参考来源"
     print("card self-check OK ✓")

@@ -102,7 +102,8 @@ class CardStream:
             return None
         return _tool_result_line(name, summary)
 
-    async def on_done(self, answer: str | None = None) -> None:
+    async def on_done(self, answer: str | None = None,
+                      citations: list | None = None) -> None:
         # 防卡死铁律：无论后面成不成功，先 flush 末批 + 关流式 + 更新 summary（"生成中..."→答案摘要），
         # 这样即使全量重建失败卡片也不会停在"生成中"。然后有过程/思考才全量重建——把 11 步工具折进
         # collapsible_panel；纯答案回复保留打字机效果只关流式即可。重建失败则兜底 acontent 答案。
@@ -110,14 +111,17 @@ class CardStream:
             self._answer = answer
         has_steps = bool(self._tool_lines)
         has_reasoning = bool(self._reasoning.strip())
-        log.info("飞书 done：answer=%d 字符，思考=%d 字符，过程=%d 步，%s",
+        has_citations = bool(citations)
+        log.info("飞书 done：answer=%d 字符，思考=%d 字符，过程=%d 步，参考=%d 条，%s",
                  len(self._answer), len(self._reasoning), len(self._tool_lines),
-                 "折叠重建" if (has_steps or has_reasoning) else "仅关流式(纯答案)")
+                 len(citations or []),
+                 "折叠重建" if (has_steps or has_reasoning or has_citations) else "仅关流式(纯答案)")
         await self._cancel_and_flush()
         await self._close_streaming(self._answer)
-        if has_steps or has_reasoning:
+        if has_steps or has_reasoning or has_citations:
             ok = await self._update_card_full(
-                card.build_final_card(self._tool_lines, self._answer, self._reasoning))
+                card.build_final_card(self._tool_lines, self._answer, self._reasoning,
+                                      citations))
             if not ok:
                 log.warning("飞书 done 全量重建失败，兜底 acontent 答案（过程保留流式态展开）")
                 await self._stream_text(card.ANSWER_EID, self._answer)
@@ -505,7 +509,8 @@ class FeishuAdapter:
                     await stream.on_clarify(evt.data.get("question", ""), evt.data.get("options"), sid)
                     return
                 elif t == "done":
-                    await stream.on_done(evt.data.get("answer", ""))
+                    await stream.on_done(evt.data.get("answer", ""),
+                                         evt.data.get("citations") or [])
                     return
                 elif t == "error":
                     await stream.on_error(evt.data.get("message", "内部错误"))
