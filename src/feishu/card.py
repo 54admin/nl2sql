@@ -84,15 +84,20 @@ def build_streaming_card() -> dict:
 
 
 def _citations_element(citations: list[dict]) -> dict:
-    """参考来源元素：命中的知识库文档（文档级），markdown 链接可跳 RAGFlow 原文；无 url 纯文本。"""
-    lines = ["**📎 参考来源**"]
+    """参考来源元素：文档名（可跳原文）+ 命中片段预览，不依赖 RAGFlow 登录态也能看依据。
+    用「」包裹片段（纯字符，避开飞书卡片 markdown 对 >引用块/缩进 code 的兼容差异）；单行化截断 200 字。"""
+    parts = ["**📎 参考来源**"]
     for c in citations:
         doc = c.get("document", "未知文档")
         sim = c.get("similarity")
         sim_str = f"（相似度 {sim}）" if sim is not None else ""
         url = c.get("url", "")
-        lines.append(f"- [{doc}]({url}){sim_str}" if url else f"- {doc}{sim_str}")
-    return {"tag": "markdown", "content": "\n".join(lines)}
+        head = f"[{doc}]({url}){sim_str}" if url else f"{doc}{sim_str}"
+        snippet = (c.get("content") or "").replace("\n", " ").strip()
+        if len(snippet) > 200:
+            snippet = snippet[:200] + "…"
+        parts.append(f"**{head}**" + (f"\n「{snippet}」" if snippet else ""))
+    return {"tag": "markdown", "content": "\n\n".join(parts)}
 
 
 def build_final_card(proc_items: list[tuple[str, str]], answer: str,
@@ -181,13 +186,15 @@ if __name__ == "__main__":
     assert btns[1]["type"] == "default", "非当前会话按钮 default"
     # 带参考来源的最终卡片：纯答案+引用 → 答案后追加 hr + 参考来源元素
     cit = [{"document": "运维手册.pdf", "similarity": 0.82,
-            "document_id": "d1", "dataset_id": "ds1", "url": "http://x/d1"}]
+            "document_id": "d1", "dataset_id": "ds1", "url": "http://x/d1",
+            "content": "每日巡检应检查变桨系统油位及渗漏情况。"}]
     fc = build_final_card([], "纯答案", reasoning="", citations=cit)
     fe = fc["body"]["elements"]
     assert fe[0].get("element_id") == ANSWER_EID, "纯答案+引用：首元素仍是答案"
     assert fe[-1]["tag"] == "markdown" and "📎 参考来源" in fe[-1]["content"], "末元素是参考来源"
     assert fe[-2]["tag"] == "hr", "答案与参考来源间有 hr"
     assert "[运维手册.pdf](http://x/d1)" in fe[-1]["content"], "参考来源含可点链接"
+    assert "每日巡检应检查变桨系统油位及渗漏情况" in fe[-1]["content"], "参考来源含命中片段预览"
     # 有步骤+引用：折叠面板 + hr + 答案 + hr + 参考来源
     fc2 = build_final_card(steps, "答案", reasoning="想……", citations=cit)
     fe2 = fc2["body"]["elements"]

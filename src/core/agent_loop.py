@@ -100,7 +100,7 @@ def _normalize_args(raw) -> dict:
 
 
 def _dedupe_citations(citations: list[dict]) -> list[dict]:
-    """按 document 去重（一次 run 可能多次 knowledge_search 命中同一文档），保留相似度最高的一条，降序。"""
+    """按 document 去重（一次 run 可能多次 knowledge_search 命中同一文档），保留相似度最高的一条（含其 content 片段），降序。"""
     best: dict[str, dict] = {}
     for c in citations:
         doc = c.get("document")

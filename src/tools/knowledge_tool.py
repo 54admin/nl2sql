@@ -37,9 +37,13 @@ def build_doc_url(base_url: str, document_id: str, document_name: str = "") -> s
     return f"{base}{path}?ext={ext}" if ext else f"{base}{path}"
 
 
+SNIPPET_LIMIT = 600   # 参考来源片段预览字数上限（防 done 事件/飞书卡片过大）
+
+
 def _build_references(rows: list[dict], base_url: str) -> list[dict]:
-    """把检索片段聚合成文档级引用（同一文档多片段只留相似度最高的一条），带跳转 URL。
-    按 similarity 降序。供 ToolResult.references，done 时再聚合成 citations。"""
+    """把检索片段聚合成文档级引用（同一文档多片段只留相似度最高的一条），带跳转 URL + 命中片段。
+    按 similarity 降序。供 ToolResult.references，done 时再聚合成 citations。
+    content：该文档最高相似度片段原文（截断 SNIPPET_LIMIT），供前端展开查看——不依赖 RAGFlow 登录态。"""
     best: dict[str, dict] = {}
     for r in rows:
         doc = r.get("document", "")
@@ -48,6 +52,7 @@ def _build_references(rows: list[dict], base_url: str) -> list[dict]:
         sim = r.get("similarity", 0.0)
         prev = best.get(doc)
         if prev is None or sim > prev.get("similarity", 0.0):
+            raw = r.get("content") or ""
             best[doc] = {
                 "document": doc,
                 "similarity": round(sim, 3),
@@ -55,6 +60,7 @@ def _build_references(rows: list[dict], base_url: str) -> list[dict]:
                 "dataset_id": r.get("dataset_id", ""),
                 "url": build_doc_url(base_url, r.get("document_id", ""),
                                      r.get("document", "")),
+                "content": raw[:SNIPPET_LIMIT] + ("…" if len(raw) > SNIPPET_LIMIT else ""),
             }
     return sorted(best.values(), key=lambda x: x["similarity"], reverse=True)
 

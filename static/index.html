@@ -260,9 +260,16 @@
   /* 参考来源区（知识库命中文档，可跳 RAGFlow）*/
   .citations-wrap { margin-top: 8px; }
   .citations-title { font-size: 12px; color: #888; margin-bottom: 4px; }
-  .citation-link { display: block; color: #1565c0; font-size: 13px; padding: 2px 0; text-decoration: none; word-break: break-all; }
-  .citation-link:hover { text-decoration: underline; }
-  .citation-link.nolink { color: #888; pointer-events: none; }
+  .citation-item { border-bottom: 1px solid #f0f0f0; }
+  .citation-item:last-child { border-bottom: none; }
+  .citation-head { display: flex; align-items: center; gap: 6px; padding: 4px 0; cursor: pointer; font-size: 13px; }
+  .citation-arrow { color: #999; font-size: 10px; width: 10px; flex-shrink: 0; transition: transform .15s; display: inline-block; }
+  .citation-item.open .citation-arrow { transform: rotate(90deg); }
+  .citation-doc { color: #1565c0; flex: 1; word-break: break-all; }
+  .citation-go { color: #1565c0; font-size: 12px; text-decoration: none; flex-shrink: 0; }
+  .citation-go:hover { text-decoration: underline; }
+  .citation-body { display: none; margin: 0 0 6px 16px; padding: 8px 10px; background: #f7f9fc; border-left: 3px solid #d0d7de; border-radius: 3px; font-size: 13px; line-height: 1.6; color: #444; white-space: pre-wrap; word-break: break-word; }
+  .citation-item.open .citation-body { display: block; }
   .sql-wrap { margin-top: 6px; }
   .sql-code { background: #2d2d2d; color: #e6e6e6; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; }
   .sql-code { background: #1e1e1e; color: #d4d4d4; padding: 10px 12px; border-radius: 6px; overflow-x: auto; font-family: Menlo, Monaco, monospace; font-size: 12px; line-height: 1.5; margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
@@ -799,7 +806,8 @@ function appendSqlToggle(bubble, sqls) {
   bubble.appendChild(wrap);
 }
 
-// 答案下挂「参考来源」区：命中的知识库文档，可点跳 RAGFlow 原文（target=_blank）。无 url 降级纯文本。
+// 答案下挂「参考来源」区：每条可点击展开命中片段（不依赖 RAGFlow 登录态即可看依据）；
+// 有 url 额外给「↗原文」跳转链接（有 RAGFlow 权限的可看整篇）。无 content 仍可展开（显示占位）。
 function appendCitations(bubble, citations) {
   const wrap = document.createElement("div");
   wrap.className = "citations-wrap";
@@ -808,14 +816,36 @@ function appendCitations(bubble, citations) {
   title.textContent = "📎 参考来源";
   wrap.appendChild(title);
   citations.forEach(c => {
-    const a = document.createElement("a");
-    a.className = "citation-link";
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
+    const item = document.createElement("div");
+    item.className = "citation-item";
+    const head = document.createElement("div");
+    head.className = "citation-head";
+    const arrow = document.createElement("span");
+    arrow.className = "citation-arrow";
+    arrow.textContent = "▶";
+    const doc = document.createElement("span");
+    doc.className = "citation-doc";
     const sim = (c.similarity !== undefined && c.similarity !== null) ? `（相似度 ${c.similarity}）` : "";
-    a.textContent = (c.document || "未知文档") + sim;
-    if (c.url) { a.href = c.url; } else { a.className = "citation-link nolink"; }
-    wrap.appendChild(a);
+    doc.textContent = (c.document || "未知文档") + sim;
+    head.appendChild(arrow);
+    head.appendChild(doc);
+    if (c.url) {
+      const go = document.createElement("a");
+      go.className = "citation-go";
+      go.href = c.url;
+      go.target = "_blank";
+      go.rel = "noopener noreferrer";
+      go.textContent = "↗原文";
+      go.onclick = (e) => e.stopPropagation();   // 点跳转不触发展开
+      head.appendChild(go);
+    }
+    const body = document.createElement("div");
+    body.className = "citation-body";
+    body.textContent = c.content || "（无片段预览）";
+    head.onclick = () => item.classList.toggle("open");
+    item.appendChild(head);
+    item.appendChild(body);
+    wrap.appendChild(item);
   });
   bubble.appendChild(wrap);
 }
