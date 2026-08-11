@@ -1,15 +1,13 @@
 -- ============================================================
--- nl2sql 数据库种子数据 —— 新环境初始化（与 schema.sql 配套）
--- ------------------------------------------------------------
--- 只含不含密钥的配置：skill 提示词 / RAGFlow 占位 / agent 上限。
--- 含密钥的表（nl_cfg_llm/nl_cfg_datasources/nl_cfg_feishu）由用户自配，不在本文件。
--- 全部 ON CONFLICT 幂等，可重复跑。由 scripts/gen_seed.py 的 SEED_SKILLS 常量生成（skills/ 目录已删除）。
+-- nl2sql 种子数据 (MySQL) —— 新环境初始化（与 schema_mysql.sql 配套）
+-- PG→MySQL：::json 去强转；ON CONFLICT(...)DO NOTHING → INSERT IGNORE；"order"→`order`
+-- 含密钥表（llm/datasources/feishu）由用户自配，不进 seed。
 -- ============================================================
 
 BEGIN;
 
--- skill 种子（全量元信息；首次灌库即权威，admin 改后 ON CONFLICT 不覆盖）
-INSERT INTO nl_cfg_skills (scene, content, tools, mode, "order", version, enabled) VALUES (
+-- skill 种子（全量元信息；首次灌库即权威，admin 改后 INSERT IGNORE 不覆盖）
+INSERT IGNORE INTO nl_cfg_skills (scene, content, tools, mode, `order`, version, enabled) VALUES (
     'nl2sql', '【问数方法论】用户问业务数据（多少/对比/排名/趋势/明细/统计）时按此走：
 1. 先调 query_metadata（无参数）看数据源有哪些表、字段、表注释、表间关联（relations）。整轮对话只调一次、记住结果。绝不凭空猜表名/字段名——编了必报错。
 2. 从返回的表里挑需要的，用 execute_sql 跑只读查询。字段取值不确定（是 0/1 还是 是/否、时间字段什么格式）时，先 SELECT DISTINCT 查一次真实取值再写主查询，别瞎猜导致查空。
@@ -32,9 +30,9 @@ SQL 原则：
 - 全限定名：表名用 query_metadata 返回的原始写法（可能是 schema.table），别自己改写。
 - JOIN 优先：跨表用 JOIN，优先按 relations 关联口径；relations 为空按字段注释推导主外键，用 INNER/LEFT JOIN，别堆子查询。
 - UNION/UNION ALL 合并结构相同的结果集（优先 UNION ALL 更快）；步骤多/有中间复用用 WITH/CTE；聚合 SUM/COUNT/AVG 起有意义的别名。
-- 比率/增长率/百分率不乘 100，数据是什么写什么；聚合空值用 coalesce(sum(coalesce(字段,0)),0)；数字保留原始精度不四舍五入。', '["query_metadata", "execute_sql", "get_sql_template"]'::json, 'always_on', 1, 1, true
-) ON CONFLICT (scene) DO NOTHING;
-INSERT INTO nl_cfg_skills (scene, content, tools, mode, "order", version, enabled) VALUES (
+- 比率/增长率/百分率不乘 100，数据是什么写什么；聚合空值用 coalesce(sum(coalesce(字段,0)),0)；数字保留原始精度不四舍五入。', '["query_metadata", "execute_sql", "get_sql_template"]', 'always_on', 1, 1, true
+);
+INSERT IGNORE INTO nl_cfg_skills (scene, content, tools, mode, `order`, version, enabled) VALUES (
     'attribution', '【归因方法论】用户问「为什么下降/上升/异常/波动/原因/怎么回事/主要原因」时按此走。
 归因 = 用问数阶段【已查回的数据】直接推理。归因的主体是数据分析，不是查知识库。
 
@@ -49,19 +47,17 @@ INSERT INTO nl_cfg_skills (scene, content, tools, mode, "order", version, enable
 1. 定位事实（直接读已有）：看本对话已有的 execute_sql 结果，确认涉及的指标、数值、对比基准。事实就在上面，不查。
 2. 推理归因（核心）：基于数据，分主因（最可能/影响最大）与次因。每条标注来源——来自数据 / 推测。明确区分两者。
 3. 补依据（可选，最多1次）：只有当某个结论需要政策/手册/口径佐证、且你觉得知识库可能有，才 knowledge_search 查 1 次。无匹配就停，不强求。
-4. 先给结论（主因），再列依据，最后给数据支撑。', '["knowledge_search"]'::json, 'always_on', 2, 1, true
-) ON CONFLICT (scene) DO NOTHING;
+4. 先给结论（主因），再列依据，最后给数据支撑。', '["knowledge_search"]', 'always_on', 2, 1, true
+);
 
 -- RAGFlow 知识库 default 占位（地址/key 空、禁用；admin 后台填真实值并启用）
-INSERT INTO nl_cfg_ragflow (id, base_url, api_key, dataset_ids, top_k,
+INSERT IGNORE INTO nl_cfg_ragflow (id, base_url, api_key, dataset_ids, top_k,
     similarity_threshold, vector_similarity_weight, enabled, version)
-VALUES ('default', '', '', '[]'::json, 5, 0.2, 0.3, false, 1)
-ON CONFLICT (id) DO NOTHING;
+VALUES ('default', '', '', '[]', 5, 0.2, 0.3, false, 1);
 
 -- agent 运行上限 default（admin 后台可改）
-INSERT INTO nl_cfg_limits (id, max_turns, max_ask_user, max_sql,
+INSERT IGNORE INTO nl_cfg_limits (id, max_turns, max_ask_user, max_sql,
     max_sql_fail_streak, max_meta_per_run, version)
-VALUES ('default', 30, 2, 10, 3, 1, 1)
-ON CONFLICT (id) DO NOTHING;
+VALUES ('default', 30, 2, 10, 3, 1, 1);
 
 COMMIT;

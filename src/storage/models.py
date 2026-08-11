@@ -17,7 +17,7 @@ class Base(DeclarativeBase):
 
 class Session(Base):
     """问数会话。"""
-    __tablename__ = "sessions"
+    __tablename__ = "nl_ru_sessions"
     __table_args__ = {"comment": "问数会话"}
     id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="会话ID")
     user_id: Mapped[str] = mapped_column(String(64), index=True, comment="用户ID")
@@ -36,7 +36,7 @@ class Session(Base):
 
 class Message(Base):
     """会话消息流水。"""
-    __tablename__ = "messages"
+    __tablename__ = "nl_ru_messages"
     __table_args__ = {"comment": "会话消息流水"}
     id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="消息ID")
     session_id: Mapped[str] = mapped_column(String(64), index=True, comment="会话ID")
@@ -48,7 +48,7 @@ class Message(Base):
 
 class AuditTrace(Base):
     """审计追溯：全链路记录。"""
-    __tablename__ = "audit_traces"
+    __tablename__ = "nl_hi_traces"
     __table_args__ = {"comment": "审计追溯：一次问数从输入到答案的全链路（汇总行+事件流）"}
     trace_id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="追踪ID")
     session_id: Mapped[str] = mapped_column(String(64), index=True, comment="会话ID")
@@ -70,7 +70,7 @@ class AuditEvent(Base):
     """审计事件流：一次 trace 的每一步一行（细粒度复盘用）。
     turn_start / answer_delta(合并) / tool_call / tool_result /
     user_input(多轮澄清每条都记) / clarification / error / cancelled / done。"""
-    __tablename__ = "audit_events"
+    __tablename__ = "nl_hi_events"
     __table_args__ = {"comment": "审计事件流：一次trace每步一行（细粒度复盘）"}
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: uuid4().hex,
                                      comment="主键UUID（应用端生成，不用PG序列，免序列权限）")
@@ -86,7 +86,7 @@ class AuditEvent(Base):
 
 class LoopCheckpoint(Base):
     """ask_user 挂起时的 loop 上下文快照。P0b 用。"""
-    __tablename__ = "loop_checkpoints"
+    __tablename__ = "nl_ru_checkpoints"
     __table_args__ = {"comment": "ask_user挂起时的loop上下文快照（断点恢复用）"}
     id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="检查点ID")
     session_id: Mapped[str] = mapped_column(String(64), index=True, comment="会话ID")
@@ -97,7 +97,7 @@ class LoopCheckpoint(Base):
 
 class QueryResult(Base):
     """execute_sql 全量结果旁路。P1 用，P0a 先建表。"""
-    __tablename__ = "query_results"
+    __tablename__ = "nl_hi_results"
     __table_args__ = {"comment": "execute_sql全量结果旁路（审计/持久+前端按result_id取）"}
     result_id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="结果ID")
     session_id: Mapped[str] = mapped_column(String(64), index=True, comment="会话ID")
@@ -111,7 +111,7 @@ class LlmConfigRow(Base):
     """动态 LLM 配置（admin 后台可改，热更新）。按用途 id 多行 + 启停：
     analysis（对话查询 chat）/ attribution（归因推理）。
     LLMService 按 id=用途 取 enabled 配置。"""
-    __tablename__ = "llm_config"
+    __tablename__ = "nl_cfg_llm"
     __table_args__ = {"comment": "动态LLM配置（按用途多行analysis/attribution+启停）"}
     id: Mapped[str] = mapped_column(String(128), primary_key=True,
                                      comment="配置ID（自定义名，如 qwen-chat）")
@@ -143,7 +143,7 @@ class FeishuConfigRow(Base):
     """飞书机器人通道动态配置（admin 后台改，热重连）。单行有效（id=default）：
     enabled=true 且凭证齐全时 adapter 从库读并启动 WsClient；改完调 adapter.reload()
     热重连，不重启服务。凭证明文存沿用内网工具惯例。"""
-    __tablename__ = "feishu_config"
+    __tablename__ = "nl_cfg_feishu"
     __table_args__ = {"comment": "飞书机器人通道动态配置（admin改+热重连，凭证明文存）"}
     id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="配置ID（default）")
     app_id: Mapped[str] = mapped_column(String(128), default="", comment="飞书App ID（cli_xxx）")
@@ -159,7 +159,7 @@ class FeishuConfigRow(Base):
 class AgentLimitsRow(Base):
     """AgentLoop 查询上限动态配置（admin 后台改，重启生效）。单行（id=default）。
     5 个上限对应 AgentLoop.__init__ 的 max_* 参数；lifespan 启动读、构造时传入。"""
-    __tablename__ = "agent_limits"
+    __tablename__ = "nl_cfg_limits"
     __table_args__ = {"comment": "AgentLoop 查询上限动态配置（admin改，重启生效）"}
     id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="配置ID（default）")
     max_turns: Mapped[int] = mapped_column(default=30, comment="agent 最大循环轮数")
@@ -175,7 +175,7 @@ class AgentLimitsRow(Base):
 class Prompt(Base):
     """skill 单一真相源：提示词内容 + 开关 + 工具声明全在一行（DB 即权威，seed 由 gen_seed.py 灌入）。
     admin 后台 CRUD，热更新（PromptStore 缓存刷新 + AgentLoop.reload_registry）。"""
-    __tablename__ = "prompts"
+    __tablename__ = "nl_cfg_skills"
     __table_args__ = {"comment": "skill单一真相源（DB权威，seed由gen_seed灌入）"}
     scene: Mapped[str] = mapped_column(String(32), primary_key=True, comment="skill名，主键")
     content: Mapped[str] = mapped_column(Text, comment="提示词内容（admin在线改，热生效）")
@@ -197,7 +197,7 @@ class Datasource(Base):
     DBeaver 式层级：一个数据源 = 一个连接（实例），db_name 改 nullable——
     建源只填连接信息，下挂多库（schema）。db_name 留空时连接串不带 /db（连实例）。
     """
-    __tablename__ = "datasources"
+    __tablename__ = "nl_cfg_datasources"
     __table_args__ = {"comment": "业务数据源连接配置（密码明文存，内网工具）"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="数据源ID")
     name: Mapped[str] = mapped_column(String(64), unique=True, comment="名称")
@@ -221,13 +221,13 @@ class MetadataTable(Base):
     schema_name 标记表属于哪个库（DBeaver 层级：源>库>表）；
     老数据 schema_name 为空——兼容（按 datasource_id 读，前端按 schema 分组时空作为默认组）。
     """
-    __tablename__ = "metadata_tables"
+    __tablename__ = "nl_md_tables"
     __table_args__ = (
         UniqueConstraint("datasource_id", "schema_name", "table_name", name="uq_ds_schema_table"),
         {"comment": "元数据·表（反向同步+手写覆盖，白名单enabled=true参与问数）"},
     )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="表元数据ID")
-    datasource_id: Mapped[int] = mapped_column(ForeignKey("datasources.id"), index=True, comment="数据源ID")
+    datasource_id: Mapped[int] = mapped_column(ForeignKey("nl_cfg_datasources.id"), index=True, comment="数据源ID")
     schema_name: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True, comment="库名（空=兼容老数据）")
     table_name: Mapped[str] = mapped_column(String(128), comment="表名")
     table_comment: Mapped[str | None] = mapped_column(Text, nullable=True, comment="表注释（手写manual优先）")
@@ -242,13 +242,13 @@ class MetadataTable(Base):
 
 class MetadataColumn(Base):
     """元数据·字段。P1a。"""
-    __tablename__ = "metadata_columns"
+    __tablename__ = "nl_md_columns"
     __table_args__ = (
         UniqueConstraint("table_id", "column_name", name="uq_table_col"),
         {"comment": "元数据·字段（反向同步+手写覆盖，role_tag=sensitive过滤回灌LLM）"},
     )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="字段元数据ID")
-    table_id: Mapped[int] = mapped_column(ForeignKey("metadata_tables.id"), index=True, comment="表元数据ID")
+    table_id: Mapped[int] = mapped_column(ForeignKey("nl_md_tables.id"), index=True, comment="表元数据ID")
     column_name: Mapped[str] = mapped_column(String(128), comment="字段名")
     column_comment: Mapped[str | None] = mapped_column(Text, nullable=True, comment="字段注释（手写manual优先）")
     data_type: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="数据类型")
@@ -261,10 +261,10 @@ class MetadataColumn(Base):
 
 class TableRelation(Base):
     """逻辑主外键关系（人工录入）。query_metadata 返回给 LLM，跨表 JOIN 时按此关联口径。"""
-    __tablename__ = "table_relations"
+    __tablename__ = "nl_md_relations"
     __table_args__ = {"comment": "逻辑主外键关系（人工录入）；query_metadata 返回，跨表 JOIN 按 this 口径"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="关系ID")
-    datasource_id: Mapped[int] = mapped_column(ForeignKey("datasources.id"), index=True, comment="数据源ID")
+    datasource_id: Mapped[int] = mapped_column(ForeignKey("nl_cfg_datasources.id"), index=True, comment="数据源ID")
     main_table: Mapped[str] = mapped_column(String(128), comment="主表")
     rel_table: Mapped[str] = mapped_column(String(128), comment="关联表")
     join_keys_json: Mapped[str] = mapped_column(Text, comment="关联键（JSON：[{main,rel}]）")
@@ -277,7 +277,7 @@ class TableRelation(Base):
 
 class BusinessRule(Base):
     """业务规则（人工录入，表级）。query_metadata 返回时按 table_name 附在对应表上，LLM 查到该表才见。"""
-    __tablename__ = "business_rules"
+    __tablename__ = "nl_md_rules"
     __table_args__ = {"comment": "业务规则（人工录入，表级；query_metadata 按表附给 LLM）"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="规则ID")
     table_name: Mapped[str] = mapped_column(String(128), nullable=False,
@@ -293,7 +293,7 @@ class BusinessRule(Base):
 
 class SqlTemplate(Base):
     """SQL 模板（人工录入）。清单拼进 get_sql_template 工具 description，LLM 复杂查询时调工具按 usage 套用。"""
-    __tablename__ = "sql_templates"
+    __tablename__ = "nl_md_templates"
     __table_args__ = {"comment": "SQL模板（人工录入，拼进 get_sql_template 工具 description，LLM 按需调工具取）"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="模板ID")
     name: Mapped[str] = mapped_column(String(128), comment="模板名")
@@ -313,7 +313,7 @@ class SqlTemplate(Base):
 # enabled=false 或未配置时 knowledge_search/归因 工具优雅降级（提示未配置）。凭证明文存沿用内网工具惯例。
 class RagflowConfigRow(Base):
     """RAGFlow 外部知识库动态配置（admin 改，热更新）。单行（id=default）。"""
-    __tablename__ = "ragflow_config"
+    __tablename__ = "nl_cfg_ragflow"
     __table_args__ = {"comment": "RAGFlow外部知识库配置（base_url+api_key+参与检索的dataset_ids，热更新）"}
     id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="配置ID（default）")
     base_url: Mapped[str] = mapped_column(String(256), default="",

@@ -1,10 +1,10 @@
 """从代码常量生成 db/seed.sql —— 数据库初始化种子数据。
 
 只 seed 不含敏感信息的配置：
-  * prompts: skill 全量元信息（SEED_SKILLS 常量 seed，DB 即唯一真相源；skills/ 目录已删除）
-  * ragflow_config: default 占位行（地址/key 空，enabled=false，待 admin 填）
-  * agent_limits: default 行（agent 运行上限，纯数字配置）
-含密钥的表（llm_config/datasources/feishu_config）由用户自配，不进 seed。
+  * nl_cfg_skills: skill 全量元信息（SEED_SKILLS 常量 seed，DB 即唯一真相源；skills/ 目录已删除）
+  * nl_cfg_ragflow: default 占位行（地址/key 空，enabled=false，待 admin 填）
+  * nl_cfg_limits: default 行（agent 运行上限，纯数字配置）
+含密钥的表（nl_cfg_llm/nl_cfg_datasources/nl_cfg_feishu）由用户自配，不进 seed。
 
 用法: python3 scripts/gen_seed.py  → 生成 db/seed.sql
 由 scripts/gen_seed.py 的 SEED_SKILLS 常量生成（skill 出厂种子）。
@@ -36,7 +36,7 @@ HEADER = """-- ============================================================
 -- nl2sql 数据库种子数据 —— 新环境初始化（与 schema.sql 配套）
 -- ------------------------------------------------------------
 -- 只含不含密钥的配置：skill 提示词 / RAGFlow 占位 / agent 上限。
--- 含密钥的表（llm_config/datasources/feishu_config）由用户自配，不在本文件。
+-- 含密钥的表（nl_cfg_llm/nl_cfg_datasources/nl_cfg_feishu）由用户自配，不在本文件。
 -- 全部 ON CONFLICT 幂等，可重复跑。由 scripts/gen_seed.py 的 SEED_SKILLS 常量生成（skills/ 目录已删除）。
 -- ============================================================
 
@@ -59,7 +59,7 @@ def _pg_json(obj) -> str:
 def generate() -> str:
     parts = [HEADER]
 
-    # --- 1) prompts: skill 单一真相源种子（content+tools+mode+order 全量，仅首次灌库）
+    # --- 1) nl_cfg_skills: skill 单一真相源种子（content+tools+mode+order 全量，仅首次灌库）
     # 之后运行时只读 DB。ON CONFLICT DO NOTHING 保护 admin 已改内容。
     skills = {sk["scene"]: sk for sk in SEED_SKILLS}
     parts.append("-- skill 种子（全量元信息；首次灌库即权威，admin 改后 ON CONFLICT 不覆盖）\n")
@@ -70,24 +70,24 @@ def generate() -> str:
         mode = skill["mode"]
         order = skill["order"]
         parts.append(
-            f'INSERT INTO prompts (scene, content, tools, mode, "order", version, enabled) VALUES (\n'
+            f'INSERT INTO nl_cfg_skills (scene, content, tools, mode, "order", version, enabled) VALUES (\n'
             f'    {_pg_str(name)}, {_pg_str(content)}, {_pg_json(tools)}, '
             f'{_pg_str(mode)}, {order}, 1, true\n'
             f') ON CONFLICT (scene) DO NOTHING;\n')
     parts.append("\n")
 
-    # --- 2) ragflow_config: default 占位（地址/key 空，enabled=false，待 admin 填）---
+    # --- 2) nl_cfg_ragflow: default 占位（地址/key 空，enabled=false，待 admin 填）---
     parts.append(
         "-- RAGFlow 知识库 default 占位（地址/key 空、禁用；admin 后台填真实值并启用）\n"
-        "INSERT INTO ragflow_config (id, base_url, api_key, dataset_ids, top_k,\n"
+        "INSERT INTO nl_cfg_ragflow (id, base_url, api_key, dataset_ids, top_k,\n"
         "    similarity_threshold, vector_similarity_weight, enabled, version)\n"
         "VALUES ('default', '', '', '[]'::json, 5, 0.2, 0.3, false, 1)\n"
         "ON CONFLICT (id) DO NOTHING;\n\n")
 
-    # --- 3) agent_limits: default 运行上限 ---
+    # --- 3) nl_cfg_limits: default 运行上限 ---
     parts.append(
         "-- agent 运行上限 default（admin 后台可改）\n"
-        "INSERT INTO agent_limits (id, max_turns, max_ask_user, max_sql,\n"
+        "INSERT INTO nl_cfg_limits (id, max_turns, max_ask_user, max_sql,\n"
         "    max_sql_fail_streak, max_meta_per_run, version)\n"
         "VALUES ('default', 30, 2, 10, 3, 1, 1)\n"
         "ON CONFLICT (id) DO NOTHING;\n")
@@ -100,4 +100,4 @@ if __name__ == "__main__":
     out = Path("db/seed.sql")
     out.parent.mkdir(exist_ok=True)
     out.write_text(generate(), encoding="utf-8")
-    print(f"wrote {out} ({len(SEED_SKILLS)} skills + ragflow_config + agent_limits)")
+    print(f"wrote {out} ({len(SEED_SKILLS)} skills + nl_cfg_ragflow + nl_cfg_limits)")
