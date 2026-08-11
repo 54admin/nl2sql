@@ -329,12 +329,18 @@ class FeishuAdapter:
             text = self._strip_at_mention((content.get("text") or "").strip())
             if not text:
                 return
+            # 回复目标：群聊(chat_type=group)回群里(chat_id)，私聊回 open_id。
+            # 每人独立会话——session 仍按 open_id 绑定，只把回复发到对应会话。
+            chat_type = getattr(msg, "chat_type", "p2p")
+            chat_id = getattr(msg, "chat_id", "")
+            reply_to = ("chat", chat_id) if (chat_type == "group" and chat_id) else ("open_id", open_id)
             if self._cfg.whitelist and open_id not in self._cfg.whitelist:
                 asyncio.run_coroutine_threadsafe(
-                    self._send_text(open_id, "未授权，联系管理员加白名单"), self._main_loop)
+                    self._send_text(reply_to[1], "未授权，联系管理员加白名单",
+                                    receive_id_type=reply_to[0]), self._main_loop)
                 return
             asyncio.run_coroutine_threadsafe(
-                self._handle_incoming(open_id, text), self._main_loop)
+                self._handle_incoming(open_id, text, reply_to=reply_to), self._main_loop)
         except Exception:
             log.exception("feishu on_message 解析异常")
 
@@ -414,19 +420,21 @@ class FeishuAdapter:
     def _strip_at_mention(text: str) -> str:
         return re.sub(r"@_user_\d+\s*", "", text).strip()
 
-    async def _send_text(self, open_id: str, text: str) -> None:
+    async def _send_text(self, receive_id: str, text: str, *, receive_id_type: str = "open_id") -> None:
         from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
-        req = (CreateMessageRequest.builder().receive_id_type("open_id")
-               .request_body(CreateMessageRequestBody.builder().receive_id(open_id)
+        req = (CreateMessageRequest.builder().receive_id_type(receive_id_type)
+               .request_body(CreateMessageRequestBody.builder().receive_id(receive_id)
                              .msg_type("text").content(json.dumps({"text": text})).build())
                .build())
         resp = await self._lark_client.im.v1.message.acreate(req)
         if not resp.success():
-            log.warning("飞书发文本失败 open_id=%s code=%s", open_id, resp.code)
+            log.warning("飞书发文本失败 %s=%s code=%s", receive_id_type, receive_id, resp.code)
 
-    async def _create_card(self, open_id: str, card_json: dict | None = None) -> str | None:
+    async def _create_card(self, receive_id: str, card_json: dict | None = None,
+                           *, receive_id_type: str = "open_id") -> str | None:
         """建 CardKit 卡片实体 + 发 interactive 消息引用 card_id。
-        默认发流式问答卡片；传 card_json 发静态卡片（如会话列表，streaming_mode=False）。"""
+        默认发流式问答卡片；传 card_json 发静态卡片（如会话列表，streaming_mode=False）。
+        receive_id_type/receive_id：回复目标——群聊传 ("chat", chat_id)，私聊默认 ("open_id", open_id)。"""
         from lark_oapi.api.cardkit.v1 import CreateCardRequest, CreateCardRequestBody
         from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
         card_json = json.dumps(card_json or card.build_streaming_card(), ensure_ascii=False)
@@ -437,14 +445,14 @@ class FeishuAdapter:
             log.warning("飞书创建卡片实体失败 code=%s msg=%s", resp.code, resp.msg)
             return None
         card_id = resp.data.card_id
-        mreq = (CreateMessageRequest.builder().receive_id_type("open_id")
-                .request_body(CreateMessageRequestBody.builder().receive_id(open_id)
+        mreq = (CreateMessageRequest.builder().receive_id_type(receive_id_type)
+                .request_body(CreateMessageRequestBody.builder().receive_id(receive_id)
                               .msg_type("interactive")
                               .content(json.dumps({"type": "card", "data": {"card_id": card_id}}))
                               .build()).build())
         mresp = await self._lark_client.im.v1.message.acreate(mreq)
         if not mresp.success():
-            log.warning("飞书发卡片消息失败 code=%s msg=%s", mresp.code, mresp.msg)
+            log.warning("飞书发卡片消息失败 %s=%s code=%s msg=%s", receive_id_type, receive_id, mresp.code, mresp.msg)
             return None
         return card_id
 
@@ -458,11 +466,12 @@ class FeishuAdapter:
         return sid
 
     async def _handle_incoming(self, open_id: str, text: str,
-                               *, force_sid: str | None = None) -> None:
+                               *, force_sid: str | None = None,
+                               reply_to: tuple[str, str] | None = None) -> None:
         # 并发防护两层：(1) _on_message_sync 已按 message_id 去重补投；
         # (2) orchestrator 的会话忙时闸门保证同 session 不并发跑第二个 run。
         # 故此处不再持有 per-user 锁（旧实现 TOCTOU 竞态会失效 + 把消息队列 130s）。
-        await self._process(open_id, text, force_sid)
+        await self._process(open_id, text, force_sid, reply_to)
 
     def _is_dup_msg(self, msg_id: str, ttl: float = 600.0) -> bool:
         """message_id 去重：TTL 内重复→True。顺手清过期项，防字典无限增长。"""
@@ -475,14 +484,16 @@ class FeishuAdapter:
         self._seen_msg[msg_id] = now
         return False
 
-    async def _process(self, open_id: str, text: str, force_sid: str | None) -> None:
+    async def _process(self, open_id: str, text: str, force_sid: str | None,
+                       reply_to: tuple[str, str] | None = None) -> None:
         trace_id = uuid4().hex
         sid = force_sid or await self._find_or_create_session(open_id)
         try:
             await self._orch._sessions.fill_title_if_empty(sid, text[:20])
         except Exception:
             pass
-        card_id = await self._create_card(open_id)
+        rid_type, rid = reply_to or ("open_id", open_id)   # 群聊→chat_id，私聊→open_id
+        card_id = await self._create_card(rid, receive_id_type=rid_type)
         if not card_id:
             return
         throttle = max(0.05, self._cfg.card_throttle_ms / 1000)
