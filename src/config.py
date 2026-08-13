@@ -38,11 +38,13 @@ class RedisConfig:
 
 @dataclass
 class PostgresConfig:
+    """平台库配置（PG/MySQL 通用）。type=mysql 走 aiomysql，否则走 asyncpg。"""
     host: str = "127.0.0.1"
     port: int = 5432
     database: str = "nl2sql"
     username: str = "postgres"
     password: str = ""
+    type: str = "postgres"
 
 
 @dataclass

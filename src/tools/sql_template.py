@@ -12,7 +12,7 @@ import json
 
 from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
 from src.storage.models import SqlTemplate
-from src.storage.pg_client import AsyncSessionFactory
+from src.storage.db_client import AsyncSessionFactory
 
 _GET_SQL_TEMPLATE_PARAMS = {
     "type": "object",

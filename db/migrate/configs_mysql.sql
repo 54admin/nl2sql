@@ -1,5 +1,5 @@
 -- 从在线 PG 导出的环境配置（模型/数据源/模板/知识库）
--- 源: nl2sql@online PG (旧表名) → 目标: MySQL 新表名
+-- 源: nl2sql@online PG (旧表名) → 目标: MySQL 新表名（dev profile 连的华为云 RDS MySQL）
 -- 飞书 feishu_config 不含（用户指定不配）。生成器: scripts/export_configs.py
 
 -- llm_config → nl_cfg_llm  (8 行)

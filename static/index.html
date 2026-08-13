@@ -8,12 +8,12 @@
   * { box-sizing: border-box; }
   body { font-family: -apple-system, "PingFang SC", sans-serif; margin: 0; background: #f0f2f5; }
   #app { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; height: 100vh; }
-  header { background: #fff; padding: 12px 16px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-  header h1 { font-size: 16px; margin: 0; color: #333; }
+  header { background: #fff; padding: 10px 20px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; gap: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); z-index: 10; }
+  header h1 { font-size: 16px; margin: 0; color: #1a1a2e; font-weight: 600; letter-spacing: 0.5px; }
   #mode { padding: 4px 8px; border: 1px solid #ccc; border-radius: 6px; }
   /* 对话区 */
   #messages { flex: 1; overflow-y: auto; padding: 16px; }
-  .msg { margin: 8px 0; padding: 10px 14px; border-radius: 12px; max-width: 75%; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+  .msg { margin: 8px 0; padding: 10px 14px; border-radius: 12px; max-width: 75%; white-space: pre-wrap; word-break: break-word; line-height: 1.5; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
   .user { background: #4caf50; color: #fff; margin-left: auto; }
   .assistant { background: #fff; color: #333; border: 1px solid #e0e0e0; }
   .system { background: #fff8e1; color: #e65100; font-size: 13px; max-width: 90%; }
@@ -22,18 +22,21 @@
   .clarify-opt:hover { background:#e3f2fd; }
   .err { background: #ffebee; color: #c62828; }
   .login-input { width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
-  footer { background: #fff; padding: 12px; border-top: 1px solid #e0e0e0; display: flex; gap: 8px; }
-  #input { flex: 1; padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 14px; }
-  #send { padding: 10px 22px; background: #4caf50; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  footer { background: #fff; padding: 12px 16px; border-top: 1px solid #e8e8e8; display: flex; gap: 8px; }
+  #input { flex: 1; padding: 10px 14px; border: 1px solid #d0d0d0; border-radius: 8px; font-size: 14px; transition: border-color .15s, box-shadow .15s; }
+  #input:focus { outline: none; border-color: #4caf50; box-shadow: 0 0 0 3px rgba(76,175,80,0.1); }
+  #send { padding: 10px 22px; background: #4caf50; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; transition: background .15s, box-shadow .15s; }
+  #send:not(:disabled):hover { background: #43a047; box-shadow: 0 2px 6px rgba(76,175,80,0.3); }
   #send:disabled { background: #bdbdbd; cursor: not-allowed; }
-  #stop { padding: 10px 22px; background: #e53935; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  #stop { padding: 10px 22px; background: #e53935; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; transition: background .15s; }
+  #stop:hover { background: #d32f2f; }
   /* Tab */
   header nav { display: flex; gap: 6px; }
   .tab { padding: 4px 14px; background: #eee; color: #333; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
   .tab.active { background: #4caf50; color: #fff; }
   /* 会话侧边栏 */
   #chat-panel { display: flex; flex: 1; }
-  #session-sidebar { width: 220px; border-right: 1px solid #e0e0e0; background: #fafafa; display: flex; flex-direction: column; min-height: 0; }
+  #session-sidebar { width: 220px; border-right: 1px solid #e8e8e8; background: #fafbfc; display: flex; flex-direction: column; min-height: 0; }
   .sb-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-bottom: 1px solid #e8e8e8; font-size: 13px; color: #666; font-weight: 600; }
   #new-session { background: #fff; color: #4caf50; border: 1px solid #4caf50; border-radius: 4px; cursor: pointer; font-size: 16px; width: 24px; height: 22px; line-height: 1; }
   #new-session:hover { background: #f1f8f1; }
@@ -53,13 +56,15 @@
   /* ===== 配置页：三栏 DB 工具风格 ===== */
   .cfg-layout {
     display: grid;
-    grid-template-columns: 22% 33% 1fr;   /* 左数据源树 / 中表视图 / 右字段 */
+    grid-template-columns: 22% 33% 1fr;
     gap: 1px;
-    background: #e0e0e0;                   /* gap 作分隔线 */
+    background: #e0e0e0;
     height: 100%;
     border: 1px solid #d0d0d0;
-    border-radius: 6px;
-    min-width: 900px;                      /* ponytail: 窄屏横滚兜底，不做响应式断点 */
+    border-radius: 8px;
+    min-width: 900px;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
   }
   .cfg-col { background: #fff; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   .cfg-col-head {
@@ -109,18 +114,22 @@
   #btn-sync:hover { background: #f1f8f1; }
   #btn-sync:disabled { opacity: 0.6; cursor: not-allowed; }
   /* ===== 管理后台（规则/模板/知识库/模型限流） ===== */
-  #admin-panel { padding: 12px; overflow: auto; flex: 1; }
+  #admin-panel { padding: 0; overflow: hidden; flex: 1; display: flex; flex-direction: column; min-height: 0; }
   /* ===== 设置页子标签切换 ===== */
   .settings-pane { flex: 1; min-height: 0; }
-  .settings-panels { padding: 12px; overflow: auto; flex: 1; }
+  .settings-panels { padding: 12px; overflow: auto; flex: 1; min-height: 0; }
   .stab-panel { display: none; }
-  .stab-panel.active { display: block; }
-  #chat-nav .gear { padding: 5px 14px; background: #1976d2; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .stab-panel.active { display: flex; flex-direction: column; min-height: 0; }
+  .stab-panel.active > .admin-card { display: block; }
+  #chat-nav .gear { padding: 5px 14px; background: #1976d2; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; }
+  #chat-nav { display: flex; gap: 8px; align-items: center; }
+  #chat-nav .gear + .gear { margin-left: 0; }
   #settings-nav { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
-  #settings-nav .stab { padding: 5px 14px; background: #eee; color: #333; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
-  #settings-nav .stab.active { background: #1976d2; color: #fff; }
+  #settings-nav .stab { padding: 6px 14px; background: #f0f2f5; color: #555; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all .15s; white-space: nowrap; }
+  #settings-nav .stab:hover { background: #e3f2fd; color: #1565c0; }
+  #settings-nav .stab.active { background: #1976d2; color: #fff; font-weight: 500; }
   #settings-nav .back { margin-left: auto; padding: 5px 12px; background: #fff; color: #1976d2; border: 1px solid #1976d2; border-radius: 6px; cursor: pointer; font-size: 13px; }
-  .admin-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; }
+  .admin-card { background: #fff; border: 1px solid #e8e8e8; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
   .admin-card h3 { margin: 0 0 10px; font-size: 14px; color: #333; }
   .admin-form { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
   .admin-form input, .admin-form select { padding: 5px 8px; border: 1px solid #d0d0d0; border-radius: 4px; font-size: 12px; min-width: 90px; flex: 1; }
@@ -294,7 +303,7 @@
 <div id="app" style="display:none">
   <header>
     <h1>AI 问数</h1>
-    <nav id="chat-nav"><button class="gear" onclick="showStats(true)">📊 统计</button><button class="gear" onclick="showSettings(true)">⚙ 设置</button><button class="gear" onclick="doLogout()" title="登出" style="margin-left:auto">⎋ 登出</button></nav>
+    <nav id="chat-nav"><button class="gear" onclick="showStats(true)">📊 统计</button> <button class="gear" onclick="showSettings(true)">⚙ 设置</button> <button class="gear" onclick="doLogout()" title="登出" style="margin-left:auto">⎋ 登出</button></nav>
     <nav id="settings-nav" style="display:none">
       <button class="stab active" data-tab="datasource" onclick="showSettingsTab('datasource')">数据源</button>
       <button class="stab" data-tab="prompt" onclick="showSettingsTab('prompt')">提示词</button>
@@ -324,7 +333,10 @@
       </footer>
     </div>
   </div>
-  <div id="stab-datasource" class="stab-panel">
+  
+  <div id="admin-panel" class="settings-pane" style="display:none">
+    <div class="settings-panels">
+      <div id="stab-datasource" class="stab-panel" style="flex:1;min-height:0;display:none;">
     <div class="cfg-layout">
       <!-- 左栏：数据源 > 库 折叠树（刷新/总览在数据源顶层，不属具体库） -->
       <div class="cfg-col cfg-left">
@@ -362,8 +374,7 @@
       </div>
     </div>
   </div>
-  <div id="admin-panel" class="settings-pane" style="display:none">
-    <div class="settings-panels">
+      
       <section class="admin-card stab-panel" id="stab-prompt">
         <h3>系统提示词（多版本，启用一个生效） <button class="add-btn" onclick="openPromptModal()">+ 新版本</button></h3>
         <div id="prompt-list"></div>
@@ -907,17 +918,17 @@ function closeAdminModal() {
 }
 function showSettings(enter) {
   document.getElementById("chat-panel").style.display = enter ? "none" : "flex";
-  document.getElementById("chat-nav").style.display = enter ? "none" : "block";
+  document.getElementById("chat-nav").style.display = enter ? "none" : "flex";
   document.getElementById("settings-nav").style.display = enter ? "flex" : "none";
-  document.getElementById("admin-panel").style.display = enter ? "block" : "none";
-  document.getElementById("stats-panel").style.display = "none";   // 进设置时关统计
+  document.getElementById("admin-panel").style.display = enter ? "flex" : "none";
+  document.getElementById("stats-panel").style.display = "none";
   if (enter) showSettingsTab("datasource");
 }
 
 // ===== 统计页（顶部独立按钮）：全局卡片 + trace 列表 + 点行看全链路 =====
 function showStats(enter) {
   document.getElementById("chat-panel").style.display = enter ? "none" : "flex";
-  document.getElementById("chat-nav").style.display = enter ? "none" : "block";
+  document.getElementById("chat-nav").style.display = enter ? "none" : "flex";
   document.getElementById("settings-nav").style.display = "none";
   document.getElementById("admin-panel").style.display = "none";
   document.getElementById("stats-panel").style.display = enter ? "flex" : "none";

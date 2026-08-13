@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from src.storage.models import BusinessRule
-from src.storage.pg_client import AsyncSessionFactory
+from src.storage.db_client import AsyncSessionFactory
 
 
 class BusinessRuleIn(BaseModel):

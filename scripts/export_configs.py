@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """从现有 PG 库（旧表名）导出 4 张配置表，生成新表名的 INSERT。
 用法: python3 scripts/export_configs.py
-产出: db/migrate/configs_mysql.sql + db/migrate/configs_pg.sql
+产出: db/migrate/configs_mysql.sql（只产 MySQL 目标；数据源是线上 PG）
 （飞书 feishu_config 不导——用户明确说不用配。）
 """
 import asyncio
@@ -87,32 +87,25 @@ def build_inserts(table_new, cols, rows, json_cols, dialect):
 
 async def main():
     conn = await asyncpg.connect(**CONF)
-    mysql_lines = []
-    pg_lines = []
-    mysql_lines.append("-- 从在线 PG 导出的环境配置（模型/数据源/模板/知识库）")
-    mysql_lines.append("-- 源: nl2sql@online PG (旧表名) → 目标: MySQL 新表名")
-    mysql_lines.append("-- 飞书 feishu_config 不含（用户指定不配）。生成器: scripts/export_configs.py")
-    mysql_lines.append("")
+    lines = [
+        "-- 从在线 PG 导出的环境配置（模型/数据源/模板/知识库）",
+        "-- 源: nl2sql@online PG (旧表名) → 目标: MySQL 新表名（dev profile 连的华为云 RDS MySQL）",
+        "-- 飞书 feishu_config 不含（用户指定不配）。生成器: scripts/export_configs.py",
+        "",
+    ]
 
     for old, spec in MAPPING.items():
         rows = await conn.fetch(f'SELECT {", ".join(spec["cols"])} FROM {old}')
         new = spec["new"]
-        mysql_lines.append(f"-- {old} → {new}  ({len(rows)} 行)")
-        mysql_lines.extend(build_inserts(new, spec["cols"], rows, spec["json_cols"], "mysql"))
-        mysql_lines.append("")
-        pg_lines.append(f"-- {old} → {new}  ({len(rows)} 行)")
-        pg_lines.extend(build_inserts(new, spec["cols"], rows, spec["json_cols"], "pg"))
-        pg_lines.append("")
+        lines.append(f"-- {old} → {new}  ({len(rows)} 行)")
+        lines.extend(build_inserts(new, spec["cols"], rows, spec["json_cols"], "mysql"))
+        lines.append("")
     await conn.close()
 
     out_dir = Path("db/migrate")
     out_dir.mkdir(exist_ok=True)
-    (out_dir / "configs_mysql.sql").write_text("\n".join(mysql_lines), encoding="utf-8")
-    (out_dir / "configs_pg.sql").write_text(
-        "-- 从在线 PG 导出的环境配置（模型/数据源/模板/知识库）\n"
-        "-- 源: nl2sql@online PG (旧表名) → 目标: PG 新表名\n"
-        "-- 飞书 feishu_config 不含。\n\n" + "\n".join(pg_lines), encoding="utf-8")
-    print(f"导出完成: {out_dir/'configs_mysql.sql'} + {out_dir/'configs_pg.sql'}")
+    (out_dir / "configs_mysql.sql").write_text("\n".join(lines), encoding="utf-8")
+    print(f"导出完成: {out_dir/'configs_mysql.sql'}")
     for old, spec in MAPPING.items():
         print(f"  {old:16s} → {spec['new']:20s}")
 

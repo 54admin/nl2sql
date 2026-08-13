@@ -35,7 +35,7 @@ from src.core.session import SessionState
 from src.llm.service import LLMService
 from src.logging import get_logger, setup_logging
 from src.memory.session import SessionManager
-from src.storage.pg_client import init_db
+from src.storage.db_client import init_db
 from src.storage.redis_client import RedisClient
 from src.tools.catalog import build_registry
 from src.web.routes.admin_llm import build_admin_llm_router
@@ -138,8 +138,9 @@ async def lifespan(app: FastAPI):
     _app_state.update(
         orchestrator=orch, loop=loop, session_mgr=sm, llm_service=llm, prompts=prompts,
         datasource_mgr=datasource_mgr, sess_state=sess_state, auth=cfg.auth)
-    log.info("nl2sql 启动完成 db=postgres(%s:%s/%s) redis=%s（模型配置走数据库 llm_config）",
-             cfg.postgres.host, cfg.postgres.port, cfg.postgres.database,
+    _db_type = getattr(cfg.postgres, "type", "postgres") or "postgres"
+    log.info("nl2sql 启动完成 db=%s(%s:%s/%s) redis=%s（模型配置走数据库 llm_config）",
+             _db_type, cfg.postgres.host, cfg.postgres.port, cfg.postgres.database,
              "可用" if redis.available else "降级内存")
 
     # 飞书机器人通道（旁路接入，不碰 HTTP/SSE）：配置完全走数据库 feishu_config 表（后台「飞书」tab），
@@ -189,9 +190,9 @@ async def lifespan(app: FastAPI):
         await sweep_task
     except (asyncio.CancelledError, Exception):
         pass
-    from src.storage import pg_client
-    if pg_client._engine is not None:
-        await pg_client._engine.dispose()
+    from src.storage import db_client
+    if db_client._engine is not None:
+        await db_client._engine.dispose()
     # 关 RAGFlow httpx 连接池（P1：进程级单例，启动复用、关闭释放）
     from src.ragflow.client import close_http_client
     await close_http_client()

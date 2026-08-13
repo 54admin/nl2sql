@@ -36,8 +36,17 @@ class Orchestrator:
                              ) -> AsyncIterator[SSEEvent]:
         # 会话忙时闸门：同一 session 已有 run 在跑 → 立即拒绝，绝不并发跑第二个。
         # 防两个 run 重叠（重叠会让审计 begin() 互冲丢记录、并白费算力）。
+        # 拒绝也要落审计：否则被拒问题在统计页完全不可见——begin+finalize 一条失败记录。
         if session_id in self._running:
             log.warning("会话忙，拒绝并发 run sid=%s trace=%s", session_id, trace_id)
+            if self._audit is not None:
+                try:
+                    self._audit.begin(trace_id, session_id, user_id, text)
+                    self._audit.event(trace_id, "error",
+                                      {"message": "会话忙，拒绝并发（上一条还在处理中）"})
+                    await self._audit.finalize(False, "⚠ 上一条还在处理中，请等它完成或先取消，再发送新问题。", trace_id)
+                except Exception as ex:
+                    log.warning("审计记录被拒请求失败（忽略）: %s", ex)
             yield SSEEvent(SSEEventType.ERROR.value,
                            {"message": "上一条还在处理中，请等它完成或先取消，再发送新问题。"},
                            trace_id)

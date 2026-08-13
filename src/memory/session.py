@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from src.logging import get_logger
 from src.storage.models import Session as SessionRow, Message
-from src.storage.pg_client import AsyncSessionFactory
+from src.storage.db_client import AsyncSessionFactory
 from src.storage.redis_client import RedisClient
 
 log = get_logger(__name__)

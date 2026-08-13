@@ -385,10 +385,22 @@ class AgentLoop:
             self._audit_event("done", {"answer": last_answer, "citations": citations}, trace_id, turn)
         except asyncio.CancelledError:
             log.info("agent loop 被取消 sid=%s turn=%s", session_id, turn)
-            await self._state.transition(session_id, SessionStatus.IDLE)
-            # 取消也回写：至少存上用户问了啥，切会话能看到
-            await self._persist_history(session_id, user_msg, last_answer or "（已取消）", trace_id)
-            await self._audit_finalize(False, last_answer or "（已取消）", trace_id)
+            # 取消时的清理（回写历史 + 审计落库）必须可靠——SSE 客户端断开/新问题抢断会
+            # 触发 task.cancel()，后续 await 可能被二次取消打断（Python 3.11+ cancel 计数 >0
+            # 时新 await 仍可能抛 CancelledError）。逐个 shield 保护，失败不阻断后续清理。
+            cancel_answer = last_answer or "（已取消）"
+            try:
+                await asyncio.shield(self._state.transition(session_id, SessionStatus.IDLE))
+            except (asyncio.CancelledError, Exception):
+                pass
+            try:
+                await asyncio.shield(self._persist_history(session_id, user_msg, cancel_answer, trace_id))
+            except (asyncio.CancelledError, Exception):
+                pass
+            try:
+                await asyncio.shield(self._audit_finalize(False, cancel_answer, trace_id))
+            except (asyncio.CancelledError, Exception):
+                pass
             yield SSEEvent("cancelled", {"turn": turn}, trace_id)
         except Exception as e:
             log.exception("agent loop 异常 sid=%s", session_id)

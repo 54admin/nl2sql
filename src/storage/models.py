@@ -1,7 +1,7 @@
 """ORM 模型。对应 spec 第 12 章核心表。
 
 列/表级 comment= 进 DDL（db/schema.sql 带 COMMENT ON TABLE/COLUMN，由 gen_schema.py 编译）；
-已存在的表靠 pg_client.apply_table_comments() 把模型注释刷进 PG，单一事实源=本文件，不维护第二份 SQL。"""
+已存在的表靠 db_client.apply_table_comments() 把模型注释刷进 PG，单一事实源=本文件，不维护第二份 SQL。"""
 from datetime import datetime
 from uuid import uuid4
 

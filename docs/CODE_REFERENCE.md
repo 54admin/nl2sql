@@ -217,7 +217,7 @@ Session/messages、AuditTrace/AuditEvent、LoopCheckpoint、QueryResult、LlmCon
 - **约束**：uq_ds_schema_table、uq_table_col。
 - **注意**：MetadataColumn 表 sync 不写列（列 live 取），主要靠 admin 手编；SqlTemplate 无 datasource_id（全局表）；QueryResult 无 datasource_id 列（execute_sql 传了但被忽略）。
 
-## `src/storage/pg_client.py`
+## `src/storage/db_client.py`
 平台库 engine + 异步 session 工厂。
 - `_pg_url(config)`：拼 `postgresql+asyncpg://`（user/pwd quote_plus）。
 - `init_db(config)`：建全局 `_engine` + `_AsyncSessionFactory`（expire_on_commit=False）。

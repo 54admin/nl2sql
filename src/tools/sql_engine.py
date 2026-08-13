@@ -12,7 +12,7 @@ from sqlalchemy import text
 
 from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
 from src.storage.models import MetadataColumn
-from src.storage.pg_client import AsyncSessionFactory
+from src.storage.db_client import AsyncSessionFactory
 from src.storage.query_results import save_result
 
 

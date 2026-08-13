@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 from src.logging import get_logger
 from src.storage.models import AuditEvent, AuditTrace
-from src.storage.pg_client import AsyncSessionFactory
+from src.storage.db_client import AsyncSessionFactory
 
 log = get_logger(__name__)
 

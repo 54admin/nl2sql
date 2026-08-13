@@ -132,8 +132,8 @@ P0 摘掉的旧知识后台，用 RAGFlow 版重建。
 |---|------|------|------|
 | C.1 | 删 `embed()` / `_embed_client()` | `src/llm/service.py` | ✅ 方法块整段删（零调用方） |
 | C.2 | 删 `embedding_model` 配置字段 | `src/config.py` | ✅ 字段+注释删 |
-| C.3 | 删 pgvector `CREATE EXTENSION` 块 | `src/storage/pg_client.py` | ✅ try/except 块删 |
-| C.4 | 删 embedding_model 迁移行 | `src/storage/pg_client.py:_PG_MIGRATIONS` | ✅ 5 行删（attribution/analysis 行保留） |
+| C.3 | 删 pgvector `CREATE EXTENSION` 块 | `src/storage/db_client.py` | ✅ try/except 块删 |
+| C.4 | 删 embedding_model 迁移行 | `src/storage/db_client.py:_PG_MIGRATIONS` | ✅ 5 行删（attribution/analysis 行保留） |
 | C.5 | PURPOSES 去 embedding | `src/web/routes/admin_llm.py` | ✅ `("analysis","attribution")` |
 | C.6 | 清 embedding 注释/docstring | `service.py`/`models.py`/`admin_llm.py` | ✅ analysis/attribution 两种用途 |
 | C.7 | 删 DB 孤儿数据（DML，ai_online 执行） | `llm_config` / `prompts` | ✅ embedding 配置行删；default/精简版 prompt 行删（引用已删 do_attribution，orchestrator 改读代码常量） |
@@ -159,10 +159,10 @@ P0 摘掉的旧知识后台，用 RAGFlow 版重建。
 | S.1 | 生成权威 schema.sql（从 ORM 编译，17 表/12 索引/170 注释） | `db/schema.sql` | ✅ |
 | S.2 | 可复用生成器（改 ORM 后重跑即同步） | `scripts/gen_schema.py` | ✅ 索引按 name 稳定排序，产出确定性 |
 | S.3 | 防漂移校验脚本（ORM↔schema.sql 不一致即 fail） | `scripts/check_schema.py` | ✅ |
-| S.4 | init_db 瘦身：只建 engine+session，删 create_all/迁移/刷注释 | `src/storage/pg_client.py` | ✅ |
-| S.5 | 删 SQLite 死路径（无 tests/ 目录，is_sqlite/StaticPool/url 参数全删） | `src/storage/pg_client.py` | ✅ |
+| S.4 | init_db 瘦身：只建 engine+session，删 create_all/迁移/刷注释 | `src/storage/db_client.py` | ✅ |
+| S.5 | 删 SQLite 死路径（无 tests/ 目录，is_sqlite/StaticPool/url 参数全删） | `src/storage/db_client.py` | ✅ |
 | S.6 | 删 `auto_migrate` 配置项 + yml 两处 + main.py 传参 | `config.py`/`application-*.yml`/`main.py` | ✅ |
-| S.7 | 删 `_PG_MIGRATIONS`(25 条) / `_apply_model_comments` / main.py 本地 `_pg_url` | `pg_client.py`/`main.py` | ✅ |
+| S.7 | 删 `_PG_MIGRATIONS`(25 条) / `_apply_model_comments` / main.py 本地 `_pg_url` | `db_client.py`/`main.py` | ✅ |
 
 ### 验收
 - [x] `grep auto_migrate|StaticPool|_PG_MIGRATIONS|is_sqlite` 在 src/ 零命中 ✅

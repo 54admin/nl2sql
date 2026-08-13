@@ -20,7 +20,7 @@
 
 | 库 | 存什么 | 怎么连 |
 |----|--------|--------|
-| **平台库**（PostgreSQL） | 会话/消息/审计/元数据/配置表/提示词/SQL 模板 | ORM，全局 `AsyncSessionFactory`（`storage/pg_client.py`） |
+| **平台库**（PostgreSQL） | 会话/消息/审计/元数据/配置表/提示词/SQL 模板 | ORM，全局 `AsyncSessionFactory`（`storage/db_client.py`） |
 | **业务库**（MySQL/StarRocks/PG） | 用户真正要查的业务数据 | `execute_sql` 按 `datasource_id` **动态建连、查完即弃**，**绝不经 ORM**（`datasource/manager.py` 缓存 engine） |
 | **RAGFlow**（外部） | 文档/向量（解析、分段、embedding 全归它） | `knowledge_search` 工具转发 `/retrieval`（`ragflow/client.py`） |
 | **Redis** | 会话热态 / 查询结果旁路(TTL) / 飞书会话绑定 | 连不上自动降级进程内 dict（`storage/redis_client.py`） |

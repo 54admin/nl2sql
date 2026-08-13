@@ -260,7 +260,7 @@ class FeishuAdapter:
         from sqlalchemy import select
         from src.config import FeishuConfig
         from src.storage.models import FeishuConfigRow
-        from src.storage.pg_client import AsyncSessionFactory
+        from src.storage.db_client import AsyncSessionFactory
         try:
             async with AsyncSessionFactory() as s:
                 row = (await s.execute(select(FeishuConfigRow).where(

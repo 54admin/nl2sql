@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
 from src.datasource.metadata_sync import fetch_table_columns
 from src.storage.models import BusinessRule, MetadataTable, TableRelation
-from src.storage.pg_client import AsyncSessionFactory
+from src.storage.db_client import AsyncSessionFactory
 
 
 async def _list_enabled_tables(datasource_id: int, engine: AsyncEngine) -> list[dict]:

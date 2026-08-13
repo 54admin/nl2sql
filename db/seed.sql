@@ -25,6 +25,7 @@ INSERT INTO nl_cfg_skills (scene, content, tools, mode, "order", version, enable
 - 问一个数给一个数，问一张表给那批数据，别扩展成报告。
 - 结果为空如实说「没有查到符合条件的数据」，不编造。
 - 先简述查了什么（表/口径/行数），再给数据。
+- Markdown 表格列类型规范：数值（金额/比率/得分/计数等）一律放独立的数字列，纯文本（名称/描述/说明等）放描述列。禁止把数值混进描述性列里（如「损失率 15.2%」整体放一个列），也禁止把文字描述混进数字列。每列只放一种数据类型——数字列只填数字（可带 % 或单位），描述列只填文字。
 
 SQL 原则：
 - 全程只读：只写 SELECT，禁止 DDL（建/改/删表）、DML（增删改数据）、危险函数。
@@ -32,7 +33,8 @@ SQL 原则：
 - 全限定名：表名用 query_metadata 返回的原始写法（可能是 schema.table），别自己改写。
 - JOIN 优先：跨表用 JOIN，优先按 relations 关联口径；relations 为空按字段注释推导主外键，用 INNER/LEFT JOIN，别堆子查询。
 - UNION/UNION ALL 合并结构相同的结果集（优先 UNION ALL 更快）；步骤多/有中间复用用 WITH/CTE；聚合 SUM/COUNT/AVG 起有意义的别名。
-- 比率/增长率/百分率不乘 100，数据是什么写什么；聚合空值用 coalesce(sum(coalesce(字段,0)),0)；数字保留原始精度不四舍五入。', '["query_metadata", "execute_sql", "get_sql_template"]'::json, 'always_on', 1, 1, true
+- 百分比/比率/完成率/损失率/增长率等比率型指标：业务表中小数存储（如 0.152 表示 15.2%），查询时必须乘 100 展示（如 loss_rate*100 AS 损失率）。SQL 里直接 *100，结果表和回答文本都显示乘后的值（如 15.2 而非 0.152）。百分点类差值也同理乘 100。
+- 聚合空值用 coalesce(sum(coalesce(字段,0)),0)；数字保留原始精度不四舍五入（乘 100 后同理不四舍五入）。', '["query_metadata", "execute_sql", "get_sql_template"]'::json, 'always_on', 1, 1, true
 ) ON CONFLICT (scene) DO NOTHING;
 INSERT INTO nl_cfg_skills (scene, content, tools, mode, "order", version, enabled) VALUES (
     'attribution', '【归因方法论】用户问「为什么下降/上升/异常/波动/原因/怎么回事/主要原因」时按此走。

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.logging import get_logger
 from src.storage.models import Datasource
-from src.storage.pg_client import AsyncSessionFactory
+from src.storage.db_client import AsyncSessionFactory
 
 log = get_logger(__name__)
 
@@ -32,7 +32,7 @@ class DataSourceManager:
     # ---- 连接池 ----
     def _build_engine(self, row: Datasource) -> AsyncEngine:
         pwd = row.password_enc   # 明文存（内网工具去加密）
-        # 用户名/密码 quote_plus，防 @:/ 等字符破坏 URL 解析（同 pg_client 范式）
+        # 用户名/密码 quote_plus，防 @:/ 等字符破坏 URL 解析（同 db_client 范式）
         # db_name 空=连实例（多库导航 / 跨库查）；非空=连指定库（兼容老数据）
         base = f"mysql+aiomysql://{quote_plus(row.username)}:{quote_plus(pwd)}@{row.host}:{row.port}"
         url = f"{base}/{row.db_name}" if row.db_name else f"{base}/"

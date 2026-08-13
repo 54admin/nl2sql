@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from src.storage.models import Datasource, MetadataTable, TableRelation
-from src.storage.pg_client import AsyncSessionFactory
+from src.storage.db_client import AsyncSessionFactory
 
 
 class TableRelationIn(BaseModel):

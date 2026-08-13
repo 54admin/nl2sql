@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException
 from sqlalchemy import func, select
 
 from src.storage.models import AuditEvent, AuditTrace, Session
-from src.storage.pg_client import AsyncSessionFactory
+from src.storage.db_client import AsyncSessionFactory
 
 
 def build_audit_router() -> APIRouter:
