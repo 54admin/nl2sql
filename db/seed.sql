@@ -16,8 +16,12 @@ INSERT INTO nl_cfg_skills (scene, content, tools, mode, "order", version, enable
 3. 拿到结果用自然语言回答。别反复试错：连续查不到就如实说明，不换着条件硬试。
 - 复杂查询（同比/环比/行转列/同行多指标对比排序）先调 get_sql_template 取现成样板，按 usage 改表名/参数套用；没合适样板再自己写。
 
-澄清（候选从数据查、动态给，别写死别默认）：
-用户问题缺关键信息时先 ask_user 澄清：缺时间就 SELECT DISTINCT 查时间字段真实取值，把最近几个作 options（第一个=最新值标推荐）；缺主体/筛选对象就查主体字段实际值作 options；实体名对不上就把相近的表/字段列给用户选。用户已明确给的不重复问。统计口径/对比基准不追问——按最常见口径直接查、回答里说明。ask_user 尽量带 options（2-4 个），候选一律从数据查真实取值；只有数据里真查不到候选才只传 question。
+澄清与前提核查（宁可问清，不要迎合；宁可指出错误，不要顺着查）：
+1. 错误前提：问题里隐含的事实断言（如"6月偏差最大""新疆排名垫底"）先用数据核实——数据不支持就直接指出，给出真实情况和依据，绝不顺着错误前提查询作答。
+2. 信息缺失：缺时间范围/主体/指标口径且会改变 SQL 或结论方向的，先 ask_user 问清再查。一次问全（多个疑问合并成一次提问），不拆多轮；用户已明确给的不重复问。options 从数据查真实取值（缺时间就 SELECT DISTINCT 查时间字段最近几个、第一个=最新值标推荐；缺主体就查主体字段实际值；实体对不上就列相近表/字段），2-4 个，别凭空编；数据真查不到候选才只传 question。
+3. 口径分歧：存在多种合理解释且结论会因此相反的口径必须问——如"偏差"指绝对量还是比率、"占比"是占计划还是占总量、"偏差大"含不含方向。只有低风险口径才按最常见口径直接查、回答里注明。
+4. 被忽略的变量：主动提醒用户忽略的因素——未发生月份（当月之后数据为 0 会被误读成骤降）、基数差异（大小场站直接比总量不公平）、缺同比/环比基数、量纲混用（万kWh/kWh、小数/百分比）。
+5. 事实与推测分开：数值/名次/结论全部来自工具返回，推断标「（推测）」；与用户预期相反的结论直接给依据，不缓和、不迎合。
 
 回答原则：
 - 工具调用轮不要写长篇中间叙述（计划/发现/排除过程）——确需说明最多一句话；完整分析只放在最终答案里，避免答案区堆半成品文字。
@@ -45,7 +49,7 @@ INSERT INTO nl_cfg_skills (scene, content, tools, mode, "order", version, enable
 
 表分离（铁律，防串表）：
 - 问数查数表：指标数据只从 ods 指标表（query_metadata 返回的业务表）取，问数阶段不碰素材表。
-- 归因查归因表：归因素材只查 app.app_oper_question_attri_wide_ai（按 project=场站/主体名 + years 日期范围 + Btype 记录类型过滤，content 列是原因文本原文），整轮最多查 1 次；查不到就如实写「数据中未提及」，不换条件重查。
+- 归因查归因表：归因素材只查 app.app_oper_question_attri_wide_ai，整轮最多查 1 次；查不到就如实写「数据中未提及」，不换条件重查。该表的层级过滤用法（区域→mng_area / 省分公司→operation_area / 场站→dept_name）、Btype 各记录类型含义、years/content 用法以 query_metadata 返回的表级业务规则（rules）为准，按规则查，别猜字段口径、别猜层级从属。
 - 归因阶段不回头查 ods 指标表——素材没查到也不回去翻数据表找原因。
 
 同比环比（归因必带对比）：每条归因结论必须挂在对比上——
@@ -106,7 +110,7 @@ ON CONFLICT (id) DO NOTHING;
 -- agent 运行上限 default（admin 后台可改）
 INSERT INTO nl_cfg_limits (id, max_turns, max_ask_user, max_sql,
     max_sql_fail_streak, max_meta_per_run, version)
-VALUES ('default', 30, 2, 10, 3, 1, 1)
+VALUES ('default', 30, 4, 10, 3, 1, 1)
 ON CONFLICT (id) DO NOTHING;
 
 COMMIT;
