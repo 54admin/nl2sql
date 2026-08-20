@@ -1,6 +1,6 @@
 # NL2SQL 演进执行计划
 
-> 「系统是什么」见 `ARCHITECTURE.md`；本文是「怎么一步步落地」。
+> 「系统是什么」见 `技术架构.md`；本文是「怎么一步步落地」。
 > 服务三大需求：① 接入 RAGFlow ② 删归因胖工具→skill 化 ③ 意图识别（涌现式，靠工具描述 + skill）。
 > **每步独立可交付、可验收；改完一步服务必须仍能起。**
 
@@ -75,7 +75,7 @@ P0 顺手把胖工具 `do_attribution` 删掉（它本就是归因 skill 化前�
 ## P2 — 窄内核 + 归因 skill（需求②③ 核心）
 
 ### 背景
-内核 prompt 当前硬编码 nl2sql 方法论；归因待用 skill 重建；意图识别靠「工具描述区分度 + 常驻方法论 skill」。两个 skill 都 **always-on**（不建 load_skill，规模未到，详见 ARCHITECTURE 5.3）。
+内核 prompt 当前硬编码 nl2sql 方法论；归因待用 skill 重建；意图识别靠「工具描述区分度 + 常驻方法论 skill」。两个 skill 都 **always-on**（不建 load_skill，规模未到，详见 技术架构.md §一）。
 
 | # | 动作 | 文件 | 具体改动 |
 |---|------|------|---------|
@@ -195,7 +195,7 @@ P0 摘掉的旧知识后台，用 RAGFlow 版重建。
 - [x] `ragflow_config` 有 default 占位（enabled=false，地址空待 admin 填）✅
 - [x] 三套校验全绿：`check_schema` / `check_seed` / `import src.main` ✅
 
-### 设计落定（ARCHITECTURE.md §5）
+### 设计落定（技术架构.md §四）
 - **代码常量**（`prompt_store.py` 顶部）= 出厂默认 + 兜底 + git 版本控制权威
 - **prompts 表** = 在线覆盖层（admin 热更新，不重启）；scene = skill 名
 - **SKILL_MANIFEST 的 desc/mode** 留代码层（线上账号非 prompts 表 owner，ALTER 加列被拒；
