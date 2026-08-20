@@ -99,7 +99,7 @@ INSERT INTO nl_cfg_skills (scene, content, tools, mode, "order", version, enable
 **二、[核心指标2]** 同上。多指标多分节。
 **三、异常关注与归因** 偏差最大/排名突出的实体逐条点名（场站/项目），给指标+变化+同比环比对比+归因（标「数据证实」或「推测」）。
 **四、措施建议** 1-3条可落地措施，针对上面点名的问题；数据不足则省略本节。
-末尾输出「该分析仅供参考」。', '["execute_sql"]'::json, 'always_on', 3, 1, true
+末尾输出「该分析仅供参考」。', '["query_metadata", "execute_sql"]'::json, 'always_on', 3, 1, true
 ) ON CONFLICT (scene) DO NOTHING;
 INSERT INTO nl_cfg_skills (scene, content, tools, mode, "order", version, enabled) VALUES (
     'contact_referral', '【联系人推荐·计划经营组】当用户问题涉及以下职责范畴时，在回答末尾自然地附一句「详细信息可联系 XXX（XX小组）」。

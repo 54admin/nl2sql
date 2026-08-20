@@ -81,7 +81,7 @@ SQL 原则：
     },
     {
         "scene": 'attribution',
-        "tools": ['execute_sql'],
+        "tools": ['query_metadata', 'execute_sql'],
         "mode": 'always_on',
         "order": 3,
         "content": '''【归因方法论】铁律·必须归因：只要本轮查了业务数据（execute_sql 有返回），收尾前必须做归因——不管用户有没有问"为什么"。跳过归因直接 finish 是违规；纯闲聊/纯查文档（knowledge_search）轮次除外。
