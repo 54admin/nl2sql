@@ -43,6 +43,29 @@ SQL 原则：
 - 聚合空值用 coalesce(sum(coalesce(字段,0)),0)；数字保留原始精度不四舍五入。', '["query_metadata", "execute_sql", "get_sql_template"]'::json, 'always_on', 1, 1, true
 ) ON CONFLICT (scene) DO NOTHING;
 INSERT INTO nl_cfg_skills (scene, content, tools, mode, "order", version, enabled) VALUES (
+    'kb_qa', '【知识库答疑方法论】用户问「文档/资料/制度/规定/办法/标准/手册/口径/移交资料/缺陷清单/验收记录/会议纪要/复盘」类内容时按此走——这是查【文档】，不是查业务数据。
+
+【先判断：是查数据还是查文档】这是第一步，判断错全盘皆错：
+- 查【文档】（用 knowledge_search）：用户要的是「某份文件/制度/资料里写了什么」——
+  规章制度、管理办法、技术标准、操作手册、指标口径、项目移交资料、验收文档、缺陷清单、
+  会议纪要、复盘材料、采购规范、图纸说明、培训资料……这类内容在「文档」里，不在业务数据表里。
+  关键词信号：制度/规定/办法/标准/手册/流程/要求/清单/资料/移交/验收/纪要/复盘/说明/口径/谁负责/怎么规定的。
+- 查【数据】（用 execute_sql）：用户要的是「具体数值/统计/排名/对比/趋势」——
+  多少/完成率/排名/偏差/得分/环比/明细/汇总。这类在业务数据表里。
+
+【禾枫移交生产的缺陷有哪些 —— 这是查文档不是查数据】
+"移交生产的缺陷"= 项目移交资料里记录的缺陷清单，这是【文档】内容（在移交资料/验收文档里），
+不是业务数据表的 overdue_defect 字段（那是运行期的超期缺陷统计，跟"移交"无关）。
+→ 该用 knowledge_search，不是 execute_sql。
+
+【怎么查】
+1. 直接调 knowledge_search：query 提炼成检索关键词（实体+事项，如「禾枫 移交 缺陷」「项目移交 验收 缺陷清单」），不要带具体数值/日期。
+2. 拿到文档片段后，基于片段内容回答用户；片段不足/无匹配就如实说明「知识库里没有找到相关文档」，不编造。
+3. 不要为了"兜底"去 execute_sql 查数据表——文档类问题查数据表是答非所问。
+
+【知识库可能为空】如果 knowledge_search 返回「未配置/无匹配」，直接告诉用户「知识库里还没有相关文档，请先上传」。不要转去查数据表。', '["knowledge_search"]'::json, 'always_on', 2, 1, true
+) ON CONFLICT (scene) DO NOTHING;
+INSERT INTO nl_cfg_skills (scene, content, tools, mode, "order", version, enabled) VALUES (
     'attribution', '【归因方法论】铁律·必须归因：只要本轮查了业务数据（execute_sql 有返回），收尾前必须做归因——不管用户有没有问"为什么"。跳过归因直接 finish 是违规；纯闲聊/纯查文档（knowledge_search）轮次除外。
 
 归因前自检（必做）：finish 前检查——归因素材查了吗？对比数据（上期/去年同期）有吗？缺了先补（素材查素材表，对比数据靠问数阶段已查回的期间数据），再 finish。
@@ -76,7 +99,7 @@ INSERT INTO nl_cfg_skills (scene, content, tools, mode, "order", version, enable
 **二、[核心指标2]** 同上。多指标多分节。
 **三、异常关注与归因** 偏差最大/排名突出的实体逐条点名（场站/项目），给指标+变化+同比环比对比+归因（标「数据证实」或「推测」）。
 **四、措施建议** 1-3条可落地措施，针对上面点名的问题；数据不足则省略本节。
-末尾输出「该分析仅供参考」。', '["knowledge_search"]'::json, 'always_on', 2, 1, true
+末尾输出「该分析仅供参考」。', '["execute_sql"]'::json, 'always_on', 3, 1, true
 ) ON CONFLICT (scene) DO NOTHING;
 INSERT INTO nl_cfg_skills (scene, content, tools, mode, "order", version, enabled) VALUES (
     'contact_referral', '【联系人推荐·计划经营组】当用户问题涉及以下职责范畴时，在回答末尾自然地附一句「详细信息可联系 XXX（XX小组）」。
@@ -98,7 +121,7 @@ INSERT INTO nl_cfg_skills (scene, content, tools, mode, "order", version, enable
 1. 用户问题明显沾上述某人的职责范畴（如问"标准体系""成本预算""分层授权""电量计划"等），才在回答末尾加「详细信息可联系 {姓名}（{小组}）」。
 2. 一句话带过即可，不要展开介绍职责、不要单列区块。
 3. 职责跨多人时，推荐最相关的一位；拿不准归属就不加，绝不乱推荐。
-4. 纯闲聊、与上述职责无关的问题，不加。', '[]'::json, 'always_on', 3, 1, true
+4. 纯闲聊、与上述职责无关的问题，不加。', '[]'::json, 'always_on', 4, 1, true
 ) ON CONFLICT (scene) DO NOTHING;
 
 -- RAGFlow 知识库 default 占位（地址/key 空、禁用；admin 后台填真实值并启用）
