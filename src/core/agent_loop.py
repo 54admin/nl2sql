@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import time
 from typing import AsyncIterator
 
 from src.core.session import SessionState, SessionStatus
@@ -15,6 +17,23 @@ from src.core.types import CancelToken, LoopContext, SSEEvent, ToolResult
 from src.llm.service import LLMService
 from src.logging import get_logger
 from src.tools.registry import ToolRegistry
+
+# 单轮 LLM 生成墙钟上限：推理模型可把 16K 思考预算磨成 10+ 分钟马拉松
+# （实测 8543 个 reasoning 增量、11 分钟、烧穿网关配额才撞上限）。到点掐流：
+# 丢弃必然残缺的 tool_calls 参数 JSON，已流式输出的正文保留，走思考超时催促路径。
+_LLM_TURN_TIMEOUT_S = 150
+
+# 孤立代理字符清洗：流式分块会把多字节字符（数学粗体 𝗽 等）切成两半，半截解码产生
+# \ud835 这类孤立代理——Python str 能存它，但后续任何 utf-8 编码（LLM 请求体/飞书卡片/
+# MySQL/Redis）都会炸（实测报错 'utf-8' codec can't encode '\ud835' surrogates not
+# allowed）。所有来自模型流的文本入口即清洗，替换为 U+FFFD。
+_SURROGATE_RE = re.compile("[\ud800-\udfff]")
+
+
+def _clean(text: str) -> str:
+    if not text:
+        return text
+    return _SURROGATE_RE.sub("\ufffd", text)
 
 log = get_logger(__name__)
 
@@ -122,6 +141,77 @@ def _to_openai_tool_calls(tool_calls: list[dict]) -> list[dict]:
     ]
 
 
+def _finish_answer_piece(acc: dict, field: str = "answer") -> str:
+    """从工具调用参数的**增量原始 JSON** 里抽取指定字符串字段的新增文本（answer/sql 通用）。
+
+    参数是流式累积的残缺 JSON（如 {"answer": "六月偏差较高的...），这里：
+    1. 定位字段名后的字符串开引号；2. 取到未转义闭引号（或串尾，流未完）；
+    3. 增量安全解码（尾部悬挂反斜杠留到下轮，防把 \\n 切两半）；
+    4. 与已发射长度（acc[f"_emitted_{field}"]）差分，只返回新增段。
+    任何一步解析不出就返回 ""——流式打字是体验优化，done/tool_result 的全量值才是兜底。"""
+    raw = acc.get("args", "")
+    key = f'"{field}"'
+    key_pos = raw.find(key)
+    if key_pos < 0:
+        return ""
+    rest = raw[key_pos + len(key):]
+    i = 0
+    while i < len(rest) and rest[i] in " \t\r\n":
+        i += 1
+    if i >= len(rest) or rest[i] != ":":
+        return ""
+    i += 1
+    while i < len(rest) and rest[i] in " \t\r\n":
+        i += 1
+    if i >= len(rest) or rest[i] != '"':
+        return ""
+    body = rest[i + 1:]
+    end, j = None, 0
+    while j < len(body):
+        if body[j] == "\\":
+            j += 2
+            continue
+        if body[j] == '"':
+            end = j
+            break
+        j += 1
+    seg = body if end is None else body[:end]
+    if seg.endswith("\\"):          # 悬挂转义：可能是 \n 被流切成两半，留到下轮
+        seg = seg[:-1]
+    try:
+        decoded = json.loads(f'"{seg}"')
+    except Exception:
+        return ""
+    emitted_key = f"_emitted_{field}"
+    emitted = acc.get(emitted_key, 0)
+    if len(decoded) <= emitted:
+        return ""
+    acc[emitted_key] = len(decoded)
+    return decoded[emitted:]
+
+
+def _loose_parse_args(raw: str) -> dict:
+    """args 流式 JSON 的宽松兜底：json.loads 失败（流尾截断/转义切半常见）时，
+    从残缺 JSON 里按 "key": "value" 抠出各字符串字段（复用 _finish_answer_piece 的
+    增量安全解码）。sql 等关键字段大多在截断前已完整——抠出来直接用，省一次模型
+    重试（实测"错误：未提供 SQL"连发 4 次就是这么来的）。抠不出返回空 dict。"""
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except Exception:
+        pass
+    out: dict = {}
+    for m in re.finditer(r'"([A-Za-z_]\w*)"\s*:\s*"', raw):
+        key = m.group(1)
+        if key in out:
+            continue
+        piece = _finish_answer_piece({"args": raw}, key)
+        if piece:
+            out[key] = piece
+    return out
+
+
 class AgentLoop:
     """自主同步 ReAct 循环。run 为 async generator，末事件必为
     done/cancelled/error/clarification_needed 之一。"""
@@ -182,6 +272,8 @@ class AgentLoop:
                 log.warning("审计 begin 失败（忽略）: %s", ex)
 
         last_answer = ""
+        dead_turns = 0     # 空转轮（无正文无工具调用）计数：防截断流被当成"答完了"
+        summary_notified = False   # 整体总结开始提示是否已发（最终答案生成 30-60s，卡片无反馈像卡死）
         ask_count = 0
         prev_keys: set[tuple[str, str]] = set()
         prev_sql: list[tuple[frozenset, frozenset, frozenset]] = []  # 已执行 SQL 的 (表,WHERE谓词,列)，查重用
@@ -195,20 +287,46 @@ class AgentLoop:
             for turn in range(self._limits["max_turns"]):
                 cancel_token.check()
                 yield SSEEvent("turn_start", {"turn": turn}, trace_id)
-                # 流式收 content（发 answer_delta 打字机）+ collect tool_calls 增量
+                # 流式收 content（发 answer_delta 打字机）+ collect tool_calls 增量。
+                # 消费循环带墙钟 deadline（见 _LLM_TURN_TIMEOUT_S）：anext 按剩余预算 wait_for，
+                # 到点掐流防思考马拉松。
                 content = ""
                 tc_acc: dict = {}
-                async for chunk in self._llm.chat_stream(msgs, self._registry.openai_tools()):
+                turn_timed_out = False
+                _stream = self._llm.chat_stream(msgs, self._registry.openai_tools())
+                # 动态墙钟：基础 150s 只管"只思考不产出"的马拉松；一旦有产出（正文/工具参数
+                # 增量）就续期到 now+60s，总上限 420s——正在打字的慢轮绝不拦腰砍
+                # （实测长答案轮 150s+ 常见，砍断→催促重写→卡片冻在半句话几分钟）。
+                _hard_deadline = time.monotonic() + _LLM_TURN_TIMEOUT_S
+                _cap = _hard_deadline + 270
+                _deadline = _hard_deadline
+                while True:
+                    _left = _deadline - time.monotonic()
+                    if _left <= 0:
+                        turn_timed_out = True
+                        break
+                    try:
+                        chunk = await asyncio.wait_for(_stream.__anext__(), timeout=_left)
+                    except StopAsyncIteration:
+                        break
+                    except asyncio.TimeoutError:
+                        turn_timed_out = True
+                        break
                     cancel_token.check()
                     if chunk.content:
-                        content += chunk.content
-                        yield SSEEvent("answer_delta", {"text": chunk.content}, trace_id)
-                        self._audit_event("answer_delta", {"text": chunk.content}, trace_id, turn)
+                        piece = _clean(chunk.content)   # 入口清洗孤立代理（见 _clean 注释）
+                        content += piece
+                        _deadline = min(time.monotonic() + 60, _cap)
+                        yield SSEEvent("answer_delta", {"text": piece}, trace_id)
+                        self._audit_event("answer_delta", {"text": piece}, trace_id, turn)
+                    if chunk.tool_call_delta:
+                        _deadline = min(time.monotonic() + 60, _cap)   # 工具参数在流=有产出，续期
                     # 思考链：推理模型在工具决策轮吐 reasoning_content（content 为空）。
                     # 单独发 reasoning_delta——飞书侧流式打字进专属"思考"元素，破除工具阶段静默。
                     if chunk.reasoning:
-                        yield SSEEvent("reasoning_delta", {"text": chunk.reasoning}, trace_id)
-                        self._audit_event("reasoning_delta", {"text": chunk.reasoning}, trace_id, turn)
+                        rpiece = _clean(chunk.reasoning)
+                        yield SSEEvent("reasoning_delta", {"text": rpiece}, trace_id)
+                        self._audit_event("reasoning_delta", {"text": rpiece}, trace_id, turn)
                     for tc in chunk.tool_call_delta:
                         idx = getattr(tc, "index", None)
                         idx = idx if idx is not None else 0
@@ -221,20 +339,51 @@ class AgentLoop:
                             if fn.name:
                                 acc["name"] = fn.name
                             if fn.arguments:
-                                acc["args"] += fn.arguments
+                                acc["args"] += _clean(fn.arguments)
                         else:
                             if getattr(tc, "name", None):
                                 acc["name"] = tc.name
                             if getattr(tc, "args", None):
-                                acc["args"] += tc.args
+                                acc["args"] += _clean(tc.args)
+                        # finish 参数打字机：模型把最终答案塞 finish(answer=...) 参数时，
+                        # 参数流式期用户原本什么都看不到（卡片静默几十秒后一次性砸出）。
+                        # 这里把参数里的 answer 增量解码成 answer_delta 实时外发——
+                        # 解析失败就静默跳过，done 事件的全量答案兜底，内容不丢。
+                        if acc["name"] == "finish" and not content.strip():
+                            piece = _finish_answer_piece(acc, "answer")
+                            if piece:
+                                yield SSEEvent("answer_delta", {"text": piece}, trace_id)
+                                self._audit_event("answer_delta", {"text": piece}, trace_id, turn)
+                        # execute_sql 参数打字机：SQL 随模型生成实时上卡（用户点名要看）。
+                        # 解码失败静默跳过，tool_call 事件的全量 SQL 兜底。不发审计（delta 太碎）。
+                        elif acc["name"] == "execute_sql":
+                            piece = _finish_answer_piece(acc, "sql")
+                            if piece:
+                                yield SSEEvent("tool_sql_delta", {"text": piece}, trace_id)
+                # 整体总结开始提示：finish 工具名在参数流里一出现即告知用户——最终答案
+                # 生成要 30-60s，此前卡片零反馈像卡死（用户点名要这个提示）。每 run 只发一次。
+                if not summary_notified and any(a.get("name") == "finish" for a in tc_acc.values()):
+                    summary_notified = True
+                    yield SSEEvent("notice", {"text": "数据查询完成，正在生成整体总结"}, trace_id)
                 tool_calls = []
-                for idx in sorted(tc_acc):
-                    v = tc_acc[idx]
+                if turn_timed_out:
+                    # 掐流收尾：关底层 HTTP 流（防连接悬挂），丢弃残缺的 tool_calls 参数——
+                    # 半截 JSON 解析成 args={} 去执行工具只会产生垃圾调用；已输出的正文保留。
                     try:
-                        args = json.loads(v["args"]) if v["args"] else {}
+                        await _stream.aclose()
                     except Exception:
-                        args = {}
-                    tool_calls.append({"id": v["id"], "name": v["name"], "args": args})
+                        pass
+                    self._audit_event("warning", {"reason": "turn_timeout",
+                                                  "limit_s": _LLM_TURN_TIMEOUT_S,
+                                                  "content_len": len(content)}, trace_id, turn)
+                    # 卡片可见反馈：掐断重写期间清单有提示行，不无声冻结
+                    yield SSEEvent("notice", {"text": "上轮输出超时，正在重新组织答案"}, trace_id)
+                else:
+                    for idx in sorted(tc_acc):
+                        v = tc_acc[idx]
+                        # 宽松解析：整段 JSON 解析失败（流尾截断）时抠字段兜底，防"未提供 SQL"
+                        args = _loose_parse_args(v["args"]) if v["args"] else {}
+                        tool_calls.append({"id": v["id"], "name": v["name"], "args": args})
                 if content.strip():  # 纯空白（如 "\n\n"）不算有效答案，避免覆盖前面已查到的结论
                     last_answer = content
                 msgs.append({"role": "assistant", "content": content,
@@ -242,6 +391,28 @@ class AgentLoop:
                              if tool_calls else []})
 
                 if not tool_calls:
+                    # 空转轮守卫：只有思考、没有正文也没有工具调用 = 输出被截断
+                    # （典型：思考烧穿 max_tokens，流戛然而止）。直接 break 会把上一轮的
+                    # 中间叙述（"接下来查…"）当最终答案发出去。塞一句催促重跑一轮；
+                    # 连续空转两次才放弃（保住已积累内容 + 明确告警）。
+                    # 思考超时（turn_timed_out）走同一守卫但换更强的催促：直接令其作答收尾。
+                    if (turn_timed_out or not content.strip()) and len(msgs) > 1 and dead_turns < 2:
+                        dead_turns += 1
+                        if turn_timed_out:
+                            self._audit_event("warning", {"reason": "turn_timeout_nudge",
+                                                          "hint": f"单轮生成超 {_LLM_TURN_TIMEOUT_S}s 被掐断，已令其直接作答"}, trace_id, turn)
+                            msgs.append({"role": "user",
+                                         "content": f"（系统提示）你上一轮思考时间过长（超过 {_LLM_TURN_TIMEOUT_S} 秒）被系统中断。"
+                                                    "请立即基于已获取的工具结果用中文写出最终答案并调用 finish 收尾，禁止再展开长思考。"})
+                        else:
+                            self._audit_event("warning", {"reason": "dead_turn",
+                                                          "hint": "模型无正文无工具调用（疑似思考烧穿输出上限），已催促重试"}, trace_id, turn)
+                            msgs.append({"role": "user",
+                                         "content": "（系统提示）你上一条回复没有输出任何正文或工具调用，可能是输出被截断。"
+                                                    "请直接给出最终答案，或调用所需工具继续。不要再复述计划。"})
+                        continue
+                    if not content.strip():
+                        dead_turns += 1
                     break
 
                 cur_keys = {(tc.get("name"),
@@ -355,9 +526,17 @@ class AgentLoop:
                                                       "result_id": result.result_id}, trace_id, turn)
 
                     if result.finished:
-                        # finish 的最终答案以 LLM 给的 args.answer 为准（spec 6.2），
-                        # summary 仅作兜底——内置 _finish 实际就把 args.answer 填进 summary
-                        last_answer = args.get("answer") or result.summary
+                        # finish 答案 vs 本轮流式正文取更完整者：
+                        # 模型把全文塞 finish 参数 → 参数长（但参数流式期用户看不见，卡片长时间静默后一次性砸出）；
+                        # 先在正文流式输出再 finish（answer 放一句话结论）→ 正文长（用户全程看到打字）。
+                        # 取长者保证答案不丢；提示词同时引导模型优先走正文流式。
+                        cand = (args.get("answer") or result.summary or "").strip()
+                        if len(content.strip()) > len(cand):
+                            cand = content.strip()
+                        # 空值不覆盖：流中断时 finish 参数可能解不出来（args 空 + 正文空），
+                        # 保留前面轮次已流式输出的内容，别把答案抹成空串
+                        if cand:
+                            last_answer = cand
                         finished = True
                         break
 
@@ -375,11 +554,26 @@ class AgentLoop:
                                trace_id)
                 self._audit_event("warning", {"reason": "max_turns", "max": self._limits["max_turns"]}, trace_id, turn)
 
-            # 正常结束（done）：把本轮 user + 最终答案回写会话历史，供下轮多轮记忆
-            await self._persist_history(session_id, user_msg, last_answer, trace_id)
-            await self._audit_finalize(True, last_answer, trace_id)
-
-            await self._state.transition(session_id, SessionStatus.DONE)
+            # 正常结束（done）：把本轮 user + 最终答案回写会话历史，供下轮多轮记忆。
+            # 三步收尾各自 wait_for 兜底：华为云会掐空闲连接且不发 RST，长 run 后落库
+            # 可能永等（实测 run 结尾卡死、done 事件发不出、用户侧卡片停在流式态）——
+            # 落历史/审计/状态是辅助链路，超时即弃（内部本就 try/except 吞错），答案优先。
+            try:
+                await asyncio.wait_for(
+                    self._persist_history(session_id, user_msg, last_answer, trace_id),
+                    timeout=10)
+            except (asyncio.TimeoutError, Exception):
+                log.warning("回写会话历史超时/失败，忽略: sid=%s", session_id)
+            try:
+                await asyncio.wait_for(
+                    self._audit_finalize(True, last_answer, trace_id), timeout=10)
+            except (asyncio.TimeoutError, Exception):
+                log.warning("审计落库超时/失败，忽略: sid=%s", session_id)
+            try:
+                await asyncio.wait_for(
+                    self._state.transition(session_id, SessionStatus.DONE), timeout=10)
+            except (asyncio.TimeoutError, Exception):
+                log.warning("状态转移超时/失败，忽略: sid=%s", session_id)
             citations = _dedupe_citations(citations)
             yield SSEEvent("done", {"answer": last_answer, "citations": citations}, trace_id)
             self._audit_event("done", {"answer": last_answer, "citations": citations}, trace_id, turn)

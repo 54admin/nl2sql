@@ -4,6 +4,7 @@
 import asyncio
 import json
 import random
+import re
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -15,6 +16,25 @@ from src.storage.models import LlmConfigRow
 from src.storage.db_client import AsyncSessionFactory
 
 log = get_logger(__name__)
+
+# 孤立代理字符（\ud800-\udfff）出口兜底：流式分块把多字节字符（数学粗体 𝗽 等）切成两半
+# 会产生半截代理；Python str 能存它，但一进 LLM 请求体 utf-8 编码就当场炸
+# （'surrogates not allowed'，全 run 报错）。入口清洗（agent_loop._clean）只管新流入的
+# 分块，管不了【中毒的会话历史回灌】（修复前中毒的 assistant 消息存在 Redis/PG 里，
+# 同会话追问会原样带回请求体）——故在请求出口递归清洗全部消息，毒从哪来都拦得住。
+_SURROGATE_RE = re.compile("[\ud800-\udfff]")
+
+
+def _sanitize_messages(messages: list[dict]) -> list[dict]:
+    def _s(v):
+        if isinstance(v, str):
+            return _SURROGATE_RE.sub("\ufffd", v) if v else v
+        if isinstance(v, list):
+            return [_s(x) for x in v]
+        if isinstance(v, dict):
+            return {k: _s(x) for k, x in v.items()}
+        return v
+    return [_s(m) for m in messages]
 
 
 @dataclass
@@ -119,6 +139,7 @@ class LLMService:
         流中途断不重试（避免重复输出），交 loop 错误自愈。"""
         cfg = await self._resolve_config(purpose)
         proto = (cfg.protocol or "openai").lower()
+        messages = _sanitize_messages(messages)   # 出口兜底：拦中毒历史/DB/知识库文本
         await self._throttle()              # RPM 时间窗：满了先 sleep（并发闸在下方 async with）
         # 并发闸：信号量在 async gen 里用 async with 包裹分发迭代；None 则不限
         if self._sem is not None:
@@ -200,8 +221,11 @@ class LLMService:
         AgentLoop 的 _to_openai_tool_calls 不用改。"""
         client = self._get_client(cfg)
         sys_text, user_msgs = _split_anthropic_messages(messages)
+        # 输出预算给足（16384）：思考模型的 reasoning 也计入 max_tokens——4096 时
+        # 长思考直接烧穿上限，流戛然而止（无正文无工具调用，或 finish 参数 JSON 被拦腰截断），
+        # 实测 glm-5.2 单轮思考就能烧 5-8K。网关侧还有模型窗口上限兜底，不会真放肆。
         kwargs: dict = {"model": cfg.model, "messages": user_msgs,
-                        "temperature": cfg.temperature, "max_tokens": 4096}
+                        "temperature": cfg.temperature, "max_tokens": 16384}
         if sys_text:
             kwargs["system"] = sys_text
         if tools:
@@ -381,10 +405,14 @@ def _is_fatal_quota(err: Exception) -> bool:
 
 def _is_retryable(err: Exception) -> bool:
     """判错误是否可恢复（限流/超时/网关/连接）。
-    顺序：先排额度类（不可恢复）→ 超时/连接/5xx 类名 → 纯 429 限流（非额度）。
-    RateLimitError 单独拎出来：先看错误体，是 quota/billing 则不重试，否则（瞬时限流）重试。"""
+    顺序：先排额度类（不可恢复）→ 网关包装 400 → 超时/连接/5xx 类名 → 纯 429 限流（非额度）。
+    RateLimitError 单独拎出来：先看错误体，是 quota/billing 则不重试，否则（瞬时限流）重试。
+    网关包装 400：'bad response status code' 是代理转述上游瞬时 400（实测网关抖动时间歇出现，
+    过一会就好）——与真 schema 错（max_tokens/invalid_request_error）区分，前者重试后者不重试。"""
     if _is_fatal_quota(err):
         return False   # 额度不足：不重试，直接抛让前端展示人话
+    if "bad response status code" in str(err):
+        return True    # 网关转述上游瞬时错误：可重试
     name = type(err).__name__
     if any(h in name for h in _RETRYABLE_HINTS):
         return True

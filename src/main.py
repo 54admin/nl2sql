@@ -107,20 +107,20 @@ async def lifespan(app: FastAPI):
     setup_logging("INFO")
     log = get_logger("main")
 
-    # 数据库连接走 config/application.yml 的 postgres 段
+    # 平台库连接走 config/application-{profile}.yml 的 database 段（老 yml 的 postgres 段仍兼容）
     redis = RedisClient(cfg.redis)
     import asyncio
-    # PG + Redis 并行连接（各自都是连华为云的网络耗时，并行省掉串行等待）
+    # 平台库 + Redis 并行连接（各自都是连华为云的网络耗时，并行省掉串行等待）
     await asyncio.gather(
-        init_db(cfg.postgres),
+        init_db(cfg.database),
         redis.connect(),
     )
 
     sm = SessionManager(redis)
     llm = LLMService()                     # 配置全走数据库 llm_config 表
     prompts = PromptStore()
-    from src.datasource.manager import DataSourceManager
-    datasource_mgr = DataSourceManager()
+    from src.datasource.manager import get_manager
+    datasource_mgr = get_manager()
     # 读 enabled SQL 模板清单拼进 get_sql_template 工具 description（LLM 看 schema 即知有哪些模板）
     from src.tools.sql_template import build_template_desc, list_enabled_templates
     reg = await build_registry(sql_template_desc=build_template_desc(await list_enabled_templates()),
@@ -138,9 +138,9 @@ async def lifespan(app: FastAPI):
     _app_state.update(
         orchestrator=orch, loop=loop, session_mgr=sm, llm_service=llm, prompts=prompts,
         datasource_mgr=datasource_mgr, sess_state=sess_state, auth=cfg.auth)
-    _db_type = getattr(cfg.postgres, "type", "postgres") or "postgres"
+    _db_type = getattr(cfg.database, "type", "postgres") or "postgres"
     log.info("nl2sql 启动完成 db=%s(%s:%s/%s) redis=%s（模型配置走数据库 llm_config）",
-             _db_type, cfg.postgres.host, cfg.postgres.port, cfg.postgres.database,
+             _db_type, cfg.database.host, cfg.database.port, cfg.database.database,
              "可用" if redis.available else "降级内存")
 
     # 飞书机器人通道（旁路接入，不碰 HTTP/SSE）：配置完全走数据库 feishu_config 表（后台「飞书」tab），

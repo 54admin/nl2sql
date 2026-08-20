@@ -33,6 +33,7 @@ class RedisConfig:
     host: str = "127.0.0.1"
     port: int = 6379
     db: int = 0
+    username: str = ""    # ACL 用户名（Redis 6+ 实例）；空=无认证/仅密码（兼容生产无账号实例）
     password: str = ""
 
 
@@ -76,7 +77,7 @@ class AuthConfig:
 class ApplicationConfig:
     app: AppConfig = field(default_factory=AppConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
-    postgres: PostgresConfig = field(default_factory=PostgresConfig)
+    database: PostgresConfig = field(default_factory=PostgresConfig)
     feishu: FeishuConfig = field(default_factory=FeishuConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
     profiles: list = field(default_factory=list)
@@ -105,7 +106,8 @@ def _build(d: dict) -> ApplicationConfig:
     return ApplicationConfig(
         app=AppConfig(**d.get("app", {})),
         redis=RedisConfig(**d.get("redis", {})),
-        postgres=PostgresConfig(**d.get("postgres", {})),
+        # 平台库段名 database:（PG/MySQL 通用）。老 yml 的 postgres: 段仍兼容
+        database=PostgresConfig(**(d.get("database") or d.get("postgres") or {})),
         feishu=FeishuConfig(**d.get("feishu", {})),
         auth=AuthConfig(**d.get("auth", {})),
         profiles=profiles,

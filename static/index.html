@@ -183,6 +183,11 @@
   .table-row .tname { font-weight: 500; color: #222; }
   .table-row .cmt { color: #999; font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .table-row .save-tag { color: #4caf50; font-size: 11px; min-width: 50px; text-align: right; }
+  .table-row .manual-tag { color: #1976d2; font-size: 11px; flex: none; }
+  .table-row .cmt-edit { border: none; background: none; color: #bbb; cursor: pointer; font-size: 12px; padding: 2px 4px; flex: none; }
+  .table-row:hover .cmt-edit { color: #1976d2; }
+  .field-table .col-note-edit { border: none; background: none; color: #ccc; cursor: pointer; font-size: 12px; padding: 1px 3px; }
+  .field-table tr:hover .col-note-edit { color: #1976d2; }
 
   /* 右栏：字段表 */
   .cfg-right .cfg-col-head { justify-content: space-between; padding: 8px 12px; }
@@ -260,6 +265,9 @@
   .step .step-status { font-size: 11px; white-space: nowrap; }
   .step.ok { border-left-color: #4caf50; } .step.ok .step-status { color: #4caf50; }
   .step.fail { border-left-color: #e53935; } .step.fail .step-status { color: #e53935; }
+  .step.thinking { border-left-color: #b0bec5; }
+  .step.thinking .step-label { color: #999; font-size: 12px; animation: thinkPulse 1.6s ease-in-out infinite; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @keyframes thinkPulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
   .msg-answer { line-height: 1.6; }
   .msg-table { margin-top: 8px; overflow-x: auto; }
   .msg-table table { border-collapse: collapse; font-size: 13px; width: 100%; }
@@ -336,7 +344,7 @@
   
   <div id="admin-panel" class="settings-pane" style="display:none">
     <div class="settings-panels">
-      <div id="stab-datasource" class="stab-panel" style="flex:1;min-height:0;display:none;">
+      <div id="stab-datasource" class="stab-panel" style="flex:1;min-height:0;">
     <div class="cfg-layout">
       <!-- 左栏：数据源 > 库 折叠树（刷新/总览在数据源顶层，不属具体库） -->
       <div class="cfg-col cfg-left">
@@ -640,6 +648,20 @@ async function ask(text) {
     s.el.querySelector(".step-status").textContent = status;
     s.el.classList.add(ok ? "ok" : "fail");
   }
+  // 思考指示：思考期间挂一行静态「💭 思考中…」（不展示思考文案——推理模型思考混英文/碎片，太乱），
+  // 工具调用/答案开始即收掉。
+  let liveThink = null;
+  function pushThinking() {
+    if (liveThink) return;
+    thoughtEl.style.display = "block";
+    liveThink = document.createElement("div");
+    liveThink.className = "step thinking";
+    liveThink.innerHTML = `<span class="step-idx">💭</span><span class="step-label">思考中…</span>`;
+    stepsEl.appendChild(liveThink);
+  }
+  function clearThinking() {
+    if (liveThink) { liveThink.remove(); liveThink = null; }
+  }
   const answerEl = document.createElement("div"); answerEl.className = "msg-answer";
   const tableEl = document.createElement("div"); tableEl.className = "msg-table";
   bubble.append(thoughtEl, answerEl, tableEl);
@@ -695,8 +717,10 @@ async function ask(text) {
         if (!evt) continue;
         if (evt.data && evt.data.trace_id) traceId = evt.data.trace_id;  // 首个事件拿 trace_id 供取消
         got = true;
-        if (evt.type === "answer_delta") pushDelta(evt.data.text || "");
+        if (evt.type === "answer_delta") { clearThinking(); pushDelta(evt.data.text || ""); }
+        else if (evt.type === "reasoning_delta") pushThinking();
         else if (evt.type === "tool_call") {
+          clearThinking();
           const n = evt.data.name;
           const sql = evt.data.args && evt.data.args.sql;
           if (n === "execute_sql" && sql) sqls.push(sql);   // SQL 收集到折叠区，不进思考区
@@ -721,9 +745,9 @@ async function ask(text) {
           const rid = evt.data.result_id;
           if (rid) renderResultTable(tableEl, rid);
         }
-        else if (evt.type === "done") { finalCitations = evt.data.citations || []; finish(evt.data.answer || ""); }
+        else if (evt.type === "done") { clearThinking(); finalCitations = evt.data.citations || []; finish(evt.data.answer || ""); }
         else if (evt.type === "cancelled") {
-          stopTyper();
+          clearThinking(); stopTyper();
           if (!finalText) bubble.textContent = "（已停止）";
           bubble.className = "msg system";
         }
@@ -746,7 +770,7 @@ async function ask(text) {
             div.appendChild(box);
           }
         } else if (evt.type === "error") {
-          stopTyper();
+          clearThinking(); stopTyper();
           bubble.textContent = "⚠ " + (evt.data.message || "出错");
           bubble.className = "msg err";
         }
@@ -840,16 +864,8 @@ function appendCitations(bubble, citations) {
     doc.textContent = (c.document || "未知文档") + sim;
     head.appendChild(arrow);
     head.appendChild(doc);
-    if (c.url) {
-      const go = document.createElement("a");
-      go.className = "citation-go";
-      go.href = c.url;
-      go.target = "_blank";
-      go.rel = "noopener noreferrer";
-      go.textContent = "↗原文";
-      go.onclick = (e) => e.stopPropagation();   // 点跳转不触发展开
-      head.appendChild(go);
-    }
+    // RAGFlow 原文链接已去掉：链接要 RAGFlow 登录态，多数人没权限点了也 403；
+    // 命中片段已内嵌（citation-body），文档名可去 RAGFlow 搜。
     const body = document.createElement("div");
     body.className = "citation-body";
     body.textContent = c.content || "（无片段预览）";
@@ -1833,19 +1849,23 @@ function renderTables(tables, q) {
       <span class="icon">${icon}</span>
       <b class="tname">${t.name}</b>
       <span class="cmt">${t.comment || ""}</span>
-      <span class="save-tag"></span>`;
+      ${t.source === "manual" ? '<span class="manual-tag" title="手写业务表述（同步不覆盖）">✍</span>' : ""}
+      <span class="save-tag"></span>
+      <button class="cmt-edit" title="配置业务表述">✎</button>`;
     const cb = row.querySelector("input");
     const tag = row.querySelector(".save-tag");
     cb.onclick = (e) => e.stopPropagation();
     cb.onchange = async () => {
       // PG 有 id 直接更新；没 id（业务库新表）走 upsert by ds+schema+table
+      // comment 一律带库内实时值（live_comment）：勾选时顺带刷新 synced 行的注释缓存（Agent 读 PG）
+      const liveCmt = t.live_comment ?? t.comment ?? "";
       const url = t.id
         ? `/api/admin/metadata/tables/${t.id}`
         : "/api/admin/metadata/tables/0";
       const body = t.id
-        ? {enabled: cb.checked}
+        ? {enabled: cb.checked, comment: liveCmt, kind: t.kind}
         : {datasource_id: selectedDsId, schema_name: selectedSchema,
-           table_name: t.name, kind: t.kind, comment: t.comment, enabled: cb.checked};
+           table_name: t.name, kind: t.kind, comment: liveCmt, enabled: cb.checked};
       const rr = await fetch(url, {
         method: "PUT", headers: {"Content-Type": "application/json"},
         body: JSON.stringify(body)});
@@ -1860,6 +1880,33 @@ function renderTables(tables, q) {
         const d = await rr.json().catch(() => ({}));
         alert("保存失败: " + (d.detail || rr.status));
       }
+    };
+    // ✎ 配置业务表述：手写口径 source=manual 优先进 Agent 元数据；留空=恢复库内注释
+    row.querySelector(".cmt-edit").onclick = async (e) => {
+      e.stopPropagation();
+      const desc = prompt(`业务表述（${t.name}）：手写口径优先进问数元数据，同步不覆盖。\n留空=恢复库内注释`,
+                          t.comment || "");
+      if (desc === null || desc === (t.comment || "")) return;   // 取消/未改
+      const url = t.id
+        ? `/api/admin/metadata/tables/${t.id}/comment`
+        : "/api/admin/metadata/tables/0/comment";
+      const body = t.id
+        ? {comment: desc, live_comment: t.live_comment || ""}
+        : {datasource_id: selectedDsId, schema_name: selectedSchema, table_name: t.name,
+           kind: t.kind, comment: desc, live_comment: t.live_comment || ""};
+      const rr = await fetch(url, {
+        method: "PUT", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body)});
+      if (!rr.ok) {
+        const d = await rr.json().catch(() => ({}));
+        alert("保存失败: " + (d.detail || rr.status));
+        return;
+      }
+      const d = await rr.json();
+      if (d.id) t.id = d.id;
+      t.source = desc ? "manual" : "synced";
+      t.comment = desc || t.live_comment || "";
+      renderTables(currentTables, tableSearch.value);   // 重渲染更新 ✍ 标 + 注释文案
     };
     row.onclick = (e) => {
       if (e.target === cb) return;
@@ -1886,15 +1933,84 @@ async function loadFields(t) {
       if (!r.ok) throw new Error(r.status);
       t._cols = (await r.json()).columns;
     }
-    fieldsCount.textContent = `共 ${t._cols.length} 个`;
+    const hiddenCnt0 = t._cols.filter(c => c.hidden).length;
+    fieldsCount.textContent = `共 ${t._cols.length} 个${hiddenCnt0 ? `（隐藏 ${hiddenCnt0}）` : ""}`;
     if (!t._cols.length) {
       fieldsArea.innerHTML = '<p class="placeholder">无字段</p>';
       return;
     }
+    // 手写业务名优先展示 + 参与勾选（勾掉=hidden 不进问数元数据）+ ✎ 编辑
     fieldsArea.innerHTML = "<table class='field-table'>" +
-      "<thead><tr><th class='col-name'>字段</th><th class='col-type'>类型</th><th>注释</th></tr></thead><tbody>" +
-      t._cols.map(c => `<tr><td class="col-name">${c.name}</td><td class="col-type">${c.type || ""}</td><td>${c.comment || ""}</td></tr>`).join("") +
+      "<thead><tr><th style='width:28px' title='勾掉=该字段不进问数元数据'></th><th class='col-name'>字段</th><th class='col-type'>类型</th><th>注释</th><th style='width:28px'></th></tr></thead><tbody>" +
+      t._cols.map((c, i) => `<tr>
+        <td><input type="checkbox" class="col-vis" data-idx="${i}" ${c.hidden ? "" : "checked"} title="参与问数"></td>
+        <td class="col-name">${c.name}</td>
+        <td class="col-type">${c.type || ""}</td>
+        <td>${(c.source === "manual" ? "✍ " : "") + (c.comment || "")}</td>
+        <td><button class="col-note-edit" data-idx="${i}" title="配置业务名">✎</button></td>
+      </tr>`).join("") +
       "</tbody></table>";
+    // 勾选=字段参与问数；勾掉=写进表行 hidden_columns_json（Agent 元数据不再返回）
+    fieldsArea.querySelectorAll(".col-vis").forEach(cb => {
+      cb.onclick = (e) => e.stopPropagation();
+      cb.onchange = async () => {
+        const c = t._cols[cb.dataset.idx];
+        c.hidden = !cb.checked;                       // 先改内存，全量提交隐藏清单
+        const hiddenList = t._cols.filter(x => x.hidden).map(x => x.name);
+        const url = t.id
+          ? `/api/admin/metadata/tables/${t.id}/hidden-columns`
+          : "/api/admin/metadata/tables/0/hidden-columns";
+        const body = t.id
+          ? {hidden_columns: hiddenList}
+          : {datasource_id: selectedDsId, schema_name: selectedSchema, table_name: t.name,
+             kind: t.kind, table_comment: t.live_comment || t.comment || "",
+             hidden_columns: hiddenList};
+        const rr = await fetch(url, {
+          method: "PUT", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(body)});
+        if (!rr.ok) {
+          cb.checked = !cb.checked;                   // 失败回滚
+          c.hidden = cb.checked ? false : true;
+          const d = await rr.json().catch(() => ({}));
+          alert("保存失败: " + (d.detail || rr.status));
+          return;
+        }
+        const d = await rr.json();
+        if (d.id) t.id = d.id;                        // upsert 新建表行后回写 id
+        const hiddenCnt = hiddenList.length;
+        fieldsCount.textContent = `共 ${t._cols.length} 个${hiddenCnt ? `（隐藏 ${hiddenCnt}）` : ""}`;
+      };
+    });
+    fieldsArea.querySelectorAll(".col-note-edit").forEach(btn => {
+      btn.onclick = async () => {
+        const c = t._cols[btn.dataset.idx];
+        const note = prompt(`业务名（${t.name}.${c.name}）：手写口径优先进问数元数据。\n留空=恢复库内注释`,
+                            c.comment || "");
+        if (note === null || note === (c.comment || "")) return;   // 取消/未改
+        const url = t.id
+          ? `/api/admin/metadata/tables/${t.id}/column-note`
+          : "/api/admin/metadata/tables/0/column-note";
+        const body = t.id
+          ? {column_name: c.name, comment: note}
+          : {datasource_id: selectedDsId, schema_name: selectedSchema, table_name: t.name,
+             kind: t.kind, table_comment: t.live_comment || t.comment || "",
+             column_name: c.name, comment: note};
+        const rr = await fetch(url, {
+          method: "PUT", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(body)});
+        if (!rr.ok) {
+          const d = await rr.json().catch(() => ({}));
+          alert("保存失败: " + (d.detail || rr.status));
+          return;
+        }
+        const d = await rr.json();
+        if (d.id) t.id = d.id;                    // upsert 新建表行后回写 id
+        c.comment = note || c.live_comment || "";
+        c.source = note ? "manual" : null;
+        loadFields(t);                            // 重渲染字段表（刷新 ✍ 标）
+        renderTables(currentTables, tableSearch.value);   // 未勾选表 upsert 后可能拿到 id
+      };
+    });
   } catch (e) {
     fieldsArea.innerHTML = `<p class="placeholder err">加载字段失败: ${e.message}</p>`;
   }

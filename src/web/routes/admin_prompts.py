@@ -10,12 +10,15 @@ from src.core.prompt_store import PromptStore
 
 
 class PromptPayload(BaseModel):
+    """tools/mode/order/enabled 可选：不传=不改（None 直通 upsert 的「不动」分支）。
+    坑史：曾用非 Optional 默认值（tools=[]/order=99），只改 content 的 PUT 会把工具声明
+    洗空、次序重置——skill 没了工具，Agent 整个瘫痪（模型只会 finish/ask_user）。"""
     scene: str = ""
     content: str = ""
-    tools: list[str] = []
-    mode: str = "always_on"
-    order: int = 99
-    enabled: bool = True
+    tools: list[str] | None = None
+    mode: str | None = None
+    order: int | None = None
+    enabled: bool | None = None
 
 
 def build_admin_prompts_router(store: PromptStore, loop_ref=None) -> APIRouter:

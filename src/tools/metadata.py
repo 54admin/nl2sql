@@ -5,38 +5,80 @@ PG metadata_tables 只存勾选白名单（enabled=true）+ 手写注释（sourc
 这里读 enabled=true 的表，对每张实时连业务库 fetch_table_columns 拉字段（白名单表少，实时拉快）。"""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import time
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.core.types import CancelToken, LoopContext, ToolDefinition, ToolResult
 from src.datasource.metadata_sync import fetch_table_columns
-from src.storage.models import BusinessRule, MetadataTable, TableRelation
+from src.storage.models import (BusinessRule, MetadataColumn, MetadataTable,
+                                TableRelation)
 from src.storage.db_client import AsyncSessionFactory
+
+# 业务库字段拉取缓存：key=(ds_id, schema, table) → (拉取时刻, 原始列清单)。
+# manual/hidden 过滤在缓存外应用（后台改配置立即生效）；缓存只省 information_schema 往返。
+_COL_CACHE: dict[tuple[int, "str | None", str], tuple[float, list[dict]]] = {}
+_COL_CACHE_TTL = 300.0   # 对齐 sql_engine._COL_CACHE 的 300s
+
+
+async def _cached_columns(datasource_id: int, engine: AsyncEngine,
+                          table: str, schema: str | None) -> list[dict]:
+    """字段拉取 + TTL 缓存（miss 才连业务库）。返回浅拷贝，防调用方改写污染缓存。"""
+    key = (datasource_id, schema, table)
+    now = time.monotonic()
+    hit = _COL_CACHE.get(key)
+    if hit and now - hit[0] < _COL_CACHE_TTL:
+        return [dict(c) for c in hit[1]]
+    cols = await fetch_table_columns(engine, table, schema)
+    stale = [k for k, v in _COL_CACHE.items() if now - v[0] >= _COL_CACHE_TTL]
+    for k in stale:
+        _COL_CACHE.pop(k, None)
+    _COL_CACHE[key] = (now, cols)
+    return [dict(c) for c in cols]
 
 
 async def _list_enabled_tables(datasource_id: int, engine: AsyncEngine) -> list[dict]:
-    """读 enabled=True 的表（表名+注释），实时拉每张表的字段。
+    """读 enabled=True 的表（表名+注释），拉每张表的字段。
     schema_name 非空时：table_name 给 `schema.table` 全限定名（execute_sql 直接拿用），
     fetch_table_columns 也按该 schema 拉字段。空时老行为（裸表名）。
-    ponytail: 每表一次连业务库拉字段，白名单表数 ≤10 规模可接受；表多了再换并发或缓存。"""
+    表/字段的手写业务表述（source=manual，nl_md_columns）优先于库内注释；
+    表行 hidden_columns_json 勾掉的字段不返回（Agent 看不到，宽表降噪）。
+    表级 asyncio.gather 并发（含各自的维度抽样）——串行时 N 表 × M 列抽样最坏几十秒，
+    是 query_metadata 的主要耗时。白名单表 ≤10，连接池（5+10）兜得住。"""
     async with AsyncSessionFactory() as s:
         tables = (await s.execute(MetadataTable.__table__.select().where(
             MetadataTable.datasource_id == datasource_id,
             MetadataTable.enabled.is_(True)))).all()
-    out = []
-    for t in tables:
-        cols = await fetch_table_columns(engine, t.table_name, t.schema_name)
+        manual_cols: dict[int, dict[str, str]] = {}
+        if tables:
+            col_rows = (await s.execute(MetadataColumn.__table__.select().where(
+                MetadataColumn.table_id.in_([t.id for t in tables]),
+                MetadataColumn.source == "manual"))).all()
+            for c in col_rows:
+                manual_cols.setdefault(c.table_id, {})[c.column_name] = c.column_comment or ""
+
+    async def _one(t) -> dict:
+        cols = await _cached_columns(datasource_id, engine, t.table_name, t.schema_name)
+        manual = manual_cols.get(t.id, {})
+        try:
+            hidden = set(json.loads(t.hidden_columns_json or "[]"))
+        except Exception:
+            hidden = set()
+        cols = [{**c, "comment": manual.get(c["name"]) or c.get("comment") or ""}
+                for c in cols if c["name"] not in hidden]
         full_name = f"{t.schema_name}.{t.table_name}" if t.schema_name else t.table_name
         cols = await _enrich_columns(engine, t.schema_name, t.table_name, cols)
-        out.append({
+        return {
             "table_name": full_name,
             "table_comment": t.table_comment or "",
             "columns": cols,
-        })
-    return out
+        }
+
+    return list(await asyncio.gather(*(_one(t) for t in tables)))
 
 
 async def _list_relations(datasource_id: int) -> list[dict]:
@@ -150,9 +192,9 @@ async def query_metadata(args: dict, ctx: LoopContext,
                          cancel_token: CancelToken) -> ToolResult:
     """工具 handler。args 可带 datasource_id；缺省取第一个数据源（单源场景；多源选择留后续）。
     返回 {tables:[...], relations:[...]}：tables=白名单表（字段实时拉），relations=已配 JOIN 口径。"""
-    from src.datasource.manager import DataSourceManager
+    from src.datasource.manager import get_manager
     ds_id = args.get("datasource_id")
-    mgr = DataSourceManager()
+    mgr = get_manager()
     if ds_id is None:
         rows = await mgr.list_datasources()
         if not rows:

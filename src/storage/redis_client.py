@@ -44,10 +44,17 @@ class RedisClient:
     async def connect(self):
         try:
             import redis.asyncio as aioredis
+            # username/password 都可空：生产实例无认证 → 两个都 None 直连；
+            # 仅密码 → AUTH default 用户；ACL 实例 → username+password（redis-py 自动 HELLO/AUTH）。
             self._backend = aioredis.Redis(
                 host=self._config.host, port=self._config.port,
-                db=self._config.db, password=self._config.password or None,
+                db=self._config.db, username=self._config.username or None,
+                password=self._config.password or None,
                 socket_connect_timeout=1,
+                socket_timeout=3,          # 读写超时：长 run 期间连接被中间设备静默掐断
+                                            # （华为云代理层掐空闲，不发 RST），无超时会永等 recvfrom
+                socket_keepalive=True,     # TCP keepalive 探测死连接，配合 socket_timeout 快速失败
+                retry_on_timeout=True,     # 超时自动重连重试一次（redis-py 内建）
                 decode_responses=True)  # 真 redis 返回 str，对齐 _InMemory
             await self._backend.ping()
             self.available = True

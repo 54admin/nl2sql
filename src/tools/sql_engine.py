@@ -157,7 +157,7 @@ async def execute_sql(args: dict, ctx: LoopContext,
     """工具 handler。
     args: {sql, datasource_id?}。datasource_id 缺省取第一个数据源（单源场景）。
     失败不抛——错误信息回灌让 LLM 改 SQL 重试（自愈，spec 第 7 章）。"""
-    from src.datasource.manager import DataSourceManager
+    from src.datasource.manager import get_manager
 
     sql = args.get("sql", "").strip()
     if not sql:
@@ -167,7 +167,7 @@ async def execute_sql(args: dict, ctx: LoopContext,
     if err:
         return ToolResult(summary=f"SQL 被拦截: {err}")
 
-    mgr = DataSourceManager()
+    mgr = get_manager()
     ds_id = args.get("datasource_id")
     session_id = getattr(ctx, "session_id", "unknown")
     try:
@@ -203,8 +203,24 @@ async def execute_sql(args: dict, ctx: LoopContext,
         columns = [c for c in columns if c not in sensitive]
         rows = [{k: v for k, v in r.items() if k not in sensitive} for r in rows]
 
+    # 小结果全量回灌（≤200 行）：模型要基于完整结果做归因/汇总，行数卡太小会逼它
+    # 切条件分页重查（实测 36 行结果被 30 行阈值卡住，连查 11 次顶穿 max_sql 护栏）。
+    # 双重护栏防爆上下文：单格截断 300 字 + 序列化总长 24000 字（超了留前 N 行并注明）。
     summary = {"result_id": result_id, "rows": len(rows), "columns": columns,
                "preview": _preview(rows)}
+    if len(rows) <= 200:
+        _CELL_CAP = 300
+        all_rows = [
+            {k: (v[:_CELL_CAP] + "…(截断)" if isinstance(v, str) and len(v) > _CELL_CAP else v)
+             for k, v in r.items()} for r in rows]
+        _TOTAL_CAP = 24000
+        dumped = json.dumps(all_rows, ensure_ascii=False, default=str)
+        if len(dumped) > _TOTAL_CAP:
+            # 0.9 保守系数：给 summary 外壳 + truncated 文案留余量
+            n = max(1, int(len(all_rows) * _TOTAL_CAP * 0.9 / len(dumped)))
+            all_rows = all_rows[:n]
+            summary["truncated"] = f"结果过大，all_rows 截断为前 {n} 行（共 {len(rows)} 行）；需要完整数据请缩小筛选条件"
+        summary["all_rows"] = all_rows
     return ToolResult(summary=json.dumps(summary, ensure_ascii=False, default=str))
 
 
@@ -222,6 +238,9 @@ EXECUTE_SQL = ToolDefinition(
         "一条 SQL 拉成一行一指标再排序，先 get_sql_template 取样板——禁止逐指标分别 SELECT 十几次。"
         "归因要用的列（实际/计划/完成率/得分）一次查全，已查回的列不重查。"
         "YYYY-MM 年月字符串字段用 = / IN / 范围，不用 LIKE。"
+        "\n"
+        "结果 ≤200 行时返回体直接带 all_rows 全量数据——已拿到全量就别再缩小范围/分段重查；"
+        "超过 200 行或被 truncated 标记时才需要缩小条件（此时 preview 只有前 5 行，全量在前端表格 result_id）。"
     ),
     parameters={"type": "object",
                 "properties": {"sql": {"type": "string", "description": "要执行的只读 SQL"},

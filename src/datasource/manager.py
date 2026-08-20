@@ -24,6 +24,17 @@ _SYSTEM_SCHEMAS = frozenset({"information_schema", "mysql", "performance_schema"
 _DS_WRITABLE = {"name", "type", "host", "port", "db_name",
                 "username", "sync_scope", "enabled"}
 
+# 进程级单例：引擎缓存是实例级的——若每次工具调用 new 一个 manager，缓存永远 miss，
+# 每次都重新建 engine（TCP+认证握手）且旧 engine 只能靠 GC 兜底（泄漏）。全进程统一取这个。
+_default_mgr: "DataSourceManager | None" = None
+
+
+def get_manager() -> "DataSourceManager":
+    global _default_mgr
+    if _default_mgr is None:
+        _default_mgr = DataSourceManager()
+    return _default_mgr
+
 
 class DataSourceManager:
     def __init__(self) -> None:
