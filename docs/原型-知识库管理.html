@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>资产哨兵 · 知识库管理 · 交互原型（演示数据）</title>
+<style>
+/* ===== 复刻资产哨兵布局 + Ant Design 风格（React + antd，主蓝 #1890ff） ===== */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 14px; color: #303133; background: #f0f2f5; }
+ul { list-style: none; }
+
+/* 顶部栏 */
+#topbar { height: 50px; background: #fff; border-bottom: 1px solid #e6e6e6; display: flex; align-items: center; padding: 0 14px; position: sticky; top: 0; z-index: 100; }
+#logo { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; color: #303133; }
+#logo .mark { width: 30px; height: 30px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #95de64, #52c41a); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+#logo small { color: #909399; font-weight: 400; font-size: 11px; }
+/* 顶部标签页（按截图复刻） */
+#tabs { display: flex; align-items: center; gap: 6px; margin-left: 26px; height: 100%; }
+.tab { display: flex; align-items: center; gap: 6px; padding: 0 12px; height: 32px; font-size: 12px; color: #606266; background: #f5f7fa; border: 1px solid #e4e7ed; border-radius: 3px; cursor: pointer; }
+.tab.active { background: #ecf5ff; border-color: #b3d8ff; color: #1890ff; }
+.tab .x { color: #c0c4cc; font-size: 13px; }
+#user { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 12px; color: #606266; }
+#user .icons { display: flex; gap: 10px; color: #909399; font-size: 15px; }
+#user .icons span { cursor: pointer; }
+
+/* 主体：左菜单 + 内容 */
+#layout { display: flex; min-height: calc(100vh - 50px); }
+#sidebar { width: 200px; background: #fff; border-right: 1px solid #e6e6e6; padding: 10px 0; flex-shrink: 0; }
+.menu-group-title { font-size: 12px; color: #909399; padding: 10px 20px 4px; }
+.menu-item { display: flex; align-items: center; gap: 8px; padding: 0 20px; height: 40px; font-size: 14px; color: #303133; cursor: pointer; border-left: 3px solid transparent; }
+.menu-item:hover { background: #f5f7fa; }
+.menu-item.active { color: #1890ff; background: #ecf5ff; border-left-color: #1890ff; font-weight: 600; }
+.menu-item.sub { padding-left: 44px; font-size: 13px; height: 36px; }
+.menu-item.dim { color: #c0c4cc; cursor: default; }
+.menu-item.dim:hover { background: none; }
+.menu-item .badge-new { font-size: 10px; color: #fff; background: #1890ff; border-radius: 8px; padding: 0 6px; height: 16px; line-height: 16px; font-weight: 400; }
+
+#main { flex: 1; padding: 16px; min-width: 0; }
+.page { max-width: 1100px; margin: 0 auto; }
+
+/* 搜索行 + 分页器（按资产哨兵真实页面风格） */
+.tool-row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.search-input { padding: 4px 10px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; width: 220px; outline: none; color: rgba(0,0,0,.65); }
+.search-input:focus { border-color: #40a9ff; box-shadow: 0 0 0 2px rgba(24,144,255,.2); }
+.pager { display: flex; align-items: center; gap: 8px; justify-content: flex-end; font-size: 12px; color: rgba(0,0,0,.65); padding: 12px 0 2px; }
+.pager .pg-btn { min-width: 26px; height: 26px; line-height: 24px; text-align: center; border: 1px solid #d9d9d9; border-radius: 4px; background: #fff; cursor: pointer; padding: 0 6px; font-size: 12px; }
+.pager .pg-btn:hover { border-color: #40a9ff; color: #40a9ff; }
+.pager .pg-btn.cur { border-color: #1890ff; color: #1890ff; }
+.pager select { border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; padding: 2px 4px; color: rgba(0,0,0,.65); }
+
+/* 主从布局：左库列表 / 右文档管理 */
+#kb-flex { display: flex; gap: 16px; align-items: stretch; }
+#kb-left { width: 290px; flex-shrink: 0; display: flex; flex-direction: column; max-height: calc(100vh - 140px); }
+#kb-left #ds-list { flex: 1; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+#kb-left .card-hd { margin-bottom: 8px; }
+.kb-left-ft { padding-top: 10px; border-top: 1px solid #f0f0f0; margin-top: 8px; }
+.kb-left-note { font-size: 11px; color: rgba(0,0,0,.45); margin-top: 8px; text-align: center; }
+#kb-right { flex: 1; min-width: 0; }
+/* 库条目（antd Menu item 风：选中 #e6f7ff + 左侧蓝条） */
+.ds-item { padding: 9px 12px; border-radius: 2px; cursor: pointer; position: relative; margin-bottom: 2px; }
+.ds-item:hover { background: #f5f7fa; }
+.ds-item.active { background: #e6f7ff; }
+.ds-item.active::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; background: #1890ff; border-radius: 2px; }
+.ds-item .row1 { display: flex; align-items: center; gap: 6px; }
+.ds-item .ds-name { font-size: 13px; color: rgba(0,0,0,.85); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ds-item.active .ds-name { color: #1890ff; }
+.ds-item .row1 .sw { margin-left: auto; }
+.ds-item .row2 { font-size: 12px; color: rgba(0,0,0,.45); margin-top: 2px; }
+
+/* 卡片（antd Card 形态） */
+.card { background: #fff; border-radius: 4px; border: 1px solid #e8e8e8; box-shadow: none; padding: 14px 16px; margin-bottom: 16px; }
+.card-hd { display: flex; align-items: center; margin-bottom: 12px; }
+.card-hd h3 { font-size: 15px; font-weight: 600; color: #303133; margin-right: auto; }
+.card-hd .sub { font-size: 12px; color: #909399; margin-left: 10px; font-weight: 400; }
+
+/* 表格（antd Table 形态：表头 #fafafa、行 hover #fafafa、分割 #f0f0f0） */
+.tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tbl th { text-align: left; padding: 12px 10px; background: #fafafa; color: rgba(0,0,0,.85); font-weight: 500; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
+.tbl td { padding: 7px 8px; border-bottom: 1px solid #f0f0f0; color: rgba(0,0,0,.65); vertical-align: middle; }
+.tbl tbody tr:hover td { background: #fafafa; }
+.tbl tr.sel td { background: #e6f7ff; }
+.tbl tr.disabled td { opacity: .45; }
+.name-link { color: #1890ff; cursor: pointer; }
+.muted { color: rgba(0,0,0,.45); }
+
+/* 按钮（antd Button 形态：圆角 2px、边框 #d9d9d9、hover #40a9ff） */
+.btn { display: inline-flex; align-items: center; gap: 4px; padding: 4px 12px; font-size: 12px; border-radius: 4px; border: 1px solid #d9d9d9; background: #fff; color: rgba(0,0,0,.65); cursor: pointer; white-space: nowrap; }
+.btn:hover { color: #40a9ff; border-color: #40a9ff; }
+.btn.primary { background: #1890ff; border-color: #1890ff; color: #fff; }
+.btn.primary:hover { background: #40a9ff; border-color: #40a9ff; }
+.btn.small { padding: 1px 8px; font-size: 12px; }
+.btn.text { border: none; background: none; color: #1890ff; padding: 2px 8px; }
+.btn.text.danger { color: #ff4d4f; }
+.btn:disabled { background: #a0cfff; border-color: #a0cfff; cursor: default; }
+
+/* 进度条（antd Progress line） */
+.bar { width: 130px; height: 8px; border-radius: 4px; background: #f5f5f5; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 6px; }
+.bar i { display: block; height: 100%; border-radius: 4px; background: #1890ff; transition: width .6s; }
+.bar i.done { background: #52c41a; } .bar i.fail { background: #ff4d4f; }
+.pct { font-size: 12px; color: rgba(0,0,0,.45); }
+
+/* 状态 tag（antd Tag） */
+.tag { display: inline-block; font-size: 12px; line-height: 20px; padding: 0 7px; border-radius: 2px; margin-right: 2px; }
+.tag.run  { background: #e6f7ff; color: #1890ff; border: 1px solid #91d5ff; }
+.tag.done { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; }
+.tag.fail { background: #fff1f0; color: #ff4d4f; border: 1px solid #ffa39e; }
+.tag.info { background: #fafafa; color: rgba(0,0,0,.45); border: 1px solid #d9d9d9; }
+.tag.warn { background: #fffbe6; color: #faad14; border: 1px solid #ffe58f; }
+
+/* 开关（antd Switch：40×20、圆点 16） */
+.sw { width: 40px; height: 20px; border-radius: 10px; background: rgba(0,0,0,.25); position: relative; cursor: pointer; display: inline-block; vertical-align: middle; transition: background .25s; border: none; }
+.sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .25s; box-shadow: 0 2px 4px rgba(0,0,0,.2); }
+.sw.on { background: #1890ff; }
+.sw.on::after { left: 22px; }
+
+/* 弹窗（antd Modal 形态：右上角关闭、底部按钮右对齐） */
+#mask { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1000; display: none; justify-content: center; align-items: center; }
+#mask.show { display: flex; }
+.dlg { background: #fff; border-radius: 2px; width: 880px; max-width: 95vw; max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 3px 12px rgba(0,0,0,.15); }
+.dlg-hd { padding: 16px 24px; display: flex; align-items: center; }
+.dlg-hd b { font-size: 16px; font-weight: 600; color: rgba(0,0,0,.85); margin-right: 12px; }
+.dlg-hd .warn-tag { font-size: 12px; color: #faad14; background: #fffbe6; border: 1px solid #ffe58f; border-radius: 2px; padding: 0 7px; margin-right: 8px; }
+.dlg-hd .close { margin-left: auto; color: rgba(0,0,0,.45); cursor: pointer; font-size: 15px; padding: 0 4px; }
+.dlg-hd .close:hover { color: rgba(0,0,0,.85); }
+#dlg-body { flex: 1; overflow-y: auto; padding: 8px 24px 16px; }
+.dlg-ft { padding: 10px 24px 16px; text-align: right; }
+.dlg input[type=text], .dlg select { width: 100%; padding: 5px 11px; border: 1px solid #d9d9d9; border-radius: 2px; font-size: 14px; color: rgba(0,0,0,.65); margin-bottom: 12px; outline: none; }
+.dlg input[type=text]:focus { border-color: #40a9ff; box-shadow: 0 0 0 2px rgba(24,144,255,.2); }
+.field-note { font-size: 12px; color: rgba(0,0,0,.45); margin: -6px 0 12px; }
+
+/* toast（antd message 形态） */
+#toast { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); background: #fff; color: rgba(0,0,0,.65); font-size: 14px; padding: 9px 16px; border-radius: 2px; opacity: 0; transition: opacity .3s; z-index: 2000; pointer-events: none; box-shadow: 0 3px 10px rgba(0,0,0,.15); }
+#toast.show { opacity: 1; }
+
+/* 来源切换（antd Radio 风） */
+.src-radio { display: flex; gap: 22px; margin-bottom: 12px; font-size: 14px; color: rgba(0,0,0,.65); }
+.src-radio label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.src-radio .dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid #d9d9d9; background: #fff; display: inline-flex; align-items: center; justify-content: center; }
+.src-radio .dot.on { border-color: #1890ff; }
+.src-radio .dot.on::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #1890ff; }
+.src-radio label.on { color: #1890ff; }
+
+/* EAM 文档树（antd Tree 形态） */
+.tree-node { display: flex; align-items: center; gap: 6px; padding: 5px 8px; font-size: 13px; cursor: pointer; border-radius: 2px; user-select: none; }
+.tree-node:hover { background: #f5f7fa; }
+.tree-node .arrow { width: 14px; text-align: center; color: rgba(0,0,0,.45); font-size: 9px; transition: transform .2s; display: inline-block; flex-shrink: 0; }
+.tree-node .arrow.open { transform: rotate(90deg); }
+.tree-node .arrow.leaf { visibility: hidden; }
+.tree-node .cnt { color: rgba(0,0,0,.45); font-size: 12px; margin-left: auto; white-space: nowrap; }
+/* antd Checkbox 形态：全选✓ / 半选横线 */
+.ck { width: 14px; height: 14px; border: 1px solid #d9d9d9; border-radius: 2px; background: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; font-size: 11px; line-height: 1; color: #fff; }
+.ck:hover { border-color: #1890ff; }
+.ck.on, .ck.half { background: #1890ff; border-color: #1890ff; }
+.ck.on::after { content: "✓"; }
+.ck.half::after { content: ""; width: 8px; height: 2px; background: #fff; border-radius: 1px; }
+
+/* EAM 弹窗内列表 */
+.eam-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid #f0f0f0; font-size: 13px; cursor: pointer; }
+.eam-row:hover { background: #f5f7fa; }
+.eam-row .meta { color: #909399; font-size: 12px; margin-left: auto; }
+.ds-pick { display: inline-block; margin: 0 18px 8px 0; font-size: 13px; color: #606266; }
+.ds-pick .dup { color: #faad14; font-size: 12px; margin-left: 4px; }
+.sync-res { margin-top: 12px; border-top: 1px dashed #ebeef5; padding-top: 10px; font-size: 13px; }
+.sync-res .ok { color: #52c41a; } .sync-res .bad { color: #ff4d4f; }
+
+/* 演示说明 */
+#help { background: #fdf6ec; border: 1px solid #faecd8; border-radius: 4px; padding: 10px 14px; font-size: 12px; color: #b88230; margin-bottom: 16px; }
+#help summary { cursor: pointer; font-weight: 600; }
+#help li { margin: 3px 0 3px 18px; }
+
+/* 首页占位（演示 tab 切换） */
+.home-ph { text-align: center; padding: 80px 0; color: #909399; }
+.home-ph .big { font-size: 40px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+
+<!-- ===== 顶部栏（复刻资产哨兵） ===== -->
+<div id="topbar">
+  <div id="logo"><span class="mark">哨</span>资产哨兵 <small>Asset Sentry</small></div>
+  <div id="tabs">
+    <div class="tab" data-page="home" onclick="switchTab('home')">首页</div>
+    <div class="tab active" data-page="kb">知识库管理 <span class="x" title="关闭（演示）" onclick="event.stopPropagation();toast('演示：这个 tab 别关 😄')">×</span></div>
+  </div>
+  <div id="user">
+    <span>北京市 27℃ 雾</span>
+    <span>你好，演示用户</span>
+    <div class="icons"><span title="设置">⚙</span><span title="收藏">★</span><span title="通知">🔔</span><span title="刷新" onclick="renderAll();toast('已刷新')">↻</span></div>
+  </div>
+</div>
+
+<div id="layout">
+  <!-- ===== 左侧菜单（复刻：新增「知识库管理」入口） ===== -->
+  <div id="sidebar">
+    <div class="menu-group-title">文档管理</div>
+    <div class="menu-item sub" onclick="toast('演示：原有文档管理，本原型不展开')">📁 文档管理</div>
+    <div class="menu-item sub active" onclick="switchTab('kb')">📚 知识库管理 <span class="badge-new">新增</span></div>
+    <div class="menu-group-title">工作台</div>
+    <div class="menu-item" onclick="switchTab('home')">🏠 首页</div>
+    <div class="menu-item dim">📊 资产大屏 ›</div>
+    <div class="menu-item dim">📈 数智监控 ›</div>
+    <div class="menu-item dim">💰 经营管理 ›</div>
+    <div class="menu-group-title">（其余菜单演示略）</div>
+  </div>
+
+  <!-- ===== 主内容区 ===== -->
+  <div id="main">
+    <!-- 首页占位 -->
+    <div class="page" id="page-home" style="display:none">
+      <div class="card"><div class="home-ph"><div class="big">🏠</div>首页占位（演示）<br><br>点左侧「知识库管理」看本原型的主角</div></div>
+    </div>
+
+    <!-- 知识库管理页面 -->
+    <div class="page" id="page-kb">
+      <details id="help">
+        <summary>📖 交互原型 · 演示说明（点开看可试流程）</summary>
+        <ul>
+          <li>① 库列表点「库名」选中 → 下方看该库文件；库行开关 = 整库启停（覆盖式，confirm 提示）</li>
+          <li>② 「＋ 上传文档」（左栏底部）→ 来源选「本地文件 / EAM 文档管理」→ 多选目标库 → 一次进多个库</li>
+          <li>③ 文件行开关 = 单文件禁用（行置灰，不再参与 nl2sql 检索）</li>
+          <li>④ 失败行：悬浮文件名看失败原因，可「重新解析」</li>
+          <li>⑤ 上传弹窗切「EAM 文档管理」：填 dqtoken → 树勾单个文件或整个文件夹（子树全选；不支持的格式自动隐藏并计数）→ 选目标库同步（含 1 个失败项演示部分成功）</li>
+          <li>⑥ EAM 面板「模拟过期」按钮 → 看 dqtoken 失效提示与重新粘贴交互</li>
+          <li>⑦ 顶部「首页」tab 可切换（演示多标签页）；其他菜单灰显为演示</li>
+        </ul>
+      </details>
+
+      <!-- 主从布局：左=知识库列表（点选），右=当前库文档管理 -->
+      <div id="kb-flex">
+        <div class="card" id="kb-left">
+          <div class="card-hd">
+            <h3>知识库</h3>
+            <button class="btn small" onclick="openCreateDs()">＋ 新建</button>
+          </div>
+          <div id="ds-list"></div>
+          <div class="kb-left-ft">
+            <button class="btn" style="width:100%;justify-content:center" onclick="openUpload()">＋ 上传文档（本地 / EAM）</button>
+            <p class="kb-left-note">所有库默认参与 nl2sql 检索，启停即时生效</p>
+          </div>
+        </div>
+        <div class="card" id="kb-right">
+          <div class="card-hd">
+            <h3 id="doc-title">—</h3>
+            <span class="sub" id="doc-sub"></span>
+          </div>
+          <div class="tool-row">
+            <input class="search-input" id="doc-kw" placeholder="按文件名搜索" oninput="docKw=this.value;renderDocs()">
+            <button class="btn small" onclick="renderAll();toast('已刷新')">刷新</button>
+          </div>
+          <div id="doc-list"></div>
+          <div id="doc-pager" class="pager"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 弹窗（antd Modal 风格） ===== -->
+<div id="mask">
+  <div class="dlg">
+    <div class="dlg-hd"><b id="dlg-title"></b><span class="warn-tag" id="dlg-tag" style="display:none"></span><span class="close" title="关闭" onclick="closeDlg()">✕</span></div>
+    <div id="dlg-body"></div>
+    <div class="dlg-ft" id="dlg-ft"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+/* ================= mock 数据（模拟 RAGFlow 返回结构） ================= */
+let seq = 100;
+const state = {
+  datasets: [
+    { id: "ds1", name: "检修规程", description: "风场检修规程与工艺文件",
+      docs: [
+        { id: "d11", name: "齿轮箱检修工艺.pdf",   chunk: 42, run: "DONE",    progress: 1,    enabled: true,  msg: "" },
+        { id: "d12", name: "偏航系统维护手册.docx", chunk: 28, run: "DONE",    progress: 1,    enabled: true,  msg: "" },
+        { id: "d13", name: "2026年检修规程汇编.pdf", chunk: 66, run: "RUNNING", progress: 0.6,  enabled: true,  msg: "Page(12~48): Finish parsing." },
+        { id: "d14", name: "液压站更换指引.pdf",    chunk: 12, run: "RUNNING", progress: 0.25, enabled: true,  msg: "Page(3~9): Start to parse." },
+        { id: "d15", name: "老旧版检修规程.docx",   chunk: 9,  run: "FAIL",    progress: 0.4,  enabled: true,  msg: "10:22:31 Page(5): 文件加密无法解析，请解除口令后重试" },
+        { id: "d16", name: "塔筒爬升安全规范.pdf",  chunk: 0,  run: "UNSTART", progress: 0,    enabled: false, msg: "" },
+      ]},
+    { id: "ds2", name: "缺陷管理制度", description: "缺陷认定与消缺管理",
+      docs: [
+        { id: "d21", name: "缺陷认定标准v3.pdf",   chunk: 31, run: "DONE", progress: 1, enabled: true, msg: "" },
+        { id: "d22", name: "消缺流程管理办法.docx", chunk: 18, run: "DONE", progress: 1, enabled: true, msg: "" },
+        { id: "d23", name: "典型缺陷案例集.xlsx",  chunk: 24, run: "DONE", progress: 1, enabled: false, msg: "" },
+      ]},
+    { id: "ds3", name: "培训资料", description: "新建空库演示",
+      docs: [] },
+  ],
+  selected: "ds1",
+};
+
+/* ================= 工具 ================= */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const curDs = () => state.datasets.find(d => d.id === state.selected);
+let toastTimer = null;
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+function runTag(run) {
+  const m = { UNSTART: ["未解析","info"], RUNNING: ["解析中","run"], DONE: ["已解析","done"], FAIL: ["失败","fail"], CANCEL: ["已取消","info"] }[run] || [run,"info"];
+  return `<span class="tag ${m[1]}">${m[0]}</span>`;
+}
+
+/* ================= tab 切换（顶部多标签 + 左菜单联动） ================= */
+function switchTab(page) {
+  document.querySelectorAll("#tabs .tab").forEach(t => t.classList.toggle("active", t.dataset.page === page));
+  $("page-home").style.display = page === "home" ? "" : "none";
+  $("page-kb").style.display = page === "kb" ? "" : "none";
+  document.querySelectorAll("#sidebar .menu-item").forEach(m =>
+    m.classList.toggle("active", m.textContent.includes("知识库管理") && page === "kb"));
+  if (page !== "kb") stopPolling(); else { renderAll(); startPolling(); }   // 切走停轮询，切回重启
+}
+
+/* ================= 渲染 ================= */
+function renderDatasets() {                // 左列：库条目（点选切换右侧；开关=整库启停）
+  const items = state.datasets.map(ds => {
+    const allOn = ds.docs.length > 0 && ds.docs.every(d => d.enabled);   // 聚合态：全 on 才 on
+    const n = { done: 0, running: 0, fail: 0 };
+    ds.docs.forEach(d => { if (d.run === "DONE") n.done++; else if (d.run === "RUNNING") n.running++; else if (d.run === "FAIL") n.fail++; });
+    const stat = `${ds.docs.length} 文档${n.done ? ` · 完成 ${n.done}` : ""}${n.running ? ` · 解析中 ${n.running}` : ""}${n.fail ? ' · <span style="color:#ff4d4f">失败 ' + n.fail + "</span>" : ""}`;
+    return `<div class="ds-item ${ds.id === state.selected ? "active" : ""}" onclick="selectDs('${ds.id}')" title="${esc(ds.description || ds.name)}">
+      <div class="row1"><span class="ds-name">${esc(ds.name)}</span>
+        <button class="sw ${allOn ? "on" : ""}" title="整库启停（覆盖库内全部文件开关）" onclick="event.stopPropagation();toggleDs('${ds.id}')"></button></div>
+      <div class="row2">${stat}</div>
+    </div>`;
+  }).join("");
+  $("ds-list").innerHTML = items || '<div class="muted" style="text-align:center;padding:24px 0">还没有知识库<br>点右上「＋ 新建」</div>';
+}
+let docKw = "";                              // 文档搜索（客户端过滤演示；真实实现走 RAGFlow keywords 参数）
+function renderDocs() {
+  const ds = curDs();
+  $("doc-title").textContent = ds ? ds.name : "—";
+  $("doc-sub").textContent = ds ? `${ds.description || ""}${ds.description ? " · " : ""}${ds.docs.length} 文档` : "先在左侧选择知识库";
+  if (!ds) { $("doc-list").innerHTML = '<div class="muted" style="text-align:center;padding:20px">先在左侧选择知识库</div>'; $("doc-pager").innerHTML = ""; return; }
+  if (!ds.docs.length) { $("doc-list").innerHTML = '<div class="muted" style="text-align:center;padding:20px">空库：点左栏底部「＋ 上传文档」添加文件</div>'; $("doc-pager").innerHTML = ""; return; }
+  const kw = docKw.trim().toLowerCase();
+  const shown = kw ? ds.docs.filter(d => d.name.toLowerCase().includes(kw)) : ds.docs;
+  if (!shown.length) { $("doc-list").innerHTML = '<div class="muted" style="text-align:center;padding:20px">无匹配文件</div>'; $("doc-pager").innerHTML = '<span>共 0 条</span>'; return; }
+  const rows = shown.map(d => {
+    let bar;
+    if (d.run === "RUNNING") bar = `<span class="bar"><i style="width:${Math.round(d.progress*100)}%"></i></span><span class="pct">${Math.round(d.progress*100)}%</span>`;
+    else if (d.run === "DONE") bar = `<span class="bar"><i class="done" style="width:100%"></i></span>`;
+    else if (d.run === "FAIL") bar = `<span class="bar"><i class="fail" style="width:${Math.max(Math.round(d.progress*100),8)}%"></i></span>`;
+    else bar = `<span class="muted" style="font-size:12px">—</span>`;
+    const failTitle = d.run === "FAIL" ? ` title="${esc(d.msg)}"` : "";
+    const ops = [
+      (d.run === "UNSTART" || d.run === "FAIL") ? `<button class="btn small" onclick="parseDoc('${d.id}')">${d.run === "FAIL" ? "重新解析" : "解析"}</button>` : "",
+      `<button class="btn text danger" onclick="delDoc('${d.id}')">删除</button>`,
+    ].join("");
+    return `<tr class="${d.enabled ? "" : "disabled"}">
+      <td${failTitle} style="cursor:${d.run === "FAIL" ? "help" : "default"}">${esc(d.name)}</td>
+      <td class="muted">${d.chunk}</td>
+      <td style="white-space:nowrap">${runTag(d.run)} ${bar}</td>
+      <td><button class="sw ${d.enabled ? "on" : ""}" title="文件级启用开关（off 后不再参与检索）" onclick="toggleDoc('${d.id}')"></button></td>
+      <td>${ops}</td>
+    </tr>`;
+  }).join("");
+  $("doc-list").innerHTML = `<table class="tbl"><thead><tr>
+    <th>文件名</th><th style="width:56px">分段</th><th style="width:210px">状态 / 进度</th><th style="width:64px">启用</th><th style="width:130px">操作</th>
+  </tr></thead><tbody>${rows}</tbody></table>`;
+  // 分页（antd Pagination 形态；真实实现：RAGFlow documents 接口 page/page_size）
+  $("doc-pager").innerHTML = `<span>共 ${shown.length} 条</span>
+    <span class="pg-btn" onclick="toast('演示：上一页')">‹</span><span class="pg-btn cur">1</span><span class="pg-btn" onclick="toast('演示：下一页')">›</span>
+    <select onchange="toast('演示：每页条数走 RAGFlow page_size')"><option>20条/页</option><option>50条/页</option><option>100条/页</option></select>`;
+}
+function renderAll() { renderDatasets(); renderDocs(); }
+function selectDs(id) { state.selected = id; renderAll(); }
+
+/* ================= 交互：启停 ================= */
+function toggleDoc(id) {                    // 文件级开关（真实实现：PUT .../documents/enabled 单文件）
+  const d = curDs().docs.find(x => x.id === id);
+  d.enabled = !d.enabled;
+  renderAll();
+  toast(d.enabled ? `已启用「${d.name}」，恢复参与检索` : `已禁用「${d.name}」，不再参与检索`);
+}
+function toggleDs(id) {                     // 库级开关 = 批量翻转全部文件（覆盖式，不记忆）
+  const ds = state.datasets.find(x => x.id === id);
+  if (!ds.docs.length) { toast(`「${ds.name}」是空库，没有可启停的文件`); return; }
+  const allOn = ds.docs.every(d => d.enabled);
+  const to = !allOn;
+  if (!confirm(to   // 真实实现：Modal.confirm
+      ? `启用知识库「${ds.name}」？将把该库 ${ds.docs.length} 个文件全部启用（覆盖现有单文件开关状态）。`
+      : `禁用知识库「${ds.name}」？将把该库 ${ds.docs.length} 个文件全部禁用，nl2sql 检索不再命中该库。`)) return;
+  ds.docs.forEach(d => d.enabled = to);
+  renderAll();
+  toast(`「${ds.name}」已${to ? "启用" : "禁用"}（${ds.docs.length} 个文件${to ? "全部恢复" : "全部停用"}）`);
+}
+
+/* ================= 交互：解析 / 删除 / 上传 ================= */
+function parseDoc(id) {
+  const d = curDs().docs.find(x => x.id === id);
+  d.run = "RUNNING"; d.progress = 0.05; d.msg = ""; d.chunk = 0;
+  renderAll(); startPolling();
+  toast(`已触发「${d.name}」解析`);
+}
+function delDoc(id) {
+  const ds = curDs();
+  const d = ds.docs.find(x => x.id === id);
+  if (!confirm(`删除文档「${d.name}」？（演示，不真删）`)) return;
+  ds.docs = ds.docs.filter(x => x.id !== id);
+  renderAll(); toast("已删除（演示）");
+}
+let upTab = "local";                          // 上传来源：local=本地文件 / eam=EAM 文档管理
+const RF_EXT = new Set(["pdf","doc","docx","xls","xlsx","ppt","pptx","txt","md","csv","json","jpg","jpeg","png","gif","bmp","tiff","epub","html"]);   // RAGFlow 支持的格式（以部署版本实测为准）
+const ext = name => (name.split(".").pop() || "").toLowerCase();
+
+function openUpload() {                      // 唯一上传入口（知识库层）：来源=本地/EAM，目标库可多选
+  upTab = "local"; eamChecked = new Set(); eamExpired = false;
+  openDlg("上传文档", null, "", [
+    { text: "取 消" },
+    { text: "开始上传", cls: "primary", keepOpen: true, fn: () => doUpload() },
+  ]);
+  renderUploadBody();
+}
+function renderUploadBody() {
+  const checked = upTargets();
+  const dsHtml = state.datasets.map(ds => {
+    const names = upTab === "local"
+      ? [((document.getElementById("up-file") || {}).files || [])[0]?.name].filter(Boolean)
+      : eamFiles(EAM_TREE).filter(f => eamChecked.has(f.id)).map(f => f.name);
+    const dup = names.some(n => ds.docs.some(d => d.name === n));
+    return `<label class="ds-pick"><input type="checkbox" class="up-ds-ck" value="${ds.id}" ${checked.includes(ds.id) ? "checked" : ""} onchange="renderUploadBody()">
+      ${esc(ds.name)}<span class="dup" style="display:${dup ? "" : "none"}">已有同名，将再添加一份</span></label>`;
+  }).join("");
+  let panel;
+  if (upTab === "local") {
+    panel = `<input type="file" id="up-file" multiple style="width:100%;margin-bottom:8px" onchange="renderUploadBody()">
+      <p class="field-note">支持：pdf / word / excel / ppt / txt / md / csv / 图片等（RAGFlow 可解析的格式）；不支持的文件会被拦截。</p>`;
+  } else {
+    const kw = ($("eam-kw") && $("eam-kw").value || "").trim().toLowerCase();
+    const curTok = ($("eam-token") && $("eam-token").value) || "b25e39b4…be56（已保存）";
+    eamCountHidden(); const files = eamFiles(EAM_TREE_STRIPPED || EAM_TREE);
+    let listHtml;
+    if (eamExpired) listHtml = '<p style="text-align:center;color:#ff4d4f;font-size:13px;padding:28px 0">加载失败：dqtoken 已过期</p>';
+    else if (kw) listHtml = files.filter(f => f.name.toLowerCase().includes(kw)).map(f => treeFileRow(f, 0)).join("") || '<p class="muted" style="text-align:center;padding:16px 0">无匹配文件</p>';
+    else listHtml = (EAM_TREE_STRIPPED || EAM_TREE).map(n => treeNodeHtml(n, 0)).join("");
+    panel = `
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <input type="text" id="eam-token" placeholder="dqtoken（从 EAM 系统 sessionStorage 复制粘贴，只存在你的浏览器）" style="flex:1;margin:0" value="${esc(curTok)}">
+        <button class="btn small" onclick="eamRefresh()">保存并刷新</button>
+        <button class="btn small" style="color:#ff4d4f;border-color:#ffa39e" onclick="eamExpire()" title="演示：token 失效场景">模拟过期</button>
+      </div>
+      ${eamExpired ? '<p style="color:#ff4d4f;font-size:12px;margin:0 0 8px">dqtoken 已过期，请从 EAM 重新复制粘贴，再点「保存并刷新」。</p>' : ""}
+      <input type="text" id="eam-kw" placeholder="按文件名过滤（输入后平铺显示匹配文件，清空恢复树）" oninput="renderUploadBody()" style="margin-bottom:6px">
+      <div style="border:1px solid #f0f0f0;border-radius:2px;max-height:230px;overflow:auto;padding:4px 8px">${listHtml}</div>
+      <p class="field-note" style="margin:8px 0 0">已选 <b>${eamChecked.size}</b> 个文件${eamHidden ? `；已隐藏 ${eamHidden} 个不支持格式的文件（仅显示 RAGFlow 可解析格式）` : ""}；勾文件夹=整棵子树全选</p>`;
+  }
+  $("dlg-body").innerHTML = `
+    <div class="src-radio">
+      <label class="${upTab === "local" ? "on" : ""}" onclick="upTab='local';renderUploadBody()"><span class="dot ${upTab === "local" ? "on" : ""}"></span>本地文件</label>
+      <label class="${upTab === "eam" ? "on" : ""}" onclick="upTab='eam';renderUploadBody()"><span class="dot ${upTab === "eam" ? "on" : ""}"></span>EAM 文档管理</label>
+    </div>
+    ${panel}
+    <p class="field-note" style="margin:10px 0 4px">目标知识库（多选，文件将分别进入每个选中库，各自独立一份）：</p>
+    <div id="up-targets" style="margin-bottom:8px">${dsHtml}</div>
+    <div id="up-result"></div>`;
+  const btn = document.querySelectorAll("#dlg-ft .btn")[1];
+  btn.textContent = upTab === "local" ? "开始上传" : "同步到选中库";
+}
+function upTargets() { return Array.from(document.querySelectorAll(".up-ds-ck:checked")).map(c => c.value); }
+function doUpload() {                          // 分发：本地 or EAM
+  const targets = upTargets();
+  if (!targets.length) { alert("至少勾选一个目标知识库"); return "keep"; }
+  if (upTab === "local") {
+    const fs = document.getElementById("up-file").files;
+    if (!fs.length) { alert("先选择本地文件"); return "keep"; }
+    const bad = Array.from(fs).filter(f => !RF_EXT.has(ext(f.name)));
+    if (bad.length) { alert("不支持的格式（" + bad.map(f => f.name).join("、") + "），请移除后重试"); return "keep"; }
+    const tars = targets.map(t => state.datasets.find(x => x.id === t));
+    Array.from(fs).forEach(f => tars.forEach(ds => addAndParse(ds, f.name)));
+    state.selected = targets[0]; renderAll(); closeDlg();
+    toast(`已上传 ${fs.length} 个文件到 ${targets.length} 个知识库，解析进行中`);
+  } else {
+    const files = eamFiles(EAM_TREE_STRIPPED || EAM_TREE).filter(f => eamChecked.has(f.id));
+    if (!files.length) { alert("先在文档树勾选要同步的文件（可直接勾整个文件夹）"); return "keep"; }
+    if (files.length > 20) { alert("单次最多 20 个文件，请分批"); return "keep"; }
+    const btns = document.querySelectorAll("#dlg-ft .btn");
+    const btn = btns[btns.length - 1]; btn.disabled = true; btn.textContent = "同步中…";
+    setTimeout(() => {                         // 真实实现：POST /eam/sync（body 带 dqtoken + 目标库，EAM下载→逐库上传→触发解析）
+      const results = [];
+      files.forEach((f, i) => targets.forEach(t => {
+        const failDemo = (i === files.length - 1 && t === targets[targets.length - 1]);   // 演示部分成功
+        results.push({ name: f.name, ds: t, ok: !failDemo, error: failDemo ? "EAM 下载超时（300s），可单独重试" : "" });
+        if (!failDemo) state.datasets.find(x => x.id === t).docs.unshift({ id: "d" + (seq++), name: f.name, chunk: 0, run: "RUNNING", progress: 0.08, enabled: true, msg: "EAM 同步，已触发解析" });
+      }));
+      const okN = results.filter(r => r.ok).length;
+      $("up-result").innerHTML = `<div class="sync-res"><b>同步完成：成功 ${okN} / 失败 ${results.length - okN}</b>` +
+        results.map(r => `<div>${r.ok ? '<span class="ok">✓</span>' : '<span class="bad">✗</span>'} ${esc(r.name)} → ${esc((state.datasets.find(x => x.id === r.ds) || {}).name || r.ds)}${r.ok ? "" : ' <span class="bad">' + esc(r.error) + "</span>"}</div>`).join("") +
+        `<p class="field-note" style="margin-top:6px">已同步文件正在解析，关闭后在文档列表看进度。</p></div>`;
+      btn.disabled = false; btn.textContent = "再同步一批";
+      renderAll(); startPolling();
+    }, 1600);
+    return "keep";
+  }
+}
+
+function addAndParse(ds, name) {
+  ds.docs.unshift({ id: "d" + (seq++), name, chunk: 0, run: "UNSTART", progress: 0, enabled: true, msg: "" });
+  renderAll();
+  setTimeout(() => {
+    const d = ds.docs.find(x => x.name === name && x.run === "UNSTART");
+    if (d) { d.run = "RUNNING"; d.progress = 0.1; renderAll(); startPolling(); }
+  }, 2000);
+}
+
+/* ================= 轮询（3s 模拟进度推进；真实实现并行刷两个接口） ================= */
+let pollTimer = null, pollStart = 0;
+function startPolling() { if (pollTimer) return; pollStart = Date.now(); pollTimer = setInterval(tick, 3000); }
+function stopPolling() { clearInterval(pollTimer); pollTimer = null; }
+function tick() {
+  if (Date.now() - pollStart > 10 * 60 * 1000) { stopPolling(); return; }   // 10 分钟上限
+  let anyRunning = false;
+  state.datasets.forEach(ds => ds.docs.forEach(d => {
+    if (d.run === "RUNNING") {
+      anyRunning = true;
+      d.progress = Math.min(1, d.progress + 0.08 + Math.random() * 0.15);
+      d.chunk = Math.max(d.chunk, Math.round(d.progress * 40));
+      d.msg = "Page(" + (1 + Math.round(d.progress * 20)) + "~48): Generating chunks…";
+      if (d.progress >= 1) { d.run = "DONE"; d.msg = ""; d.progress = 1; d.chunk = Math.max(d.chunk, 30); toast(`「${d.name}」解析完成 ✅`); }
+    }
+  }));
+  renderAll();
+  if (!anyRunning) stopPolling();
+}
+
+/* ================= 新建知识库 ================= */
+function openCreateDs() {
+  openDlg("新建知识库", null, `
+    <input type="text" id="new-ds-name" placeholder="库名（必填，如：风机技改资料）">
+    <input type="text" id="new-ds-desc" placeholder="描述（可选）">
+    <select id="new-ds-method">
+      <option value="naive">通用（默认，推荐）</option>
+      <option value="book">书籍</option><option value="laws">法律</option>
+      <option value="qa">问答</option><option value="table">表格</option><option value="one">单块</option>
+    </select>
+    <p class="field-note">真实实现：POST /datasets → RAGFlow 建库（解析方式默认通用）。新库即刻参与 nl2sql 检索。</p>`,
+    [{ text: "取 消" }, { text: "创 建", cls: "primary", fn: () => {
+      const name = $("new-ds-name").value.trim();
+      if (!name) { alert("填个库名"); return "keep"; }   // 返回 keep = 不关弹窗
+      state.datasets.unshift({ id: "ds" + (seq++), name, description: $("new-ds-desc").value.trim(), docs: [] });
+      state.selected = state.datasets[0].id;
+      renderAll(); closeDlg();
+      toast(`知识库「${name}」已创建，默认参与检索`);
+    } }]);
+}
+
+/* ================= EAM 文档树（嵌在上传弹窗的 EAM 来源面板；接口待抓包） ================= */
+const EAM_TREE = [                          // EAM 文档管理是树型结构（mock，含 2 个不支持格式的文件演示过滤）
+  { id: "f1", name: "2026年检修资料", folder: true, children: [
+    { id: "f11", name: "风机类", folder: true, children: [
+      { id: "e3", name: "2026年检修规程汇编.pdf", size: "8.7 MB" },   // 与 ds1 同名 → 演示中性提示
+      { id: "e2", name: "齿轮箱检修作业指导.docx", size: "2.1 MB" },
+    ]},
+    { id: "f12", name: "光伏类", folder: true, children: [
+      { id: "e7", name: "组件清洗作业指导.pdf", size: "1.2 MB" },
+    ]},
+  ]},
+  { id: "f2", name: "安全管理", folder: true, children: [
+    { id: "e5", name: "安全工器具检验台账.xlsx", size: "0.5 MB" },
+    { id: "e4", name: "升压站巡检记录模板.xlsx", size: "0.3 MB" },
+  ]},
+  { id: "e6", name: "老旧机组技改评估报告.pdf", size: "5.2 MB" },     // 根级文件
+  { id: "e8", name: "图纸包-风机基础.dwg", size: "18 MB" },           // 不支持 → 不显示
+  { id: "e9", name: "旧系统备份.zip", size: "230 MB" },               // 不支持 → 不显示
+];
+let eamChecked = new Set();                  // 已勾文件 id 集合
+let eamExpanded = new Set(["f1", "f11"]);    // 展开的文件夹
+let eamExpired = false;
+let eamHidden = 0;                           // 被过滤的不支持格式文件数
+
+function eamFiles(nodes) {                   // 收集（子）树内全部 RAGFlow 支持的文件（不支持的在源头过滤）
+  let r = []; nodes.forEach(n => { if (n.folder) r = r.concat(eamFiles(n.children)); else r.push(n); }); return r;
+}
+function eamCountHidden() {                  // 统计不支持文件数（仅展示提示用）
+  let all = []; (function walk(ns){ ns.forEach(n => n.folder ? walk(n.children) : all.push(n)); })(EAM_TREE);
+  eamHidden = all.filter(f => !RF_EXT.has(ext(f.name))).length;
+  EAM_TREE_STRIPPED = stripUnsupported(EAM_TREE);
+}
+let EAM_TREE_STRIPPED = null;
+function stripUnsupported(nodes) {           // 生成过滤后的树（不支持的文件直接不显示）
+  return nodes.map(n => n.folder
+    ? Object.assign({}, n, { children: stripUnsupported(n.children).filter(c => c.folder || RF_EXT.has(ext(c.name))) })
+    : n).filter(n => n.folder || RF_EXT.has(ext(n.name)));
+}
+function folderState(node) {                 // 文件夹勾选态：all / half / none
+  const fs = eamFiles([node]); const c = fs.filter(f => eamChecked.has(f.id)).length;
+  return c === 0 ? "none" : (c === fs.length ? "all" : "half");
+}
+function toggleFolderSel(node) {             // 勾文件夹 = 子树全选/全清（过滤后的）
+  const all = folderState(node) === "all";
+  eamFiles([node]).forEach(f => all ? eamChecked.delete(f.id) : eamChecked.add(f.id));
+}
+function treeNodeHtml(n, depth) {            // 文件夹行（可展开/勾选子树）——渲染用过滤后的树
+  const open = eamExpanded.has(n.id);
+  const st = folderState(n);
+  const cnt = eamFiles([n]).length;
+  return `<div class="tree-node" style="padding-left:${depth * 18}px" onclick="eamExpanded.has('${n.id}')?eamExpanded.delete('${n.id}'):eamExpanded.add('${n.id}');renderUploadBody()">
+      <span class="arrow ${open ? "open" : ""}">▶</span>
+      <span class="ck ${st}" onclick="event.stopPropagation();toggleFolderSelById('${n.id}')"></span>
+      <span>📁 ${esc(n.name)}</span><span class="cnt">${cnt} 文件${st === "half" ? " · 部分已选" : ""}</span>
+    </div>` + (open ? n.children.map(c => treeNodeHtml(c, depth + 1)).join("") : "");
+}
+function treeFileRow(f, depth) {             // 文件行（过滤平铺时 depth=0）
+  return `<div class="tree-node" style="padding-left:${depth * 18 + 30}px" onclick="toggleFileSel('${f.id}')">
+      <span class="ck ${eamChecked.has(f.id) ? "on" : ""}"></span>
+      <span>📄 ${esc(f.name)}</span><span class="cnt">${f.size}</span>
+    </div>`;
+}
+function toggleFolderSelById(id) {
+  const find = nodes => { for (const n of nodes) { if (n.id === id) return n; if (n.folder) { const r = find(n.children); if (r) return r; } } return null; };
+  const node = find(EAM_TREE_STRIPPED || EAM_TREE); if (node) { toggleFolderSel(node); renderUploadBody(); }
+}
+function toggleFileSel(id) { eamChecked.has(id) ? eamChecked.delete(id) : eamChecked.add(id); renderUploadBody(); }
+function eamRefresh() { eamExpired = false; renderUploadBody(); toast("已保存 token 并刷新列表（演示）"); }
+function eamExpire() { eamExpired = true; renderUploadBody(); $("eam-token").focus(); $("eam-token").select(); }
+
+/* ================= 通用弹窗（antd Modal 风格，对应 Modal + Footer 按钮） ================= */
+function openDlg(title, tag, bodyHtml, btns) {
+  $("dlg-title").textContent = title;
+  const tagEl = $("dlg-tag");
+  if (tag) { tagEl.textContent = "⚠ " + tag; tagEl.style.display = ""; } else tagEl.style.display = "none";
+  $("dlg-body").innerHTML = bodyHtml;
+  $("dlg-ft").innerHTML = btns.map((b, i) =>
+    `<button class="btn ${b.cls || ""}" data-i="${i}">${b.text}</button>`).join("");
+  document.querySelectorAll("#dlg-ft .btn").forEach((el, i) => {
+    el.onclick = () => {
+      const b = btns[i];
+      if (!b.fn) return closeDlg();                       // 无 fn = 纯关闭
+      const r = b.fn();
+      if (r !== "keep" && !b.keepOpen) closeDlg();        // keepOpen：同步按钮不关，等结果
+    };
+  });
+  $("mask").classList.add("show");
+}
+function closeDlg() { $("mask").classList.remove("show"); }
+$("mask").addEventListener("click", e => { if (e.target.id === "mask") closeDlg(); });
+
+/* ================= 启动 ================= */
+renderAll();
+startPolling();   // 初始就有 RUNNING 文件，直接演示轮询
+</script>
+</body>
+</html>
