@@ -5,48 +5,38 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>资产哨兵 · 知识库管理 · 交互原型（演示数据）</title>
 <style>
-/* ===== 复刻资产哨兵布局 + Ant Design 风格（React + antd，主蓝 #1890ff） ===== */
+/* ===== nl2sql 管理后台 · 知识库管理原型（Material 风：蓝 #1976d2 绿 #4caf50） ===== */
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 14px; color: #303133; background: #f0f2f5; }
+body { font-family: -apple-system, "PingFang SC", sans-serif; font-size: 14px; color: #303133; background: #f0f2f5; }
 ul { list-style: none; }
 
-/* 顶部栏 */
-#topbar { height: 50px; background: #fff; border-bottom: 1px solid #e6e6e6; display: flex; align-items: center; padding: 0 14px; position: sticky; top: 0; z-index: 100; }
-#logo { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; color: #303133; }
-#logo .mark { width: 30px; height: 30px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #95de64, #52c41a); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; }
-#logo small { color: #909399; font-weight: 400; font-size: 11px; }
-/* 顶部标签页（按截图复刻） */
-#tabs { display: flex; align-items: center; gap: 6px; margin-left: 26px; height: 100%; }
-.tab { display: flex; align-items: center; gap: 6px; padding: 0 12px; height: 32px; font-size: 12px; color: #606266; background: #f5f7fa; border: 1px solid #e4e7ed; border-radius: 3px; cursor: pointer; }
-.tab.active { background: #ecf5ff; border-color: #b3d8ff; color: #1890ff; }
-.tab .x { color: #c0c4cc; font-size: 13px; }
-#user { margin-left: auto; display: flex; align-items: center; gap: 12px; font-size: 12px; color: #606266; }
-#user .icons { display: flex; gap: 10px; color: #909399; font-size: 15px; }
-#user .icons span { cursor: pointer; }
+/* nl2sql 设置页外壳（stab 条 + 身份切换） */
+#settings-bar { display: flex; align-items: center; gap: 6px; background: #fff; padding: 10px 20px; border-bottom: 1px solid #e8e8e8; }
+.stab2 { padding: 6px 14px; background: #f0f2f5; color: #555; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.stab2:hover { background: #e3f2fd; color: #1565c0; }
+.stab2.active { background: #1976d2; color: #fff; font-weight: 500; }
+.stab2.locked { opacity: .4; cursor: not-allowed; }
+#role-box { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #666; }
+#role-box select { border: 1px solid #ccc; border-radius: 4px; padding: 3px 6px; font-size: 12px; color: #333; }
+.role-tip { max-width: 1100px; margin: 12px auto 0; padding: 6px 14px; border-radius: 6px; font-size: 12px; }
+.role-tip.admin { background: #e8f5e9; color: #2e7d32; }
+.role-tip.kb_op { background: #fff3e0; color: #e65100; }
+#main-wrap { max-width: 1100px; margin: 0 auto; padding: 4px 16px 40px; }
 
-/* 主体：左菜单 + 内容 */
-#layout { display: flex; min-height: calc(100vh - 50px); }
-#sidebar { width: 200px; background: #fff; border-right: 1px solid #e6e6e6; padding: 10px 0; flex-shrink: 0; }
-.menu-group-title { font-size: 12px; color: #909399; padding: 10px 20px 4px; }
-.menu-item { display: flex; align-items: center; gap: 8px; padding: 0 20px; height: 40px; font-size: 14px; color: #303133; cursor: pointer; border-left: 3px solid transparent; }
-.menu-item:hover { background: #f5f7fa; }
-.menu-item.active { color: #1890ff; background: #ecf5ff; border-left-color: #1890ff; font-weight: 600; }
-.menu-item.sub { padding-left: 44px; font-size: 13px; height: 36px; }
-.menu-item.dim { color: #c0c4cc; cursor: default; }
-.menu-item.dim:hover { background: none; }
-.menu-item .badge-new { font-size: 10px; color: #fff; background: #1890ff; border-radius: 8px; padding: 0 6px; height: 16px; line-height: 16px; font-weight: 400; }
-
-#main { flex: 1; padding: 16px; min-width: 0; }
-.page { max-width: 1100px; margin: 0 auto; }
+/* 连接配置卡（仅管理员） */
+.cfg label { display: inline-block; margin: 4px 14px 4px 0; font-size: 12px; color: #555; }
+.cfg input { padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; }
+.cfg-note { font-size: 12px; color: #555; margin: 10px 0 0; }
+.cfg-note b { color: #1565c0; }
 
 /* 搜索行 + 分页器（按资产哨兵真实页面风格） */
 .tool-row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
 .search-input { padding: 4px 10px; border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; width: 220px; outline: none; color: rgba(0,0,0,.65); }
-.search-input:focus { border-color: #40a9ff; box-shadow: 0 0 0 2px rgba(24,144,255,.2); }
+.search-input:focus { border-color: #1565c0; box-shadow: 0 0 0 2px rgba(24,144,255,.2); }
 .pager { display: flex; align-items: center; gap: 8px; justify-content: flex-end; font-size: 12px; color: rgba(0,0,0,.65); padding: 12px 0 2px; }
 .pager .pg-btn { min-width: 26px; height: 26px; line-height: 24px; text-align: center; border: 1px solid #d9d9d9; border-radius: 4px; background: #fff; cursor: pointer; padding: 0 6px; font-size: 12px; }
-.pager .pg-btn:hover { border-color: #40a9ff; color: #40a9ff; }
-.pager .pg-btn.cur { border-color: #1890ff; color: #1890ff; }
+.pager .pg-btn:hover { border-color: #1565c0; color: #1565c0; }
+.pager .pg-btn.cur { border-color: #1976d2; color: #1976d2; }
 .pager select { border: 1px solid #d9d9d9; border-radius: 4px; font-size: 12px; padding: 2px 4px; color: rgba(0,0,0,.65); }
 
 /* 主从布局：左库列表 / 右文档管理 */
@@ -57,101 +47,101 @@ ul { list-style: none; }
 .kb-left-ft { padding-top: 10px; border-top: 1px solid #f0f0f0; margin-top: 8px; }
 .kb-left-note { font-size: 11px; color: rgba(0,0,0,.45); margin-top: 8px; text-align: center; }
 #kb-right { flex: 1; min-width: 0; }
-/* 库条目（antd Menu item 风：选中 #e6f7ff + 左侧蓝条） */
+/* 库条目（选中 #e3f2fd + 左侧蓝条） */
 .ds-item { padding: 9px 12px; border-radius: 2px; cursor: pointer; position: relative; margin-bottom: 2px; }
 .ds-item:hover { background: #f5f7fa; }
-.ds-item.active { background: #e6f7ff; }
-.ds-item.active::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; background: #1890ff; border-radius: 2px; }
+.ds-item.active { background: #e3f2fd; }
+.ds-item.active::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; background: #1976d2; border-radius: 2px; }
 .ds-item .row1 { display: flex; align-items: center; gap: 6px; }
 .ds-item .ds-name { font-size: 13px; color: rgba(0,0,0,.85); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ds-item.active .ds-name { color: #1890ff; }
+.ds-item.active .ds-name { color: #1976d2; }
 .ds-item .row1 .sw { margin-left: auto; }
 .ds-item .row2 { font-size: 12px; color: rgba(0,0,0,.45); margin-top: 2px; }
 
-/* 卡片（antd Card 形态） */
-.card { background: #fff; border-radius: 4px; border: 1px solid #e8e8e8; box-shadow: none; padding: 14px 16px; margin-bottom: 16px; }
+/* 卡片（nl2sql admin-card 风） */
+.card { background: #fff; border-radius: 10px; border: 1px solid #e8e8e8; box-shadow: none; padding: 14px 16px; margin-bottom: 16px; }
 .card-hd { display: flex; align-items: center; margin-bottom: 12px; }
 .card-hd h3 { font-size: 15px; font-weight: 600; color: #303133; margin-right: auto; }
 .card-hd .sub { font-size: 12px; color: #909399; margin-left: 10px; font-weight: 400; }
 
-/* 表格（antd Table 形态：表头 #fafafa、行 hover #fafafa、分割 #f0f0f0） */
+/* 表格（nl2sql admin-table 风） */
 .tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
-.tbl th { text-align: left; padding: 12px 10px; background: #fafafa; color: rgba(0,0,0,.85); font-weight: 500; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
+.tbl th { text-align: left; padding: 12px 10px; background: #f5f5f5; color: rgba(0,0,0,.85); font-weight: 500; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
 .tbl td { padding: 7px 8px; border-bottom: 1px solid #f0f0f0; color: rgba(0,0,0,.65); vertical-align: middle; }
-.tbl tbody tr:hover td { background: #fafafa; }
-.tbl tr.sel td { background: #e6f7ff; }
+.tbl tbody tr:hover td { background: #f5f5f5; }
+.tbl tr.sel td { background: #e3f2fd; }
 .tbl tr.disabled td { opacity: .45; }
-.name-link { color: #1890ff; cursor: pointer; }
+.name-link { color: #1976d2; cursor: pointer; }
 .muted { color: rgba(0,0,0,.45); }
 
-/* 按钮（antd Button 形态：圆角 2px、边框 #d9d9d9、hover #40a9ff） */
+/* 按钮（nl2sql admin 风） */
 .btn { display: inline-flex; align-items: center; gap: 4px; padding: 4px 12px; font-size: 12px; border-radius: 4px; border: 1px solid #d9d9d9; background: #fff; color: rgba(0,0,0,.65); cursor: pointer; white-space: nowrap; }
-.btn:hover { color: #40a9ff; border-color: #40a9ff; }
-.btn.primary { background: #1890ff; border-color: #1890ff; color: #fff; }
-.btn.primary:hover { background: #40a9ff; border-color: #40a9ff; }
+.btn:hover { color: #1565c0; border-color: #1565c0; }
+.btn.primary { background: #1976d2; border-color: #1976d2; color: #fff; }
+.btn.primary:hover { background: #1565c0; border-color: #1565c0; }
 .btn.small { padding: 1px 8px; font-size: 12px; }
-.btn.text { border: none; background: none; color: #1890ff; padding: 2px 8px; }
-.btn.text.danger { color: #ff4d4f; }
+.btn.text { border: none; background: none; color: #1976d2; padding: 2px 8px; }
+.btn.text.danger { color: #e53935; }
 .btn:disabled { background: #a0cfff; border-color: #a0cfff; cursor: default; }
 
-/* 进度条（antd Progress line） */
+/* 进度条 */
 .bar { width: 130px; height: 8px; border-radius: 4px; background: #f5f5f5; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 6px; }
-.bar i { display: block; height: 100%; border-radius: 4px; background: #1890ff; transition: width .6s; }
-.bar i.done { background: #52c41a; } .bar i.fail { background: #ff4d4f; }
+.bar i { display: block; height: 100%; border-radius: 4px; background: #1976d2; transition: width .6s; }
+.bar i.done { background: #4caf50; } .bar i.fail { background: #e53935; }
 .pct { font-size: 12px; color: rgba(0,0,0,.45); }
 
-/* 状态 tag（antd Tag） */
+/* 状态 tag */
 .tag { display: inline-block; font-size: 12px; line-height: 20px; padding: 0 7px; border-radius: 2px; margin-right: 2px; }
-.tag.run  { background: #e6f7ff; color: #1890ff; border: 1px solid #91d5ff; }
-.tag.done { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; }
-.tag.fail { background: #fff1f0; color: #ff4d4f; border: 1px solid #ffa39e; }
-.tag.info { background: #fafafa; color: rgba(0,0,0,.45); border: 1px solid #d9d9d9; }
-.tag.warn { background: #fffbe6; color: #faad14; border: 1px solid #ffe58f; }
+.tag.run  { background: #e3f2fd; color: #1976d2; border: 1px solid #90caf9; }
+.tag.done { background: #f1f8f1; color: #4caf50; border: 1px solid #a5d6a7; }
+.tag.fail { background: #ffebee; color: #e53935; border: 1px solid #ef9a9a; }
+.tag.info { background: #f5f5f5; color: rgba(0,0,0,.45); border: 1px solid #d9d9d9; }
+.tag.warn { background: #fff3e0; color: #f57c00; border: 1px solid #ffcc80; }
 
-/* 开关（antd Switch：40×20、圆点 16） */
+/* 开关 */
 .sw { width: 40px; height: 20px; border-radius: 10px; background: rgba(0,0,0,.25); position: relative; cursor: pointer; display: inline-block; vertical-align: middle; transition: background .25s; border: none; }
 .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .25s; box-shadow: 0 2px 4px rgba(0,0,0,.2); }
-.sw.on { background: #1890ff; }
+.sw.on { background: #1976d2; }
 .sw.on::after { left: 22px; }
 
-/* 弹窗（antd Modal 形态：右上角关闭、底部按钮右对齐） */
+/* 弹窗（nl2sql admin-modal 风格） */
 #mask { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1000; display: none; justify-content: center; align-items: center; }
 #mask.show { display: flex; }
 .dlg { background: #fff; border-radius: 2px; width: 880px; max-width: 95vw; max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 3px 12px rgba(0,0,0,.15); }
 .dlg-hd { padding: 16px 24px; display: flex; align-items: center; }
 .dlg-hd b { font-size: 16px; font-weight: 600; color: rgba(0,0,0,.85); margin-right: 12px; }
-.dlg-hd .warn-tag { font-size: 12px; color: #faad14; background: #fffbe6; border: 1px solid #ffe58f; border-radius: 2px; padding: 0 7px; margin-right: 8px; }
+.dlg-hd .warn-tag { font-size: 12px; color: #f57c00; background: #fff3e0; border: 1px solid #ffcc80; border-radius: 2px; padding: 0 7px; margin-right: 8px; }
 .dlg-hd .close { margin-left: auto; color: rgba(0,0,0,.45); cursor: pointer; font-size: 15px; padding: 0 4px; }
 .dlg-hd .close:hover { color: rgba(0,0,0,.85); }
 #dlg-body { flex: 1; overflow-y: auto; padding: 8px 24px 16px; }
 .dlg-ft { padding: 10px 24px 16px; text-align: right; }
 .dlg input[type=text], .dlg select { width: 100%; padding: 5px 11px; border: 1px solid #d9d9d9; border-radius: 2px; font-size: 14px; color: rgba(0,0,0,.65); margin-bottom: 12px; outline: none; }
-.dlg input[type=text]:focus { border-color: #40a9ff; box-shadow: 0 0 0 2px rgba(24,144,255,.2); }
+.dlg input[type=text]:focus { border-color: #1565c0; box-shadow: 0 0 0 2px rgba(24,144,255,.2); }
 .field-note { font-size: 12px; color: rgba(0,0,0,.45); margin: -6px 0 12px; }
 
-/* toast（antd message 形态） */
+/* toast */
 #toast { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); background: #fff; color: rgba(0,0,0,.65); font-size: 14px; padding: 9px 16px; border-radius: 2px; opacity: 0; transition: opacity .3s; z-index: 2000; pointer-events: none; box-shadow: 0 3px 10px rgba(0,0,0,.15); }
 #toast.show { opacity: 1; }
 
-/* 来源切换（antd Radio 风） */
+/* 来源切换 */
 .src-radio { display: flex; gap: 22px; margin-bottom: 12px; font-size: 14px; color: rgba(0,0,0,.65); }
 .src-radio label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .src-radio .dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid #d9d9d9; background: #fff; display: inline-flex; align-items: center; justify-content: center; }
-.src-radio .dot.on { border-color: #1890ff; }
-.src-radio .dot.on::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #1890ff; }
-.src-radio label.on { color: #1890ff; }
+.src-radio .dot.on { border-color: #1976d2; }
+.src-radio .dot.on::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #1976d2; }
+.src-radio label.on { color: #1976d2; }
 
-/* EAM 文档树（antd Tree 形态） */
+/* EAM 文档树 */
 .tree-node { display: flex; align-items: center; gap: 6px; padding: 5px 8px; font-size: 13px; cursor: pointer; border-radius: 2px; user-select: none; }
 .tree-node:hover { background: #f5f7fa; }
 .tree-node .arrow { width: 14px; text-align: center; color: rgba(0,0,0,.45); font-size: 9px; transition: transform .2s; display: inline-block; flex-shrink: 0; }
 .tree-node .arrow.open { transform: rotate(90deg); }
 .tree-node .arrow.leaf { visibility: hidden; }
 .tree-node .cnt { color: rgba(0,0,0,.45); font-size: 12px; margin-left: auto; white-space: nowrap; }
-/* antd Checkbox 形态：全选✓ / 半选横线 */
+/* 复选框：全选✓ / 半选横线 */
 .ck { width: 14px; height: 14px; border: 1px solid #d9d9d9; border-radius: 2px; background: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; font-size: 11px; line-height: 1; color: #fff; }
-.ck:hover { border-color: #1890ff; }
-.ck.on, .ck.half { background: #1890ff; border-color: #1890ff; }
+.ck:hover { border-color: #1976d2; }
+.ck.on, .ck.half { background: #1976d2; border-color: #1976d2; }
 .ck.on::after { content: "✓"; }
 .ck.half::after { content: ""; width: 8px; height: 2px; background: #fff; border-radius: 1px; }
 
@@ -160,12 +150,12 @@ ul { list-style: none; }
 .eam-row:hover { background: #f5f7fa; }
 .eam-row .meta { color: #909399; font-size: 12px; margin-left: auto; }
 .ds-pick { display: inline-block; margin: 0 18px 8px 0; font-size: 13px; color: #606266; }
-.ds-pick .dup { color: #faad14; font-size: 12px; margin-left: 4px; }
+.ds-pick .dup { color: #f57c00; font-size: 12px; margin-left: 4px; }
 .sync-res { margin-top: 12px; border-top: 1px dashed #ebeef5; padding-top: 10px; font-size: 13px; }
-.sync-res .ok { color: #52c41a; } .sync-res .bad { color: #ff4d4f; }
+.sync-res .ok { color: #4caf50; } .sync-res .bad { color: #e53935; }
 
 /* 演示说明 */
-#help { background: #fdf6ec; border: 1px solid #faecd8; border-radius: 4px; padding: 10px 14px; font-size: 12px; color: #b88230; margin-bottom: 16px; }
+#help { background: #fff3e0; border: 1px solid #ffcc80; border-radius: 4px; padding: 10px 14px; font-size: 12px; color: #b88230; margin-bottom: 16px; }
 #help summary { cursor: pointer; font-weight: 600; }
 #help li { margin: 3px 0 3px 18px; }
 
@@ -176,55 +166,59 @@ ul { list-style: none; }
 </head>
 <body>
 
-<!-- ===== 顶部栏（复刻资产哨兵） ===== -->
-<div id="topbar">
-  <div id="logo"><span class="mark">哨</span>资产哨兵 <small>Asset Sentry</small></div>
-  <div id="tabs">
-    <div class="tab" data-page="home" onclick="switchTab('home')">首页</div>
-    <div class="tab active" data-page="kb">知识库管理 <span class="x" title="关闭（演示）" onclick="event.stopPropagation();toast('演示：这个 tab 别关 😄')">×</span></div>
+<!-- ===== nl2sql 管理后台 · 设置页外壳（演示） ===== -->
+<div id="settings-bar">
+  <div id="stab-bar">
+    <button class="stab2" data-tab="datasource" onclick="stabClick('数据源')">数据源</button>
+    <button class="stab2" data-tab="prompt" onclick="stabClick('提示词')">提示词</button>
+    <button class="stab2" data-tab="rules" onclick="stabClick('业务规则')">业务规则</button>
+    <button class="stab2" data-tab="templates" onclick="stabClick('SQL模板')">SQL模板</button>
+    <button class="stab2 active" data-tab="knowledge">知识库</button>
+    <button class="stab2" data-tab="models" onclick="stabClick('模型')">模型</button>
+    <button class="stab2" data-tab="feishu" onclick="stabClick('飞书')">飞书</button>
+    <button class="stab2" data-tab="limits" onclick="stabClick('查询上限')">查询上限</button>
   </div>
-  <div id="user">
-    <span>北京市 27℃ 雾</span>
-    <span>你好，演示用户</span>
-    <div class="icons"><span title="设置">⚙</span><span title="收藏">★</span><span title="通知">🔔</span><span title="刷新" onclick="renderAll();toast('已刷新')">↻</span></div>
+  <div id="role-box">
+    <span>演示身份</span>
+    <select id="role-sel" onchange="switchRole(this.value)">
+      <option value="admin">管理员（admin）</option>
+      <option value="kb_op">知识库操作员（kb_op）</option>
+    </select>
+    <button class="btn small" onclick="toast('演示：返回对话页')">⎋ 返回对话</button>
   </div>
 </div>
+<div id="role-tip" class="role-tip admin"></div>
 
-<div id="layout">
-  <!-- ===== 左侧菜单（复刻：新增「知识库管理」入口） ===== -->
-  <div id="sidebar">
-    <div class="menu-group-title">文档管理</div>
-    <div class="menu-item sub" onclick="toast('演示：原有文档管理，本原型不展开')">📁 文档管理</div>
-    <div class="menu-item sub active" onclick="switchTab('kb')">📚 知识库管理 <span class="badge-new">新增</span></div>
-    <div class="menu-group-title">工作台</div>
-    <div class="menu-item" onclick="switchTab('home')">🏠 首页</div>
-    <div class="menu-item dim">📊 资产大屏 ›</div>
-    <div class="menu-item dim">📈 数智监控 ›</div>
-    <div class="menu-item dim">💰 经营管理 ›</div>
-    <div class="menu-group-title">（其余菜单演示略）</div>
-  </div>
+<div id="main-wrap">
+  <!-- 知识库管理页面（#stab-knowledge 对应内容） -->
+  <div class="page" id="page-kb">
+    <details id="help">
+      <summary>📖 交互原型 · 演示说明（点开看可试流程）</summary>
+      <ul>
+        <li>⓪ 右上角切「演示身份」：知识库操作员（kb_op）= 只剩知识库 tab 可用、连接配置卡不渲染；管理员全恢复</li>
+        <li>① 左栏库列表点选 → 右侧看该库文档；库条目开关 = 整库启停（覆盖式，confirm 提示）</li>
+        <li>② 「＋ 上传文档」（左栏底部）→ 来源选「本地文件 / EAM 文档管理」→ 多选目标库 → 一次进多个库</li>
+        <li>③ 文件行开关 = 单文件禁用（行置灰，不再参与 nl2sql 检索）</li>
+        <li>④ 失败行：悬浮文件名看失败原因，可「重新解析」</li>
+        <li>⑤ 上传弹窗切「EAM 文档管理」：填 dqtoken → 树勾文件或整个文件夹（不支持的格式自动隐藏并计数）→ 选目标库同步（含 1 个失败项演示部分成功）</li>
+        <li>⑥ EAM 面板「模拟过期」按钮 → 看 dqtoken 失效提示；其他 tab 点击为演示占位</li>
+      </ul>
+    </details>
 
-  <!-- ===== 主内容区 ===== -->
-  <div id="main">
-    <!-- 首页占位 -->
-    <div class="page" id="page-home" style="display:none">
-      <div class="card"><div class="home-ph"><div class="big">🏠</div>首页占位（演示）<br><br>点左侧「知识库管理」看本原型的主角</div></div>
+    <!-- 连接配置（仅管理员可见；kb_op 登录时整卡不渲染——api_key/服务地址不可见更不可改） -->
+    <div class="card" id="cfg-card">
+      <div class="card-hd"><h3>RAGFlow 连接</h3><span class="sub">仅管理员可见可改 · kb_op 无权</span></div>
+      <div class="cfg">
+        <label>服务地址 <input style="width:280px" value="http://10.x.x.x:9380"></label>
+        <label>API Key <input type="password" style="width:220px" value="ragflow-xxxx"></label><br>
+        <label>返回片段数 top_k <input type="number" style="width:50px" value="5"></label>
+        <label>相似度门槛 <input style="width:60px" value="0.2"></label>
+        <label>向量权重 <input style="width:60px" value="0.3"></label>
+        <label><input type="checkbox" checked> 启用 RAGFlow</label>
+        <button class="btn primary" onclick="toast('配置已保存（演示）')">保存配置</button>
+        <p class="cfg-note"><b>所有知识库默认参与检索</b>；范围用下方 库开关 / 文件开关 控制。</p>
+      </div>
     </div>
-
-    <!-- 知识库管理页面 -->
-    <div class="page" id="page-kb">
-      <details id="help">
-        <summary>📖 交互原型 · 演示说明（点开看可试流程）</summary>
-        <ul>
-          <li>① 库列表点「库名」选中 → 下方看该库文件；库行开关 = 整库启停（覆盖式，confirm 提示）</li>
-          <li>② 「＋ 上传文档」（左栏底部）→ 来源选「本地文件 / EAM 文档管理」→ 多选目标库 → 一次进多个库</li>
-          <li>③ 文件行开关 = 单文件禁用（行置灰，不再参与 nl2sql 检索）</li>
-          <li>④ 失败行：悬浮文件名看失败原因，可「重新解析」</li>
-          <li>⑤ 上传弹窗切「EAM 文档管理」：填 dqtoken → 树勾单个文件或整个文件夹（子树全选；不支持的格式自动隐藏并计数）→ 选目标库同步（含 1 个失败项演示部分成功）</li>
-          <li>⑥ EAM 面板「模拟过期」按钮 → 看 dqtoken 失效提示与重新粘贴交互</li>
-          <li>⑦ 顶部「首页」tab 可切换（演示多标签页）；其他菜单灰显为演示</li>
-        </ul>
-      </details>
 
       <!-- 主从布局：左=知识库列表（点选），右=当前库文档管理 -->
       <div id="kb-flex">
@@ -254,9 +248,8 @@ ul { list-style: none; }
       </div>
     </div>
   </div>
-</div>
 
-<!-- ===== 弹窗（antd Modal 风格） ===== -->
+<!-- ===== 弹窗（nl2sql admin-modal 风格：遮罩 + 白盒圆角） ===== -->
 <div id="mask">
   <div class="dlg">
     <div class="dlg-hd"><b id="dlg-title"></b><span class="warn-tag" id="dlg-tag" style="display:none"></span><span class="close" title="关闭" onclick="closeDlg()">✕</span></div>
@@ -306,14 +299,26 @@ function runTag(run) {
   return `<span class="tag ${m[1]}">${m[0]}</span>`;
 }
 
-/* ================= tab 切换（顶部多标签 + 左菜单联动） ================= */
-function switchTab(page) {
-  document.querySelectorAll("#tabs .tab").forEach(t => t.classList.toggle("active", t.dataset.page === page));
-  $("page-home").style.display = page === "home" ? "" : "none";
-  $("page-kb").style.display = page === "kb" ? "" : "none";
-  document.querySelectorAll("#sidebar .menu-item").forEach(m =>
-    m.classList.toggle("active", m.textContent.includes("知识库管理") && page === "kb"));
-  if (page !== "kb") stopPolling(); else { renderAll(); startPolling(); }   // 切走停轮询，切回重启
+/* ================= 角色切换（多账号演示：admin 全权 / kb_op 仅知识库） ================= */
+let role = "admin";
+function stabClick(name) {
+  if (role === "kb_op") return toast(`知识库操作员无权访问「${name}」（仅开放：知识库）`);
+  toast(`演示：仅知识库可交互（「${name}」为占位）`);
+}
+function switchRole(r) {
+  role = r;
+  renderRole(); renderAll();
+}
+function renderRole() {
+  // kb_op：其余 stab 置灰锁定；连接配置卡不渲染（api_key/服务地址不可见）
+  document.querySelectorAll("#stab-bar .stab2").forEach(b =>
+    b.classList.toggle("locked", role === "kb_op" && b.dataset.tab !== "knowledge"));
+  $("cfg-card").style.display = role === "kb_op" ? "none" : "";   // 真实实现：kb_op 分支不渲染 DOM（后端 ragflow-config 也 403）
+  const tip = $("role-tip");
+  tip.className = "role-tip " + role;
+  tip.textContent = role === "kb_op"
+    ? "当前身份：知识库操作员（kb_op）—— 仅开放「知识库」管理；RAGFlow 连接配置（API Key / 服务地址）不可见不可改；其余后台功能已锁定"
+    : "当前身份：管理员（admin）—— 全部后台功能可用，可修改 RAGFlow 连接配置";
 }
 
 /* ================= 渲染 ================= */
@@ -322,7 +327,7 @@ function renderDatasets() {                // 左列：库条目（点选切换�
     const allOn = ds.docs.length > 0 && ds.docs.every(d => d.enabled);   // 聚合态：全 on 才 on
     const n = { done: 0, running: 0, fail: 0 };
     ds.docs.forEach(d => { if (d.run === "DONE") n.done++; else if (d.run === "RUNNING") n.running++; else if (d.run === "FAIL") n.fail++; });
-    const stat = `${ds.docs.length} 文档${n.done ? ` · 完成 ${n.done}` : ""}${n.running ? ` · 解析中 ${n.running}` : ""}${n.fail ? ' · <span style="color:#ff4d4f">失败 ' + n.fail + "</span>" : ""}`;
+    const stat = `${ds.docs.length} 文档${n.done ? ` · 完成 ${n.done}` : ""}${n.running ? ` · 解析中 ${n.running}` : ""}${n.fail ? ' · <span style="color:#e53935">失败 ' + n.fail + "</span>" : ""}`;
     return `<div class="ds-item ${ds.id === state.selected ? "active" : ""}" onclick="selectDs('${ds.id}')" title="${esc(ds.description || ds.name)}">
       <div class="row1"><span class="ds-name">${esc(ds.name)}</span>
         <button class="sw ${allOn ? "on" : ""}" title="整库启停（覆盖库内全部文件开关）" onclick="event.stopPropagation();toggleDs('${ds.id}')"></button></div>
@@ -363,7 +368,7 @@ function renderDocs() {
   $("doc-list").innerHTML = `<table class="tbl"><thead><tr>
     <th>文件名</th><th style="width:56px">分段</th><th style="width:210px">状态 / 进度</th><th style="width:64px">启用</th><th style="width:130px">操作</th>
   </tr></thead><tbody>${rows}</tbody></table>`;
-  // 分页（antd Pagination 形态；真实实现：RAGFlow documents 接口 page/page_size）
+  // 分页；真实实现：RAGFlow documents 接口 page/page_size
   $("doc-pager").innerHTML = `<span>共 ${shown.length} 条</span>
     <span class="pg-btn" onclick="toast('演示：上一页')">‹</span><span class="pg-btn cur">1</span><span class="pg-btn" onclick="toast('演示：下一页')">›</span>
     <select onchange="toast('演示：每页条数走 RAGFlow page_size')"><option>20条/页</option><option>50条/页</option><option>100条/页</option></select>`;
@@ -436,16 +441,16 @@ function renderUploadBody() {
     const curTok = ($("eam-token") && $("eam-token").value) || "b25e39b4…be56（已保存）";
     eamCountHidden(); const files = eamFiles(EAM_TREE_STRIPPED || EAM_TREE);
     let listHtml;
-    if (eamExpired) listHtml = '<p style="text-align:center;color:#ff4d4f;font-size:13px;padding:28px 0">加载失败：dqtoken 已过期</p>';
+    if (eamExpired) listHtml = '<p style="text-align:center;color:#e53935;font-size:13px;padding:28px 0">加载失败：dqtoken 已过期</p>';
     else if (kw) listHtml = files.filter(f => f.name.toLowerCase().includes(kw)).map(f => treeFileRow(f, 0)).join("") || '<p class="muted" style="text-align:center;padding:16px 0">无匹配文件</p>';
     else listHtml = (EAM_TREE_STRIPPED || EAM_TREE).map(n => treeNodeHtml(n, 0)).join("");
     panel = `
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
         <input type="text" id="eam-token" placeholder="dqtoken（从 EAM 系统 sessionStorage 复制粘贴，只存在你的浏览器）" style="flex:1;margin:0" value="${esc(curTok)}">
         <button class="btn small" onclick="eamRefresh()">保存并刷新</button>
-        <button class="btn small" style="color:#ff4d4f;border-color:#ffa39e" onclick="eamExpire()" title="演示：token 失效场景">模拟过期</button>
+        <button class="btn small" style="color:#e53935;border-color:#ef9a9a" onclick="eamExpire()" title="演示：token 失效场景">模拟过期</button>
       </div>
-      ${eamExpired ? '<p style="color:#ff4d4f;font-size:12px;margin:0 0 8px">dqtoken 已过期，请从 EAM 重新复制粘贴，再点「保存并刷新」。</p>' : ""}
+      ${eamExpired ? '<p style="color:#e53935;font-size:12px;margin:0 0 8px">dqtoken 已过期，请从 EAM 重新复制粘贴，再点「保存并刷新」。</p>' : ""}
       <input type="text" id="eam-kw" placeholder="按文件名过滤（输入后平铺显示匹配文件，清空恢复树）" oninput="renderUploadBody()" style="margin-bottom:6px">
       <div style="border:1px solid #f0f0f0;border-radius:2px;max-height:230px;overflow:auto;padding:4px 8px">${listHtml}</div>
       <p class="field-note" style="margin:8px 0 0">已选 <b>${eamChecked.size}</b> 个文件${eamHidden ? `；已隐藏 ${eamHidden} 个不支持格式的文件（仅显示 RAGFlow 可解析格式）` : ""}；勾文件夹=整棵子树全选</p>`;
@@ -619,7 +624,7 @@ function toggleFileSel(id) { eamChecked.has(id) ? eamChecked.delete(id) : eamChe
 function eamRefresh() { eamExpired = false; renderUploadBody(); toast("已保存 token 并刷新列表（演示）"); }
 function eamExpire() { eamExpired = true; renderUploadBody(); $("eam-token").focus(); $("eam-token").select(); }
 
-/* ================= 通用弹窗（antd Modal 风格，对应 Modal + Footer 按钮） ================= */
+/* ================= 通用弹窗 ================= */
 function openDlg(title, tag, bodyHtml, btns) {
   $("dlg-title").textContent = title;
   const tagEl = $("dlg-tag");
@@ -641,6 +646,7 @@ function closeDlg() { $("mask").classList.remove("show"); }
 $("mask").addEventListener("click", e => { if (e.target.id === "mask") closeDlg(); });
 
 /* ================= 启动 ================= */
+renderRole();
 renderAll();
 startPolling();   // 初始就有 RUNNING 文件，直接演示轮询
 </script>
