@@ -72,9 +72,9 @@ class RagflowConfig:
 
     @property
     def ready(self) -> bool:
-        """配置是否可用：启用 + 地址/密钥/至少一个 dataset 齐全。"""
-        return (self.enabled and bool(self.base_url) and bool(self.api_key)
-                and len(self.dataset_ids) > 0)
+        """配置是否可用：启用 + 地址/密钥齐全。
+        dataset_ids 不再要求（检索默认全部库，见 retrieve；勾选机制已废弃）。"""
+        return self.enabled and bool(self.base_url) and bool(self.api_key)
 
     @property
     def api_base(self) -> str:
@@ -122,10 +122,11 @@ class RagflowClient:
         return cfg if cfg.enabled else None
 
     async def _require(self) -> RagflowConfig:
-        """取配置并校验可用，不可用抛 RagflowError（上层捕获转友好提示）。"""
+        """取配置并校验可用（启用+地址/密钥），不可用抛 RagflowError。
+        不要求 dataset_ids：检索默认全部库、建库/文档管理在勾选前也要能用。"""
         cfg = await self.load_config()
         if cfg is None or not cfg.ready:
-            raise RagflowError("RAGFlow 知识库未配置或未启用：请在管理后台「知识库」配置地址/API Key 并勾选知识库。")
+            raise RagflowError("RAGFlow 知识库未配置或未启用：请在管理后台「知识库」配置地址/API Key。")
         return cfg
 
     def _headers(self, cfg: RagflowConfig) -> dict:
@@ -151,21 +152,9 @@ class RagflowClient:
         return body
 
     # ---------- 知识库(dataset)管理 ----------
-    async def _require_base(self) -> RagflowConfig:
-        """轻量校验：仅需启用 + 地址/密钥（不要求 dataset_ids）。
-        list_datasets 等管理操作用——列出所有库给 admin 勾选，此时 dataset_ids
-        尚未配置（勾选结果才有值），不能用 _require（它会因 dataset_ids 空而拒绝，
-        形成「要勾选必须先勾选」的鸡生蛋死锁）。
-        """
-        cfg = await self.load_config()
-        if cfg is None or not cfg.enabled or not cfg.base_url or not cfg.api_key:
-            raise RagflowError("RAGFlow 未配置或未启用：请先在管理后台填写地址/API Key。")
-        return cfg
-
     async def list_datasets(self) -> list[dict]:
-        """列出 RAGFlow 所有知识库（含解析状态计数）。admin 后台勾选用。
-        只需地址/密钥即可列库（dataset_ids 尚未勾选时也要能列出供勾选）。"""
-        cfg = await self._require_base()
+        """列出 RAGFlow 所有知识库（含解析状态计数）。检索默认全部库也用它取全量 id。"""
+        cfg = await self._require()
         body = await self._request(
             cfg, "GET", "/datasets",
             params={"page": 1, "page_size": 100, "include_parsing_status": "true"})
@@ -215,13 +204,60 @@ class RagflowClient:
         body = await self._request(
             cfg, "GET", f"/datasets/{dataset_id}/documents",
             params={"page": page, "page_size": page_size})
-        return body.get("data", []) or []
+        data = body.get("data") or {}
+        # 新版 RAGFlow 返回 {docs:[...], total}，旧版直接数组——两者兼容
+        return (data.get("docs") or []) if isinstance(data, dict) else data
 
     async def delete_documents(self, dataset_id: str, document_ids: list[str]) -> None:
         """删除文档（按 id）。"""
         cfg = await self._require()
         await self._request(cfg, "DELETE", f"/datasets/{dataset_id}/documents",
                             json={"ids": document_ids})
+
+    # ---------- 文档启用/禁用 ----------
+    # RAGFlow：PUT /datasets/{ds}/documents/{doc} body {"enabled": 0|1}（旧版字段名 status）。
+    # 字段名收敛为常量，版本不兼容时一处切换。off 的文档检索不召回——库级启停=全库文件批量翻转。
+    ENABLED_FIELD = "enabled"
+
+    async def update_document_enabled(self, dataset_id: str, document_id: str,
+                                      enabled: bool) -> None:
+        """启停单个文档。"""
+        cfg = await self._require()
+        await self._request(
+            cfg, "PUT", f"/datasets/{dataset_id}/documents/{document_id}",
+            json={self.ENABLED_FIELD: 1 if enabled else 0})
+
+    async def _all_documents(self, dataset_id: str) -> list[dict]:
+        """翻页取全量文档（该 RAGFlow 版本 page_size 上限 100）。"""
+        out, page = [], 1
+        while True:
+            docs = await self.list_documents(dataset_id, page=page, page_size=100)
+            out.extend(docs)
+            if len(docs) < 100:
+                return out
+            page += 1
+
+    async def set_documents_enabled(self, dataset_id: str,
+                                    document_ids: list[str] | None,
+                                    enabled: bool) -> dict:
+        """批量启停。document_ids=None → 全库（先列全量再逐个翻转，覆盖式不记忆单文件状态）。
+        逐项容错，返回 {total, updated, failed:[{id,name,error}]}。"""
+        if document_ids is None:
+            docs = await self._all_documents(dataset_id)
+            names = {d.get("id"): d.get("name", "") for d in docs}
+            document_ids = list(names.keys())
+        else:
+            docs = await self._all_documents(dataset_id)
+            names = {d.get("id"): d.get("name", "") for d in docs
+                     if d.get("id") in set(document_ids)}
+        failed, updated = [], 0
+        for did in document_ids:
+            try:
+                await self.update_document_enabled(dataset_id, did, enabled)
+                updated += 1
+            except RagflowError as e:
+                failed.append({"id": did, "name": names.get(did, ""), "error": str(e)[:200]})
+        return {"total": len(document_ids), "updated": updated, "failed": failed}
 
     # ---------- 检索（核心）----------
     async def retrieve(self, question: str, top_k: int | None = None,
@@ -231,11 +267,19 @@ class RagflowClient:
                        keyword: bool = True) -> list[dict]:
         """向量+关键词混合检索 RAGFlow。返回片段列表：
         [{content, document_keyword(文档名), similarity, document_id, dataset_id, highlight}, ...]
-        按相似度降序。未配置/无结果返回 []（不抛，上层按空处理给友好提示）。"""
+        按相似度降序。未配置/无结果返回 []（不抛，上层按空处理给友好提示）。
+        dataset_ids 缺省 = 全部知识库（现列现传；RAGFlow retrieval 不传 dataset_ids 会报错）。
+        禁用文件/整库禁用由 RAGFlow 侧 enabled 状态自然排除，无需本系统过滤。"""
         cfg = await self.load_config()
         if cfg is None or not cfg.ready:
             return []   # 未配置：静默返回空，上层提示「知识库未配置」
-        ds = dataset_ids or cfg.dataset_ids
+        ds = dataset_ids
+        if not ds:
+            try:
+                ds = [d.get("id") for d in await self.list_datasets() if d.get("id")]
+            except RagflowError as e:
+                log.warning("RAGFlow 列库失败（检索返回空）: %s", e)
+                return []
         if not ds:
             return []
         payload = {

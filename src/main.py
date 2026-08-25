@@ -59,29 +59,31 @@ _app_state: dict = {}
 _TOKEN_TTL = 7 * 24 * 3600   # token 有效期 7 天
 
 
-def _sign_token(username: str, secret: str) -> str:
-    """签名 token：username:expire:hmac(secret, username:expire)。登录返回，前端存 localStorage，
-    请求带 Authorization: Bearer <token>。无状态——服务端不存，登出靠前端丢弃。"""
+def _sign_token(username: str, role: str, secret: str) -> str:
+    """签名 token：username:role:expire:hmac(secret, ...)。登录返回，前端存 localStorage，
+    请求带 Authorization: Bearer <token>。无状态——服务端不存，登出靠前端丢弃。
+    role：admin=全权 / kb_op=知识库操作员（auth_guard 按矩阵拦截）。"""
     expire = int(time.time()) + _TOKEN_TTL
-    payload = f"{username}:{expire}"
+    payload = f"{username}:{role}:{expire}"
     sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}:{sig}"
 
 
-def _verify_token(val: str | None, secret: str) -> str | None:
-    """校验 token 返回 username；格式错/签名不符/过期都返回 None。"""
+def _verify_token(val: str | None, secret: str) -> tuple[str, str] | None:
+    """校验 token 返回 (username, role)；格式错/签名不符/过期都返回 None。"""
     if not val or not secret:
         return None
     parts = val.split(":")
-    if len(parts) != 3:
+    if len(parts) != 4:
         return None
-    username, expire, sig = parts
-    expect = hmac.new(secret.encode(), f"{username}:{expire}".encode(), hashlib.sha256).hexdigest()
+    username, role, expire, sig = parts
+    expect = hmac.new(secret.encode(), f"{username}:{role}:{expire}".encode(),
+                      hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expect):
         return None
     if not expire.isdigit() or int(expire) < time.time():
         return None
-    return username
+    return username, role
 
 
 def _bearer(req: Request) -> str | None:
@@ -135,9 +137,11 @@ async def lifespan(app: FastAPI):
                      session_manager=sm, audit=audit)
     orch = Orchestrator(loop, sm, prompt_store=prompts, audit=audit)
 
+    from src.eam.client import EamClient
     _app_state.update(
         orchestrator=orch, loop=loop, session_mgr=sm, llm_service=llm, prompts=prompts,
-        datasource_mgr=datasource_mgr, sess_state=sess_state, auth=cfg.auth)
+        datasource_mgr=datasource_mgr, sess_state=sess_state, auth=cfg.auth,
+        eam_client=EamClient(cfg.eam))   # EAM 只读同步源（yml eam 段配置，改配置需重启）
     _db_type = getattr(cfg.database, "type", "postgres") or "postgres"
     log.info("nl2sql 启动完成 db=%s(%s:%s/%s) redis=%s（模型配置走数据库 llm_config）",
              _db_type, cfg.database.host, cfg.database.port, cfg.database.database,
@@ -211,15 +215,16 @@ def create_app() -> FastAPI:
         html = (Path(__file__).resolve().parent.parent / "static" / "index.html").read_bytes()
         return Response(content=html, media_type="text/html")
 
-    # ---- 全站单账户登录（hmac 签名 token，Authorization: Bearer）----
+    # ---- 登录（多账号+角色，hmac 签名 token，Authorization: Bearer）----
     @app.post("/api/login")
     async def login(req: Request):
         body = await req.json()
         auth = _app_state.get("auth")
-        if not auth or not auth.password or body.get("username") != auth.username \
-                or body.get("password") != auth.password:
+        account = auth.find(body.get("username", ""), body.get("password", "")) if auth else None
+        if account is None:
             raise HTTPException(401, "账号或密码错误")
-        return {"ok": True, "token": _sign_token(auth.username, auth.password)}
+        return {"ok": True, "token": _sign_token(account.username, account.role, auth.secret()),
+                "role": account.role}
 
     @app.post("/api/logout")
     async def logout():
@@ -228,9 +233,7 @@ def create_app() -> FastAPI:
     @app.get("/api/me")
     async def whoami(req: Request):
         # 受中间件保护（需 Bearer token）；到这里说明已登录
-        auth = _app_state.get("auth")
-        user = _verify_token(_bearer(req), auth.password if auth else "")
-        return {"logged_in": user is not None, "username": user}
+        return {"logged_in": True, "username": req.state.username, "role": req.state.role}
 
     @app.middleware("http")
     async def auth_guard(req: Request, call_next):
@@ -239,15 +242,30 @@ def create_app() -> FastAPI:
         if p in ("/", "/favicon.ico") or (p == "/api/login" and m == "POST") or m == "OPTIONS":
             return await call_next(req)
         auth = _app_state.get("auth")
-        if not auth or not auth.password:   # 未配密码 → 不启用认证（开发兜底）
+        accounts = auth.account_list() if auth else []
+        if not accounts:   # 未配任何账号 → 不启用认证（开发兜底）
             return await call_next(req)
-        if not _verify_token(_bearer(req), auth.password):
+        verified = _verify_token(_bearer(req), auth.secret())
+        if verified is None:
             return JSONResponse({"detail": "未登录"}, status_code=401)
+        req.state.username, req.state.role = verified
+        # kb_op（知识库操作员）：仅放行知识库管理与 EAM 端点；其余 admin 端点 403
+        # （问数 /api/ask、会话等非 admin 接口不受限；ragflow-config 含 API Key/地址，对其不可见不可改）
+        if req.state.role == "kb_op" and p.startswith("/api/admin"):
+            allowed = p.startswith(("/api/admin/ragflow/datasets",
+                                    "/api/admin/ragflow/documents",
+                                    "/api/admin/ragflow/parse",
+                                    "/api/admin/eam"))
+            if not allowed:
+                return JSONResponse(
+                    {"detail": "无权限：知识库操作员仅能访问知识库管理相关功能"}, status_code=403)
         return await call_next(req)
 
     app.include_router(build_ask_router(_Lazy("orchestrator")))
     app.include_router(build_admin_feishu_router(_Lazy("feishu_adapter")))
     app.include_router(build_admin_ragflow_router())  # P3：RAGFlow 知识库配置+文档管理
+    from src.web.routes.admin_eam import build_admin_eam_router
+    app.include_router(build_admin_eam_router(_Lazy("eam_client")))  # EAM 只读同步（树/清单/同步）
     app.include_router(build_agent_limits_router(_Lazy("loop")))   # 查询上限可配（PUT 后热刷新 AgentLoop）
     app.include_router(build_session_router(_Lazy("session_mgr")))
     app.include_router(build_admin_llm_router(_Lazy("llm_service")))

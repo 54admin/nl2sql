@@ -36,6 +36,23 @@ def _row_to_dict(r) -> dict:
             "enabled": r.enabled, "version": r.version}
 
 
+class CreateDatasetPayload(BaseModel):
+    name: str
+    description: str = ""
+    chunk_method: str = "naive"   # naive=通用（默认）
+
+
+class DocumentsEnabledPayload(BaseModel):
+    dataset_id: str
+    document_ids: list[str] | None = None   # None/空 = 整库
+    enabled: bool
+
+
+class ParsePayload(BaseModel):
+    dataset_id: str
+    document_ids: list[str]
+
+
 def build_admin_ragflow_router() -> APIRouter:
     """构造 admin RAGFlow 路由。配置每次现读 ragflow_config 表（agent 检索也现读，天然热更新）。"""
     router = APIRouter()
@@ -75,14 +92,40 @@ def build_admin_ragflow_router() -> APIRouter:
 
     @router.get("/api/admin/ragflow/datasets")
     async def list_datasets() -> dict:
-        """列出 RAGFlow 所有知识库（admin 勾选哪些参与检索用）。"""
+        """列出 RAGFlow 所有知识库（含每库解析状态计数；检索默认全部库，无需勾选）。"""
         try:
             return {"datasets": await get_ragflow_client().list_datasets()}
         except Exception as e:
             raise HTTPException(400, f"RAGFlow 列知识库失败：{e}")
 
+
+    @router.post("/api/admin/ragflow/datasets")
+    async def create_dataset(payload: CreateDatasetPayload) -> dict:
+        """新建知识库。新库即刻参与检索（默认全部库）。"""
+        if not payload.name.strip():
+            raise HTTPException(400, "库名不能为空")
+        try:
+            ds = await get_ragflow_client().create_dataset(
+                payload.name.strip(), payload.description.strip(), payload.chunk_method)
+        except Exception as e:
+            raise HTTPException(400, f"RAGFlow 建库失败：{e}")
+        return {"ok": True, "dataset": ds}
+
+
+    @router.put("/api/admin/ragflow/documents-enabled")
+    async def set_documents_enabled(payload: DocumentsEnabledPayload) -> dict:
+        """文档启停统一端点：单文件（传一个 id）/整库（ids 缺省）。
+        逐项容错，返回部分成功报告。禁用后 RAGFlow 检索不召回（nl2sql 检索自动跟随）。"""
+        try:
+            ids = payload.document_ids or None
+            result = await get_ragflow_client().set_documents_enabled(
+                payload.dataset_id, ids, payload.enabled)
+        except Exception as e:
+            raise HTTPException(400, f"RAGFlow 启停失败：{e}")
+        return {"ok": True, **result}
+
     @router.get("/api/admin/ragflow/documents")
-    async def list_documents(dataset_id: str, page: int = 1, page_size: int = 200) -> dict:
+    async def list_documents(dataset_id: str, page: int = 1, page_size: int = 100) -> dict:   # 该 RAGFlow 版本上限 100
         """列出某知识库的文档（含解析状态 run / chunk_count）。"""
         try:
             return {"documents": await get_ragflow_client().list_documents(
@@ -102,12 +145,12 @@ def build_admin_ragflow_router() -> APIRouter:
             raise HTTPException(400, f"RAGFlow 上传失败：{e}")
         return {"ok": True, "documents": data}
 
+
     @router.post("/api/admin/ragflow/parse")
-    async def parse_documents(dataset_id: str = Form(...),
-                              document_ids: list[str] = Form(...)) -> dict:
+    async def parse_documents(payload: ParsePayload) -> dict:
         """触发文档解析（分段 + embedding）。上传后必须调，否则不可检索。"""
         try:
-            await get_ragflow_client().parse_documents(dataset_id, document_ids)
+            await get_ragflow_client().parse_documents(payload.dataset_id, payload.document_ids)
         except Exception as e:
             raise HTTPException(400, f"RAGFlow 解析失败：{e}")
         return {"ok": True}

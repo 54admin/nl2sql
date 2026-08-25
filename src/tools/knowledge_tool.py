@@ -78,8 +78,7 @@ async def knowledge_search(args: dict, ctx: LoopContext,
     except Exception as e:
         return ToolResult(summary=f"知识库检索失败：{e}")
     if not rows:
-        return ToolResult(summary="知识库未配置或无匹配文档片段。"
-                                  "（RAGFlow 未启用/未勾选知识库，或确实无相关文档）。"
+        return ToolResult(summary="知识库未启用或无匹配文档片段（RAGFlow 未配置/未启用，或确实无相关文档）。"
                                   "不要再调 knowledge_search（换 query 也是空）；归因/答疑直接基于已有数据。")
     # content 截断 800 字防撑爆 prompt；带文档名来源 + 相似度，便于 LLM 判断依据可信度
     hits = [{

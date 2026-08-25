@@ -1,4 +1,4 @@
-"""配置加载：YAML 基线 + profile 合并（只读 app/redis/postgres）。
+"""配置加载：YAML 基线 + profile 合并（读 app/redis/database/feishu/auth/eam）。
 llm 不在这里读——全走数据库 llm_config 表（PUT /api/admin/llm-config）。
 LLMConfig dataclass 保留供 LLMService 内部装数据库读出的配置用。"""
 from dataclasses import dataclass, field
@@ -66,11 +66,56 @@ class FeishuConfig:
 
 
 @dataclass
+class Account:
+    """登录账号。role：admin=全权；kb_op=知识库操作员（仅知识库管理+问数，
+    RAGFlow 连接配置等其余 admin 端点 403，见 main.py auth_guard）。"""
+    username: str
+    password: str
+    role: str = "admin"
+
+
+@dataclass
 class AuthConfig:
-    """全站单账户登录配置（hmac 签名 cookie 认证）。
-    默认 username=admin；password 必须在 application-{profile}.yml 配（文件已 gitignore，密码不入库）。"""
+    """登录配置（hmac 签名 token，无状态）。
+    兼容两种写法：旧式 username/password 单账户（视为 admin）；
+    新式 accounts 列表（多账号+角色）。密码在 application-{profile}.yml 配（gitignore 不入库）。"""
     username: str = "admin"
     password: str = ""
+    accounts: list = field(default_factory=list)   # [{username, password, role}]，role 缺省 admin
+
+    def account_list(self) -> list[Account]:
+        """生效账号列表：accounts 优先；为空且配了 password 则视为单 admin 账号。"""
+        if self.accounts:
+            return [Account(a.get("username", ""), a.get("password", ""), a.get("role", "admin"))
+                    for a in self.accounts if a.get("username") and a.get("password")]
+        if self.password:
+            return [Account(self.username, self.password, "admin")]
+        return []
+
+    def find(self, username: str, password: str) -> Account | None:
+        for a in self.account_list():
+            if a.username == username and a.password == password:
+                return a
+        return None
+
+    def secret(self) -> str:
+        """token 签名全局密钥 = 全部账号密码拼接。改任一密码 → 全员 token 失效重新登录。"""
+        return "|".join(a.password for a in self.account_list())
+
+
+@dataclass
+class EamConfig:
+    """EAM 文档管理对接（只读同步源，全部接口 2026-08-25 实测，见 docs/知识库管理设计.md 第7章）。
+    鉴权：Authorization: Basic <auth_basic> 且 loginToken 头必须存在（空值即可）。"""
+    base_url: str = "https://api.gw-greenenergy.com"
+    auth_basic: str = ""            # base64(ak:sk)，平台签发长期凭证；sk 不进前端
+    tree_api: str = "/annex/folder/tree"
+    files_api: str = "/annex/file/fileList"
+    download_api: str = "/annex/file/batch/downLoad"
+
+    @property
+    def ready(self) -> bool:
+        return bool(self.base_url and self.auth_basic)
 
 
 @dataclass
@@ -80,6 +125,7 @@ class ApplicationConfig:
     database: PostgresConfig = field(default_factory=PostgresConfig)
     feishu: FeishuConfig = field(default_factory=FeishuConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
+    eam: EamConfig = field(default_factory=EamConfig)
     profiles: list = field(default_factory=list)
 
 
@@ -110,6 +156,7 @@ def _build(d: dict) -> ApplicationConfig:
         database=PostgresConfig(**(d.get("database") or d.get("postgres") or {})),
         feishu=FeishuConfig(**d.get("feishu", {})),
         auth=AuthConfig(**d.get("auth", {})),
+        eam=EamConfig(**d.get("eam", {})),
         profiles=profiles,
     )
 

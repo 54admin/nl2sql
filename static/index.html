@@ -295,6 +295,41 @@
   .stat-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 14px 22px; min-width: 130px; }
   .stat-val { font-size: 24px; font-weight: 600; color: #333; }
   .stat-label { font-size: 12px; color: #888; margin-top: 4px; }
+
+/* ===== 知识库管理（主从布局 + 手写组件） ===== */
+.kb-ds-item { padding:8px 10px; border-radius:4px; cursor:pointer; position:relative; margin-bottom:2px; }
+.kb-ds-item:hover { background:#f5f7fa; }
+.kb-ds-item.active { background:#e3f2fd; }
+.kb-ds-item.active::before { content:""; position:absolute; left:0; top:6px; bottom:6px; width:3px; background:#1976d2; border-radius:2px; }
+.kb-ds-item .r1 { display:flex; align-items:center; gap:6px; }
+.kb-ds-item .nm { font-size:13px; color:#333; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kb-ds-item.active .nm { color:#1565c0; }
+.kb-ds-item .r2 { font-size:11px; color:#999; margin-top:2px; }
+.kb-sw { width:36px; height:18px; border-radius:9px; background:#c0c4cc; position:relative; cursor:pointer; display:inline-block; vertical-align:middle; transition:background .2s; border:none; padding:0; flex-shrink:0; }
+.kb-sw::after { content:""; position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%; background:#fff; transition:left .2s; box-shadow:0 1px 2px rgba(0,0,0,.2); }
+.kb-sw.on { background:#4caf50; }
+.kb-sw.on::after { left:20px; }
+.kb-bar { width:110px; height:6px; border-radius:3px; background:#eee; overflow:hidden; display:inline-block; vertical-align:middle; margin-right:4px; }
+.kb-bar i { display:block; height:100%; border-radius:3px; background:#1976d2; transition:width .6s; }
+.kb-bar i.done { background:#4caf50; } .kb-bar i.fail { background:#e53935; }
+.kb-tag { display:inline-block; font-size:11px; line-height:18px; padding:0 7px; border-radius:3px; margin-right:2px; }
+.kb-tag.run { background:#e3f2fd; color:#1565c0; } .kb-tag.done { background:#f1f8f1; color:#2e7d32; }
+.kb-tag.fail { background:#ffebee; color:#c62828; } .kb-tag.info { background:#f5f5f5; color:#888; }
+.kb-pager { display:flex; align-items:center; gap:8px; justify-content:flex-end; font-size:12px; color:#888; padding:10px 0 2px; }
+.kb-tree-node { display:flex; align-items:center; gap:6px; padding:5px 8px; font-size:12px; cursor:pointer; border-radius:3px; user-select:none; }
+.kb-tree-node:hover { background:#f5f7fa; }
+.kb-tree-node .arr { width:14px; text-align:center; color:#999; font-size:9px; transition:transform .2s; flex-shrink:0; }
+.kb-tree-node .arr.open { transform:rotate(90deg); }
+.kb-tree-node .meta { color:#999; font-size:11px; margin-left:auto; white-space:nowrap; }
+.kb-ck { width:14px; height:14px; border:1px solid #ccc; border-radius:2px; background:#fff; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; font-size:11px; line-height:1; color:#fff; }
+.kb-ck.on, .kb-ck.half { background:#1976d2; border-color:#1976d2; }
+.kb-ck.on::after { content:"✓"; } .kb-ck.half::after { content:""; width:8px; height:2px; background:#fff; }
+.kb-src { display:flex; gap:20px; margin-bottom:10px; font-size:13px; color:#666; }
+.kb-src label { display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+.kb-src .dot { width:14px; height:14px; border-radius:50%; border:1px solid #ccc; display:inline-flex; align-items:center; justify-content:center; }
+.kb-src .dot.on { border-color:#1976d2; } .kb-src .dot.on::after { content:""; width:6px; height:6px; border-radius:50%; background:#1976d2; }
+.kb-src label.on { color:#1565c0; }
+.stab-locked { opacity:.4 !important; cursor:not-allowed !important; }
 </style>
 </head>
 <body>
@@ -396,18 +431,41 @@
         <ul id="st-list" class="admin-list"></ul>
       </section>
       <section class="admin-card stab-panel" id="stab-knowledge">
-        <h3>知识库（RAGFlow）</h3>
-        <div id="ragflow-cfg" style="max-width:680px">
-          <p class="placeholder">加载中…</p>
+        <!-- kb_op 角色提示（admin 不显示） -->
+        <div id="kb-role-tip" style="display:none;background:#fff3e0;color:#e65100;font-size:12px;padding:6px 12px;border-radius:6px;margin-bottom:10px">
+          当前身份：知识库操作员——仅开放知识库管理；RAGFlow 连接配置不可见不可改
         </div>
-        <hr style="margin:16px 0;border:none;border-top:1px solid #eee">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <h3 style="margin:0">文档管理</h3>
-          <select id="rf-dataset" onchange="loadRfDocs()" style="padding:3px 8px;border:1px solid #ccc;border-radius:4px;font-size:12px"></select>
-          <button class="add-btn" onclick="rfUploadModal()">+ 上传</button>
-          <button class="llm-edit-btn" onclick="loadRfDocs()">刷新</button>
+        <!-- 连接配置（仅 admin；kb_op 整卡不渲染） -->
+        <div id="kb-cfg" style="max-width:760px">
+          <h3>RAGFlow 连接 <span style="font-size:12px;color:#888;font-weight:400">仅管理员可见可改</span></h3>
+          <div id="kb-cfg-form"><p class="placeholder">加载中…</p></div>
         </div>
-        <div id="rf-docs" style="max-height:60vh;overflow:auto"></div>
+        <div id="kb-cfg-hr" style="border-top:1px solid #eee;margin:14px 0"></div>
+        <!-- 主从布局：左=库列表，右=当前库文档管理 -->
+        <div style="display:flex;gap:14px;align-items:stretch">
+          <div style="width:270px;flex-shrink:0">
+            <div style="display:flex;align-items:center;margin-bottom:8px">
+              <h3 style="margin:0;margin-right:auto">知识库</h3>
+              <button class="llm-edit-btn" onclick="kbNewDsModal()">＋ 新建</button>
+            </div>
+            <div id="kb-ds-list" style="max-height:62vh;overflow:auto;margin:0 -4px;padding:0 4px"></div>
+            <div style="border-top:1px solid #f0f0f0;margin-top:8px;padding-top:10px">
+              <button class="llm-edit-btn" style="width:100%;padding:6px 0;background:#1976d2;color:#fff;border:none;font-size:12px" onclick="kbUploadModal()">＋ 上传文档（本地 / EAM）</button>
+              <p style="font-size:11px;color:#999;text-align:center;margin:8px 0 0">所有库默认参与检索，启停即时生效</p>
+            </div>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <h3 id="kb-doc-title" style="margin:0">—</h3>
+              <span id="kb-doc-sub" style="font-size:12px;color:#888"></span>
+              <span style="margin-left:auto"></span>
+              <input id="kb-doc-kw" placeholder="按文件名搜索" oninput="KB.docKw=this.value;renderKbDocs()" style="padding:4px 10px;border:1px solid #ccc;border-radius:4px;font-size:12px;width:180px">
+              <button class="llm-edit-btn" onclick="kbRefreshAll()">刷新</button>
+            </div>
+            <div id="kb-doc-list"></div>
+            <div id="kb-doc-pager" class="kb-pager"></div>
+          </div>
+        </div>
       </section>
       <section class="admin-card stab-panel" id="stab-models">
         <h3>模型 &amp; 限流 <button class="add-btn" onclick="openLlmModal()">+ 新增</button></h3>
@@ -938,7 +996,7 @@ function showSettings(enter) {
   document.getElementById("settings-nav").style.display = enter ? "flex" : "none";
   document.getElementById("admin-panel").style.display = enter ? "flex" : "none";
   document.getElementById("stats-panel").style.display = "none";
-  if (enter) showSettingsTab("datasource");
+  if (enter) showSettingsTab(USER_ROLE === "admin" ? "datasource" : "knowledge");
 }
 
 // ===== 统计页（顶部独立按钮）：全局卡片 + trace 列表 + 点行看全链路 =====
@@ -1055,11 +1113,12 @@ async function openTraceDetail(tid) {
 function showSettingsTab(tab) {
   document.querySelectorAll(".stab-panel").forEach(p => p.classList.toggle("active", p.id === "stab-" + tab));
   document.querySelectorAll("#settings-nav .stab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  if (tab !== "knowledge") kbStopPolling();
   if (tab === "datasource") loadDatasources();
   else if (tab === "prompt") loadPrompt();
   else if (tab === "rules") loadRules();
   else if (tab === "templates") loadSqlTemplates();
-  else if (tab === "knowledge") loadRagflow();
+  else if (tab === "knowledge") loadKnowledgeTab();
   else if (tab === "models") loadLlm();
   else if (tab === "feishu") loadFeishu();
   else if (tab === "limits") loadLimits();
@@ -1199,107 +1258,318 @@ async function delTpl(id) {
   await fetch(`/api/admin/sql-templates/${id}`, {method: "DELETE"});
   await loadSqlTemplates();
 }
-// 知识库（RAGFlow：配置走库热更新 + 文档管理转发 RAGFlow）
-async function loadRagflow() {
-  await Promise.all([loadRagflowConfig(), loadRfDatasets(), loadRfDocs()]);
-}
-async function loadRagflowConfig() {
-  const cfg = await (await fetch("/api/admin/ragflow-config")).json().catch(() => ({}));
-  const el = document.getElementById("ragflow-cfg");
-  el.innerHTML = `
-    <label style="display:block;margin:6px 0">RAGFlow 地址
-      <input id="rf-base" style="width:360px" value="${escapeHtml(cfg.base_url||"")}" placeholder="http://10.x.x.x:9380（不带 /api/v1）">
-    </label>
-    <label style="display:block;margin:6px 0">API Key
-      <input id="rf-key" style="width:360px" value="${escapeHtml(cfg.api_key||"")}" placeholder="RAGFlow 平台头像 → API Key">
-    </label>
-    <div style="display:flex;gap:16px;margin:8px 0;flex-wrap:wrap">
-      <label>返回片段数 top_k <input id="rf-topk" type="number" style="width:60px" value="${cfg.top_k??5}"></label>
-      <label>相似度门槛 <input id="rf-sim" type="number" step="0.05" style="width:70px" value="${cfg.similarity_threshold??0.2}"></label>
-      <label>向量权重 <input id="rf-vw" type="number" step="0.05" style="width:70px" value="${cfg.vector_similarity_weight??0.3}"></label>
-    </div>
-    <label style="display:block;margin:8px 0"><input id="rf-enabled" type="checkbox" ${cfg.enabled?"checked":""}> 启用 RAGFlow 知识库（勾选后问数/归因可检索文档）</label>
-    <button class="llm-edit-btn" style="background:#1976d2;color:#fff;padding:4px 14px" onclick="saveRagflowConfig()">保存配置</button>
-    <span style="font-size:11px;color:#999;margin-left:8px">下方「文档管理」选 dataset 勾选参与检索</span>`;
-}
-async function saveRagflowConfig() {
-  const payload = {
-    base_url: rfVal("rf-base"), api_key: rfVal("rf-key"),
-    dataset_ids: getSelectedDatasets(),
-    top_k: +rfVal("rf-topk")||5, similarity_threshold: +rfVal("rf-sim")||0.2,
-    vector_similarity_weight: +rfVal("rf-vw")||0.3, enabled: document.getElementById("rf-enabled").checked,
-  };
-  const r = await fetch("/api/admin/ragflow-config", {method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-  if (r.ok) { alert("已保存（agent 下次检索即生效）"); }
-  else { const e = await r.json().catch(()=>({})); alert("保存失败: "+(e.detail||r.status)); }
-}
-function rfVal(id){ const el=document.getElementById(id); return el?el.value:""; }
+// ===== 知识库管理（主从布局：左库列表/右文档管理；检索默认全部库；启停即时生效）=====
+// 设计与接口对照见 docs/知识库管理设计.md；kb_op 角色仅开放此 tab（连接配置对其不可见）
+let KB = { datasets: [], selected: null, docKw: "", pollTimer: null, pollStart: 0 };
+const RF_EXT = new Set(["pdf","doc","docx","xls","xlsx","ppt","pptx","txt","md","csv","json","jpg","jpeg","png","gif","bmp","tiff","epub","html"]);   // RAGFlow 支持格式（EAM 树过滤/本地上传拦截）
+const KB_RUN = { UNSTART:"未解析", RUNNING:"解析中", DONE:"已解析", FAIL:"失败", CANCEL:"已取消" };
 
-async function loadRfDatasets() {
-  const [dsRes, cfgRes] = await Promise.all([
-    (await fetch("/api/admin/ragflow/datasets")).json().catch(()=>({})),
-    (await fetch("/api/admin/ragflow-config")).json().catch(()=>({}))]);
-  const datasets = dsRes.datasets || [];
-  const sel = cfgRes.dataset_ids || [];
-  const selEl = document.getElementById("rf-dataset");
-  const cur = selEl.value;
-  selEl.innerHTML = '<option value="">（选择知识库查看文档）</option>' + datasets.map(d=>
-    `<option value="${d.id}" ${d.id===cur?"selected":""}>${escapeHtml(d.name)}（${d.document_count??0}文档/${d.chunk_count??0}分段）</option>`).join("");
-  let box = document.getElementById("rf-ds-box");
-  if (!box) { box = document.createElement("div"); box.id="rf-ds-box"; document.getElementById("ragflow-cfg").appendChild(box); }
-  box.innerHTML = '<div style="font-size:12px;color:#555;margin:10px 0 4px">勾选参与检索的知识库：</div>' +
-    (datasets.length ? datasets.map(d=>`<label style="margin-right:14px;font-size:12px"><input type="checkbox" class="rf-ds-check" value="${d.id}" ${sel.includes(d.id)?"checked":""}> ${escapeHtml(d.name)}</label>`).join("")
-     : '<p class="placeholder">未列到知识库（检查地址/Key/是否启用）</p>');
+async function loadKnowledgeTab() {
+  kbRenderRole();
+  await Promise.all([kbLoadCfg(), kbLoadDatasets()]);
 }
-function getSelectedDatasets() {
-  return Array.from(document.querySelectorAll(".rf-ds-check:checked")).map(c=>c.value);
+function kbRenderRole() {
+  // kb_op：其余 tab 锁定；连接配置整卡不渲染（api_key/服务地址不可见不可改，后端 ragflow-config 也 403）
+  document.querySelectorAll("#settings-nav .stab").forEach(b =>
+    b.classList.toggle("stab-locked", USER_ROLE !== "admin" && b.dataset.tab !== "knowledge"));
+  const isAdmin = USER_ROLE === "admin";
+  ["kb-cfg", "kb-cfg-hr"].forEach(id => document.getElementById(id).style.display = isAdmin ? "" : "none");
+  document.getElementById("kb-role-tip").style.display = isAdmin ? "none" : "";
 }
-async function loadRfDocs() {
-  const dsId = document.getElementById("rf-dataset")?.value;
-  const el = document.getElementById("rf-docs");
-  if (!dsId) { el.innerHTML = '<p class="placeholder">先在上方选择一个知识库</p>'; return; }
-  const {documents = []} = await (await fetch(`/api/admin/ragflow/documents?dataset_id=${encodeURIComponent(dsId)}`)).json().catch(()=>({}));
-  const runText = r => ({UNSTART:"未解析",RUNNING:"解析中",DONE:"已解析",FAIL:"失败"}[r]||r||"-");
-  _renderTable("rf-docs", ["文件名","分段数","状态","操作"], documents.map(d=>
-    `<tr><td>${escapeHtml(d.name||"")}</td><td>${d.chunk_count??0}</td><td>${runText(d.run)}</td>
-      <td class="col-op">
-        ${(d.run!=="DONE"&&d.run!=="RUNNING")?`<button class="llm-edit-btn" onclick="rfParse('${dsId}','${d.id}')">解析</button>`:""}
-        <button class="li-del" onclick="rfDel('${dsId}','${d.id}')">×</button>
-      </td></tr>`));
+// ---------- 连接配置（仅 admin） ----------
+async function kbLoadCfg() {
+  const el = document.getElementById("kb-cfg-form");
+  if (USER_ROLE !== "admin") { el.innerHTML = ""; return; }
+  const cfg = await (await fetch("/api/admin/ragflow-config")).json().catch(() => ({}));
+  el.innerHTML = `
+    <label style="display:block;margin:6px 0;font-size:12px;color:#555">服务地址
+      <input id="rf-base" style="width:340px;margin-left:6px" value="${escapeHtml(cfg.base_url||"")}" placeholder="http://10.x.x.x:9380（不带 /api/v1）"></label>
+    <label style="display:block;margin:6px 0;font-size:12px;color:#555">API Key
+      <input id="rf-key" style="width:300px;margin-left:6px" value="${escapeHtml(cfg.api_key||"")}" placeholder="RAGFlow 控制台头像 → API Key"></label><br>
+    <label style="margin:6px 14px 6px 0;font-size:12px;color:#555">top_k <input id="rf-topk" type="number" style="width:50px" value="${cfg.top_k??5}"></label>
+    <label style="margin:6px 14px 6px 0;font-size:12px;color:#555">相似度门槛 <input id="rf-sim" type="number" step="0.05" style="width:64px" value="${cfg.similarity_threshold??0.2}"></label>
+    <label style="margin:6px 14px 6px 0;font-size:12px;color:#555">向量权重 <input id="rf-vw" type="number" step="0.05" style="width:64px" value="${cfg.vector_similarity_weight??0.3}"></label>
+    <label style="margin-left:10px;font-size:12px;color:#555"><input id="rf-enabled" type="checkbox" ${cfg.enabled?"checked":""}> 启用 RAGFlow</label>
+    <button class="llm-edit-btn" style="background:#1976d2;color:#fff;padding:4px 14px;margin-left:8px" onclick="kbSaveCfg()">保存配置</button>
+    <p style="font-size:12px;color:#555;margin:8px 0 0">所有知识库默认参与检索；范围用下方 库开关 / 文件开关 控制。</p>`;
 }
-function rfUploadModal() {
-  const dsId = document.getElementById("rf-dataset")?.value;
-  if (!dsId) return alert("先选择要上传到的知识库");
-  openAdminModal("上传文档到当前知识库",
-    `<input id="rf-file" type="file">
-     <p style="font-size:11px;color:#999;margin-top:4px">RAGFlow 自动分段；上传后点「解析」才可检索</p>`,
-    rfUploadFromModal);
+async function kbSaveCfg() {
+  const v = id => document.getElementById(id).value;
+  const r = await fetch("/api/admin/ragflow-config", {method:"PUT",
+    headers:{"Content-Type":"application/json"}, body: JSON.stringify({
+      base_url: v("rf-base"), api_key: v("rf-key"),
+      top_k: +v("rf-topk")||5, similarity_threshold: +v("rf-sim")||0.2,
+      vector_similarity_weight: +v("rf-vw")||0.3, enabled: document.getElementById("rf-enabled").checked })});
+  alert(r.ok ? "已保存" : "保存失败: " + (await r.json().catch(()=>({})).then(e=>e.detail||r.status)));
+  await kbLoadDatasets();
 }
-async function rfUploadFromModal() {
-  const dsId = document.getElementById("rf-dataset").value;
-  const f = document.getElementById("rf-file").files[0];
-  if (!f) return alert("选文件");
-  const btn = document.getElementById("admin-modal-save"); const old = btn.textContent;
-  btn.disabled = true; btn.textContent = "上传中…";
-  try {
-    const fd = new FormData(); fd.append("dataset_id", dsId); fd.append("file", f);
-    const r = await fetch("/api/admin/ragflow/documents", {method:"POST", body:fd});
-    if (r.ok) { closeAdminModal(); await loadRfDocs(); }
-    else { const e = await r.json().catch(()=>({})); alert("上传失败: "+(e.detail||r.status)); }
-  } finally { btn.disabled = false; btn.textContent = old; }
+// ---------- 库列表（左栏） ----------
+async function kbLoadDatasets() {
+  const {datasets = []} = await (await fetch("/api/admin/ragflow/datasets")).json().catch(() => ({}));
+  KB.datasets = datasets;
+  if (!KB.selected && datasets.length) KB.selected = datasets[0].id;
+  renderKbList();
+  await kbLoadDocs();
 }
-async function rfParse(dsId, docId) {
+function kbStat(ds) {   // 库条目第二行：N 文档 · 完成 x · 解析中 y · 失败 z（来自 include_parsing_status）
+  const t = ds.document_count ?? 0, d = ds.done_count ?? 0;
+  let s = `${t} 文档` + (d ? ` · 完成 ${d}` : "");
+  if (ds.running_count) s += ` · 解析中 ${ds.running_count}`;
+  if (ds.fail_count) s += ` · <span style="color:#c62828">失败 ${ds.fail_count}</span>`;
+  return s;
+}
+function renderKbList() {
+  const el = document.getElementById("kb-ds-list");
+  el.innerHTML = KB.datasets.length ? KB.datasets.map(ds => `
+    <div class="kb-ds-item ${ds.id===KB.selected?"active":""}" onclick="kbSelect('${ds.id}')" title="${escapeHtml(ds.description||ds.name||"")}">
+      <div class="r1"><span class="nm">${escapeHtml(ds.name||"")}</span>
+        <span style="margin-left:auto;flex-shrink:0">
+          <button class="llm-edit-btn" style="padding:1px 6px;font-size:10px" title="全库文件停用，检索不再命中" onclick="event.stopPropagation();kbToggleDs('${ds.id}',false)">停用</button>
+          <button class="llm-edit-btn" style="padding:1px 6px;font-size:10px" title="全库文件恢复启用（覆盖式，含之前单独停用的）" onclick="event.stopPropagation();kbToggleDs('${ds.id}',true)">启用</button>
+        </span></div>
+      <div class="r2">${kbStat(ds)}</div>
+    </div>`).join("") : '<p class="placeholder">未列到知识库（检查上方连接配置）<br>或点「＋ 新建」建一个</p>';
+}
+async function kbSelect(id) { KB.selected = id; renderKbList(); await kbLoadDocs(); }
+async function kbRefreshAll() { await Promise.all([kbLoadDatasets()]); }
+// ---------- 文档列表（右栏） ----------
+async function kbLoadDocs() {
+  const title = document.getElementById("kb-doc-title"), sub = document.getElementById("kb-doc-sub");
+  const ds = KB.datasets.find(d => d.id === KB.selected);
+  title.textContent = ds ? (ds.name || "—") : "—";
+  sub.textContent = ds ? `${ds.description||""}${ds.description?" · ":""}${ds.document_count??0} 文档` : "先在左侧选择知识库";
+  if (!ds) { document.getElementById("kb-doc-list").innerHTML = '<p class="placeholder">先在左侧选择知识库</p>'; document.getElementById("kb-doc-pager").innerHTML = ""; return; }
+  if (!(ds.document_count > 0)) { document.getElementById("kb-doc-list").innerHTML = '<p class="placeholder">空库：点左栏「＋ 上传文档」添加文件</p>'; document.getElementById("kb-doc-pager").innerHTML = ""; return; }
+  const {documents = []} = await (await fetch(`/api/admin/ragflow/documents?dataset_id=${encodeURIComponent(ds.id)}`)).json().catch(() => ({}));
+  KB.docs = documents;
+  renderKbDocs();
+  // 有解析中 → 轮询（无则停）
+  const anyRunning = KB.datasets.some(d => (d.running_count??0) > 0) || documents.some(d => d.run === "RUNNING");
+  anyRunning ? kbStartPolling() : kbStopPolling();
+}
+function renderKbDocs() {
+  const ds = KB.datasets.find(d => d.id === KB.selected);
+  const kw = KB.docKw.trim().toLowerCase();
+  const docs = (KB.docs || []).filter(d => !kw || (d.name||"").toLowerCase().includes(kw));
+  const listEl = document.getElementById("kb-doc-list"), pagerEl = document.getElementById("kb-doc-pager");
+  if (!docs.length) { listEl.innerHTML = '<p class="placeholder">' + (kw ? "无匹配文件" : "空库：点左栏「＋ 上传文档」添加文件") + '</p>'; pagerEl.innerHTML = kw ? "共 0 条" : ""; return; }
+  const runText = r => KB_RUN[r] || r || "-";
+  listEl.innerHTML = `<table class="admin-table"><thead><tr>
+    <th>文件名</th><th style="width:52px">分段</th><th style="width:190px">状态 / 进度</th><th style="width:64px">启用</th><th style="width:120px">操作</th>
+  </tr></thead><tbody>${docs.map(d => {
+    const enabled = d.enabled ?? d.status ?? "1";   // 新版字段 enabled(int)，旧版 status；默认启用
+    const on = String(enabled) !== "0";
+    let bar;
+    if (d.run === "RUNNING") bar = `<span class="kb-bar"><i style="width:${Math.round((d.progress||0)*100)}%"></i></span><span style="font-size:11px;color:#999">${Math.round((d.progress||0)*100)}%</span>`;
+    else if (d.run === "DONE") bar = `<span class="kb-bar"><i class="done" style="width:100%"></i></span>`;
+    else if (d.run === "FAIL") bar = `<span class="kb-bar"><i class="fail" style="width:${Math.max(Math.round((d.progress||0)*100),8)}%"></i></span>`;
+    else bar = `<span style="color:#bbb;font-size:11px">—</span>`;
+    const tagCls = {RUNNING:"run", DONE:"done", FAIL:"fail"}[d.run] || "info";
+    const titleAttr = d.run === "FAIL" ? ` title="${escapeHtml(String(d.progress_msg||"").slice(-300))}"` : "";
+    const ops = [
+      (d.run === "UNSTART" || d.run === "FAIL") ? `<button class="llm-edit-btn" onclick="kbParse('${d.id}')">${d.run==="FAIL"?"重新解析":"解析"}</button>` : "",
+      `<button class="li-del" title="删除" onclick="kbDelDoc('${d.id}')">×</button>`,
+    ].join("");
+    return `<tr class="${on ? "" : "disabled"}" ${on ? "" : 'style="opacity:.45"'}>
+      <td${titleAttr} style="cursor:${d.run==="FAIL"?"help":"default"}">${escapeHtml(d.name||"")}</td>
+      <td style="color:#999">${d.chunk_count??0}</td>
+      <td style="white-space:nowrap"><span class="kb-tag ${tagCls}">${runText(d.run)}</span>${bar}</td>
+      <td><button class="kb-sw ${on?"on":""}" title="启用开关（off 后不再参与检索）" onclick="kbToggleDoc('${d.id}')"></button></td>
+      <td class="col-op">${ops}</td></tr>`;
+  }).join("")}</tbody></table>`;
+  pagerEl.innerHTML = `<span>共 ${docs.length} 条</span>`;   // 分页：当前拉全量（page_size 默认大），超量再分页
+}
+// ---------- 启停 / 解析 / 删除 ----------
+async function kbToggleDoc(docId) {
+  const doc = (KB.docs||[]).find(d => d.id === docId);
+  const to = !(String(doc?.enabled ?? doc?.status ?? "1") !== "0");
+  await fetch("/api/admin/ragflow/documents-enabled", {method:"PUT",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({dataset_id: KB.selected, document_ids: [docId], enabled: to})});
+  await kbLoadDocs();
+}
+async function kbToggleDs(dsId, to) {
+  const ds = KB.datasets.find(d => d.id === dsId);
+  if (!(ds?.document_count > 0)) return alert("空库，没有可启停的文件");
+  const verb = to ? "启用" : "停用";
+  if (!confirm(`${verb}知识库「${ds.name}」？将把该库 ${ds.document_count} 个文件全部${to?"恢复启用（覆盖单文件状态）":"停用，检索不再命中该库"}。`)) return;
+  const r = await fetch("/api/admin/ragflow/documents-enabled", {method:"PUT",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({dataset_id: dsId, enabled: !!to})});
+  if (!r.ok) return alert("失败: " + (await r.json().catch(()=>({})).then(e=>e.detail||r.status)));
+  const {failed = []} = await r.json();
+  if (failed.length) alert(`已停用，但 ${failed.length} 个失败：` + failed.map(f=>f.name).join("、"));
+  await kbRefreshAll();
+}
+async function kbParse(docId) {
   const r = await fetch("/api/admin/ragflow/parse", {method:"POST",
-    body:new URLSearchParams({dataset_id:dsId, document_ids:docId})});
-  if (r.ok) { alert("已触发解析（分段+embedding，稍候刷新看状态）"); await loadRfDocs(); }
-  else { const e = await r.json().catch(()=>({})); alert("解析失败: "+(e.detail||r.status)); }
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({dataset_id: KB.selected, document_ids: [docId]})});
+  if (!r.ok) return alert("解析失败: " + (await r.json().catch(()=>({})).then(e=>e.detail||r.status)));
+  await kbLoadDatasets();
 }
-async function rfDel(dsId, docId) {
-  if (!confirm("删除该文档？")) return;
-  await fetch(`/api/admin/ragflow/documents?dataset_id=${encodeURIComponent(dsId)}`, {method:"DELETE",
-    headers:{"Content-Type":"application/json"}, body:JSON.stringify([docId])});
-  await loadRfDocs();
+async function kbDelDoc(docId) {
+  const doc = (KB.docs||[]).find(d => d.id === docId);
+  if (!confirm(`删除文档「${doc?.name||docId}」？`)) return;
+  await fetch(`/api/admin/ragflow/documents?dataset_id=${encodeURIComponent(KB.selected)}`, {
+    method:"DELETE", headers:{"Content-Type":"application/json"}, body: JSON.stringify([docId])});
+  await kbLoadDatasets();
 }
+// ---------- 进度轮询（3s；无 RUNNING 自动停；10 分钟上限） ----------
+function kbStartPolling() {
+  if (KB.pollTimer) return;
+  KB.pollStart = Date.now();
+  KB.pollTimer = setInterval(async () => {
+    if (Date.now() - KB.pollStart > 10*60*1000) return kbStopPolling();
+    const dsId = KB.selected;
+    const [{datasets = []}, docsRes] = await Promise.all([
+      (await fetch("/api/admin/ragflow/datasets").catch(()=>({}))).json().catch(()=>({})),
+      dsId ? (await fetch(`/api/admin/ragflow/documents?dataset_id=${encodeURIComponent(dsId)}`).catch(()=>({}))).json().catch(()=>({})) : Promise.resolve({}),
+    ]);
+    KB.datasets = datasets;
+    KB.docs = docsRes.documents || KB.docs || [];
+    renderKbList(); renderKbDocs();
+    if (!datasets.some(d => (d.running_count??0) > 0) && !(KB.docs||[]).some(d => d.run === "RUNNING")) kbStopPolling();
+  }, 3000);
+}
+function kbStopPolling() { clearInterval(KB.pollTimer); KB.pollTimer = null; }
+// ---------- 新建知识库 ----------
+function kbNewDsModal() {
+  openAdminModal("新建知识库", `
+    <input id="kb-new-name" placeholder="库名（必填，如：风机技改资料）" style="width:100%;padding:6px 8px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px;margin-bottom:8px">
+    <input id="kb-new-desc" placeholder="描述（可选）" style="width:100%;padding:6px 8px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px;margin-bottom:8px">
+    <select id="kb-new-method" style="width:100%;padding:6px 8px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px">
+      <option value="naive">通用（默认，推荐）</option><option value="book">书籍</option><option value="laws">法律</option>
+      <option value="qa">问答</option><option value="table">表格</option><option value="one">单块</option></select>
+    <p style="font-size:11px;color:#999;margin-top:6px">新库即刻参与 nl2sql 检索（默认全部库）</p>`,
+  async () => {
+    const name = document.getElementById("kb-new-name").value.trim();
+    if (!name) { alert("填个库名"); return; }
+    const r = await fetch("/api/admin/ragflow/datasets", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({name, description: document.getElementById("kb-new-desc").value.trim(),
+        chunk_method: document.getElementById("kb-new-method").value})});
+    if (!r.ok) { alert("建库失败: " + (await r.json().catch(()=>({})).then(e=>e.detail||r.status))); return; }
+    closeAdminModal(); await kbLoadDatasets();
+  });
+}
+// ---------- 上传弹窗（唯一入口：来源=本地/EAM，目标库可多选） ----------
+let KB_UP = { tab: "local", eamTree: null, eamFiles: 0, eamHidden: 0, eamChecked: new Set(), eamExpanded: new Set() };
+function kbUploadModal() {
+  if (!KB.datasets.length) return alert("先新建或连上知识库");
+  KB_UP = { tab: "local", eamTree: null, eamFiles: 0, eamHidden: 0, eamChecked: new Set(), eamExpanded: new Set() };
+  openAdminModal("上传文档", "", kbDoUpload);
+  kbRenderUploadBody();
+}
+function kbRenderUploadBody() {
+  const body = document.getElementById("admin-modal-body");
+  const checked = Array.from(document.querySelectorAll(".kb-up-ds:checked")).map(c => c.value);
+  const srcHtml = `<div class="kb-src">
+    <label class="${KB_UP.tab==="local"?"on":""}" onclick="KB_UP.tab='local';kbRenderUploadBody()"><span class="dot ${KB_UP.tab==="local"?"on":""}"></span>本地文件</label>
+    <label class="${KB_UP.tab==="eam"?"on":""}" onclick="KB_UP.tab='eam';kbRenderUploadBody()"><span class="dot ${KB_UP.tab==="eam"?"on":""}"></span>EAM 文档管理</label></div>`;
+  let panel;
+  if (KB_UP.tab === "local") {
+    panel = `<input type="file" id="kb-up-file" multiple style="width:100%;margin-bottom:6px;font-size:12px">
+      <p style="font-size:11px;color:#999">支持 pdf/word/excel/ppt/txt/md/csv/图片等（RAGFlow 可解析格式）；不支持的文件会被拦截。</p>`;
+  } else {
+    panel = KB_UP.eamTree === null
+      ? '<p class="placeholder">加载 EAM 文档树中…</p>'
+      : `<input id="kb-eam-kw" placeholder="按文件名过滤（清空恢复树）" oninput="kbRenderEamList()" style="width:100%;padding:5px 8px;border:1px solid #d0d0d0;border-radius:4px;font-size:12px;margin-bottom:6px">
+         <div id="kb-eam-list" style="border:1px solid #f0f0f0;border-radius:4px;max-height:260px;overflow:auto;padding:4px 8px"></div>
+         <p style="font-size:11px;color:#999;margin-top:6px">已选 <b>${KB_UP.eamChecked.size}</b> 个文件（上限 20）${KB_UP.eamHidden ? `；已隐藏 ${KB_UP.eamHidden} 个不支持格式` : ""}；勾文件夹=整棵子树全选</p>`;
+  }
+  const dsHtml = KB.datasets.map(ds => `<label style="display:inline-block;margin:0 16px 6px 0;font-size:12px">
+    <input type="checkbox" class="kb-up-ds" value="${ds.id}" ${checked.includes(ds.id)||(!checked.length&&ds.id===KB.selected)?"checked":""}> ${escapeHtml(ds.name||"")}</label>`).join("");
+  body.innerHTML = `${srcHtml}${panel}
+    <p style="font-size:12px;color:#555;margin:8px 0 4px">目标知识库（多选，同一文档将分别进入每个选中库）：</p>
+    <div style="margin-bottom:8px">${dsHtml}</div><div id="kb-up-result"></div>`;
+  document.getElementById("admin-modal-save").textContent = KB_UP.tab === "local" ? "开始上传" : "同步到选中库";
+  if (KB_UP.tab === "eam") {
+    if (KB_UP.eamTree === null) kbLoadEam();
+    else kbRenderEamList();
+  }
+}
+async function kbLoadEam() {
+  const [treeRes, filesRes] = await Promise.all([
+    (await fetch("/api/admin/eam/tree").catch(()=>({}))).json().catch(()=>({})),
+    (await fetch("/api/admin/eam/files").catch(()=>({}))).json().catch(()=>({})),
+  ]);
+  if (!treeRes.tree || !filesRes.files) {
+    KB_UP.eamTree = [];
+    document.getElementById("kb-eam-list") && (document.getElementById("kb-eam-list").innerHTML =
+      '<p class="placeholder" style="color:#c62828">EAM 加载失败（未配置 yml eam 段或 ak/sk 失效）</p>');
+    return;
+  }
+  KB_UP.eamFiles = filesRes.files.length;
+  // 组树：文件夹来自 tree，文件按 parentId 挂叶（不支持的 fileType 直接不挂=隐藏）
+  const map = {}, roots = [];
+  const mk = n => { map[n.id] = {id:n.id, name:n.name, folder:true, children:[]}; (n.children||[]).forEach(mk); };
+  treeRes.tree.forEach(mk);
+  const attach = n => { const node = map[n.id]; (map[n.parentId] && map[n.parentId] !== node) ? map[n.parentId].children.push(node) : roots.push(node); };
+  treeRes.tree.forEach(attach);
+  let hung = 0;
+  filesRes.files.forEach(f => { if (RF_EXT.has(String(f.fileType||"").toLowerCase())) { const p = map[f.parentId]; if (p) { p.children.push({id:f.id, name:f.name, meta:f.size||"", }); hung++; } } });
+  KB_UP.eamHidden = KB_UP.eamFiles - hung;
+  KB_UP.eamTree = roots;
+  KB_UP.eamExpanded = new Set(roots.slice(0, 2).map(r => r.id));
+  kbRenderUploadBody();
+}
+function kbEamSubFiles(node) { let r=[]; (node.children||[]).forEach(c => c.folder ? r=r.concat(kbEamSubFiles(c)) : r.push(c)); return r; }
+function kbEamFolderState(node) { const fs = kbEamSubFiles(node); const c = fs.filter(f => KB_UP.eamChecked.has(f.id)).length; return c===0?"":(c===fs.length?"on":"half"); }
+function kbRenderEamList() {
+  const el = document.getElementById("kb-eam-list"); if (!el) return;
+  const kw = (document.getElementById("kb-eam-kw")?.value || "").trim().toLowerCase();
+  const fileRow = f => `<div class="kb-tree-node" style="padding-left:26px" onclick="kbEamToggleFile('${f.id}')">
+    <span class="kb-ck ${KB_UP.eamChecked.has(f.id)?"on":""}"></span><span>📄 ${escapeHtml(f.name)}</span><span class="meta">${escapeHtml(String(f.meta||""))}</span></div>`;
+  const nodeHtml = n => { const open = KB_UP.eamExpanded.has(n.id); const st = kbEamFolderState(n);
+    return `<div class="kb-tree-node" onclick="KB_UP.eamExpanded.has('${n.id}')?KB_UP.eamExpanded.delete('${n.id}'):KB_UP.eamExpanded.add('${n.id}');kbRenderEamList()">
+      <span class="arr ${open?"open":""}">▶</span><span class="kb-ck ${st}" onclick="event.stopPropagation();kbEamToggleFolder(kbFindEamNode('${n.id}'))"></span>
+      <span>📁 ${escapeHtml(n.name)}</span><span class="meta">${kbEamSubFiles(n).length} 文件</span></div>`
+      + (open ? n.children.map(nodeHtml).join("") : ""); };
+  let all = []; KB_UP.eamTree.forEach(n => all = all.concat(kbEamSubFiles(n)));
+  el.innerHTML = kw ? (all.filter(f => f.name.toLowerCase().includes(kw)).map(fileRow).join("") || '<p class="placeholder">无匹配</p>')
+                    : KB_UP.eamTree.map(nodeHtml).join("");
+}
+function kbFindEamNode(id) { let f = null; const walk = ns => ns.forEach(n => { if (n.id === id) f = n; if (n.folder) walk(n.children||[]); }); walk(KB_UP.eamTree||[]); return f; }
+function kbEamToggleFile(id) { KB_UP.eamChecked.has(id) ? KB_UP.eamChecked.delete(id) : KB_UP.eamChecked.add(id); kbRenderUploadBody(); }
+function kbEamToggleFolder(node) { if (!node) return; const fs = kbEamSubFiles(node); const all = kbEamFolderState(node) === "on";
+  fs.forEach(f => all ? KB_UP.eamChecked.delete(f.id) : KB_UP.eamChecked.add(f.id)); kbRenderUploadBody(); }
+async function kbDoUpload() {
+  const targets = Array.from(document.querySelectorAll(".kb-up-ds:checked")).map(c => c.value);
+  if (!targets.length) { alert("至少勾选一个目标知识库"); return; }
+  if (KB_UP.tab === "local") {
+    const fs = Array.from(document.getElementById("kb-up-file").files);
+    if (!fs.length) { alert("先选择文件"); return; }
+    const bad = fs.filter(f => !RF_EXT.has(f.name.split(".").pop().toLowerCase()));
+    if (bad.length) { alert("不支持的格式：" + bad.map(f=>f.name).join("、")); return; }
+    const btn = document.getElementById("admin-modal-save"); btn.disabled = true; btn.textContent = "上传中…";
+    for (const dsId of targets) for (const f of fs) {
+      const fd = new FormData(); fd.append("dataset_id", dsId); fd.append("file", f);
+      const r = await fetch("/api/admin/ragflow/documents", {method:"POST", body: fd});
+      if (r.ok) { const {documents = []} = await r.json();
+        const ids = documents.map(d => d.id).filter(Boolean);
+        if (ids.length) await fetch("/api/admin/ragflow/parse", {method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({dataset_id: dsId, document_ids: ids})}); }
+    }
+    btn.disabled = false; closeAdminModal();
+    KB.selected = targets[0]; await kbLoadDatasets();
+  } else {
+    let all = []; KB_UP.eamTree.forEach(n => all = all.concat(kbEamSubFiles(n)));
+    const items = all.filter(f => KB_UP.eamChecked.has(f.id)).map(f => ({id: f.id, name: f.name}));
+    if (!items.length) { alert("先勾选 EAM 文件"); return; }
+    if (items.length > 20) { alert("单次最多 20 个文件，请分批"); return; }
+    const btn = document.getElementById("admin-modal-save"); btn.disabled = true; btn.textContent = "同步中…";
+    const r = await fetch("/api/admin/eam/sync", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({items, dataset_ids: targets})});
+    btn.disabled = false; btn.textContent = "再同步一批";
+    const res = await r.json().catch(()=>({}));
+    document.getElementById("kb-up-result").innerHTML =
+      `<div style="margin-top:10px;border-top:1px dashed #eee;padding-top:8px;font-size:12px"><b>完成：成功 ${res.ok_count??0} / 失败 ${res.fail_count??0}</b>` +
+      (res.results||[]).map(x => `<div>${x.ok?'<span style="color:#2e7d32">✓</span>':'<span style="color:#c62828">✗</span>'} ${escapeHtml(x.name||"")} → ${escapeHtml((KB.datasets.find(d=>d.id===x.dataset_id)||{}).name||"")}${x.ok?"":' <span style="color:#c62828">'+escapeHtml(x.error||"")+"</span>"}</div>`).join("") + "</div>";
+    KB.selected = targets[0]; await kbLoadDatasets();
+  }
+}
+
 // 飞书机器人通道（动态配置：admin 改 + 保存即热重连，凭证走库不入 yml）
 const FS_INPUT = "display:block;width:100%;margin:6px 0;padding:6px;border:1px solid #d0d0d0;border-radius:4px;box-sizing:border-box";
 async function loadFeishu() {
@@ -2132,16 +2402,19 @@ document.getElementById("dash-content").addEventListener("click", (e) => {
 });
 
 // 页面启动：token 存 localStorage，请求带 Authorization: Bearer <token>
+// role：admin=全权 / kb_op=知识库操作员（仅知识库 tab + 问数；其余 admin 功能后端 403 前端锁定）
 const TOKEN_KEY = "nl2sql_token";
+let USER_ROLE = "admin";
 async function bootstrap() {
   if (!localStorage.getItem(TOKEN_KEY)) { showLogin(); return; }
   try {
     const me = await (await fetch("/api/me")).json();
-    if (me.logged_in) enterApp(); else showLogin();
+    if (me.logged_in) { USER_ROLE = me.role || "admin"; enterApp(); } else showLogin();
   } catch { showLogin(); }
 }
 function showLogin() {
   localStorage.removeItem(TOKEN_KEY);
+  USER_ROLE = "admin";
   document.getElementById("login-panel").style.display = "flex";
   document.getElementById("app").style.display = "none";
 }
@@ -2155,7 +2428,7 @@ async function doLogin() {
   const password = document.getElementById("login-pwd").value;
   const r = await fetch("/api/login", {method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({username, password})});
-  if (r.ok) { localStorage.setItem(TOKEN_KEY, (await r.json()).token); enterApp(); }
+  if (r.ok) { const d = await r.json(); localStorage.setItem(TOKEN_KEY, d.token); USER_ROLE = d.role || "admin"; enterApp(); }
   else document.getElementById("login-err").textContent = "账号或密码错误";
 }
 async function doLogout() {
