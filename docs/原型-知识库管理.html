@@ -200,8 +200,8 @@ ul { list-style: none; }
         <li>② 「＋ 上传文档」（左栏底部）→ 来源选「本地文件 / EAM 文档管理」→ 多选目标库 → 一次进多个库</li>
         <li>③ 文件行开关 = 单文件禁用（行置灰，不再参与 nl2sql 检索）</li>
         <li>④ 失败行：悬浮文件名看失败原因，可「重新解析」</li>
-        <li>⑤ 上传弹窗切「EAM 文档管理」：填 dqtoken → 树勾文件或整个文件夹（不支持的格式自动隐藏并计数）→ 选目标库同步（含 1 个失败项演示部分成功）</li>
-        <li>⑥ EAM 面板「模拟过期」按钮 → 看 dqtoken 失效提示；其他 tab 点击为演示占位</li>
+        <li>⑤ 上传弹窗切「EAM 文档管理」：树勾文件或整个文件夹（不支持的格式自动隐藏并计数）→ 选目标库同步（含 1 个失败项演示部分成功）</li>
+        <li>⑥ EAM 来源免凭证（ak/sk 在服务端 yml，页面零输入）；其他 tab 点击为演示占位</li>
       </ul>
     </details>
 
@@ -415,7 +415,7 @@ const RF_EXT = new Set(["pdf","doc","docx","xls","xlsx","ppt","pptx","txt","md",
 const ext = name => (name.split(".").pop() || "").toLowerCase();
 
 function openUpload() {                      // 唯一上传入口（知识库层）：来源=本地/EAM，目标库可多选
-  upTab = "local"; eamChecked = new Set(); eamExpired = false;
+  upTab = "local"; eamChecked = new Set();
   openDlg("上传文档", null, "", [
     { text: "取 消" },
     { text: "开始上传", cls: "primary", keepOpen: true, fn: () => doUpload() },
@@ -438,21 +438,14 @@ function renderUploadBody() {
       <p class="field-note">支持：pdf / word / excel / ppt / txt / md / csv / 图片等（RAGFlow 可解析的格式）；不支持的文件会被拦截。</p>`;
   } else {
     const kw = ($("eam-kw") && $("eam-kw").value || "").trim().toLowerCase();
-    const curTok = ($("eam-token") && $("eam-token").value) || "b25e39b4…be56（已保存）";
     eamCountHidden(); const files = eamFiles(EAM_TREE_STRIPPED || EAM_TREE);
     let listHtml;
-    if (eamExpired) listHtml = '<p style="text-align:center;color:#e53935;font-size:13px;padding:28px 0">加载失败：dqtoken 已过期</p>';
-    else if (kw) listHtml = files.filter(f => f.name.toLowerCase().includes(kw)).map(f => treeFileRow(f, 0)).join("") || '<p class="muted" style="text-align:center;padding:16px 0">无匹配文件</p>';
+    if (kw) listHtml = files.filter(f => f.name.toLowerCase().includes(kw)).map(f => treeFileRow(f, 0)).join("") || '<p class="muted" style="text-align:center;padding:16px 0">无匹配文件</p>';
     else listHtml = (EAM_TREE_STRIPPED || EAM_TREE).map(n => treeNodeHtml(n, 0)).join("");
     panel = `
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-        <input type="text" id="eam-token" placeholder="dqtoken（从 EAM 系统 sessionStorage 复制粘贴，只存在你的浏览器）" style="flex:1;margin:0" value="${esc(curTok)}">
-        <button class="btn small" onclick="eamRefresh()">保存并刷新</button>
-        <button class="btn small" style="color:#e53935;border-color:#ef9a9a" onclick="eamExpire()" title="演示：token 失效场景">模拟过期</button>
-      </div>
-      ${eamExpired ? '<p style="color:#e53935;font-size:12px;margin:0 0 8px">dqtoken 已过期，请从 EAM 重新复制粘贴，再点「保存并刷新」。</p>' : ""}
+      <p class="field-note" style="margin:0 0 8px">✅ EAM 已连接（ak/sk 在服务端 yml，页面零凭证输入）· 真实环境实测 2030 个文件</p>
       <input type="text" id="eam-kw" placeholder="按文件名过滤（输入后平铺显示匹配文件，清空恢复树）" oninput="renderUploadBody()" style="margin-bottom:6px">
-      <div style="border:1px solid #f0f0f0;border-radius:2px;max-height:230px;overflow:auto;padding:4px 8px">${listHtml}</div>
+      <div style="border:1px solid #f0f0f0;border-radius:2px;max-height:250px;overflow:auto;padding:4px 8px">${listHtml}</div>
       <p class="field-note" style="margin:8px 0 0">已选 <b>${eamChecked.size}</b> 个文件${eamHidden ? `；已隐藏 ${eamHidden} 个不支持格式的文件（仅显示 RAGFlow 可解析格式）` : ""}；勾文件夹=整棵子树全选</p>`;
   }
   $("dlg-body").innerHTML = `
@@ -486,7 +479,7 @@ function doUpload() {                          // 分发：本地 or EAM
     if (files.length > 20) { alert("单次最多 20 个文件，请分批"); return "keep"; }
     const btns = document.querySelectorAll("#dlg-ft .btn");
     const btn = btns[btns.length - 1]; btn.disabled = true; btn.textContent = "同步中…";
-    setTimeout(() => {                         // 真实实现：POST /eam/sync（body 带 dqtoken + 目标库，EAM下载→逐库上传→触发解析）
+    setTimeout(() => {                         // 真实实现：POST /eam/sync（nl2sql 后端按 yml 的 ak/sk 调 EAM 下载→逐库上传→触发解析）
       const results = [];
       files.forEach((f, i) => targets.forEach(t => {
         const failDemo = (i === files.length - 1 && t === targets[targets.length - 1]);   // 演示部分成功
@@ -575,7 +568,6 @@ const EAM_TREE = [                          // EAM 文档管理是树型结构�
 ];
 let eamChecked = new Set();                  // 已勾文件 id 集合
 let eamExpanded = new Set(["f1", "f11"]);    // 展开的文件夹
-let eamExpired = false;
 let eamHidden = 0;                           // 被过滤的不支持格式文件数
 
 function eamFiles(nodes) {                   // 收集（子）树内全部 RAGFlow 支持的文件（不支持的在源头过滤）
@@ -621,8 +613,6 @@ function toggleFolderSelById(id) {
   const node = find(EAM_TREE_STRIPPED || EAM_TREE); if (node) { toggleFolderSel(node); renderUploadBody(); }
 }
 function toggleFileSel(id) { eamChecked.has(id) ? eamChecked.delete(id) : eamChecked.add(id); renderUploadBody(); }
-function eamRefresh() { eamExpired = false; renderUploadBody(); toast("已保存 token 并刷新列表（演示）"); }
-function eamExpire() { eamExpired = true; renderUploadBody(); $("eam-token").focus(); $("eam-token").select(); }
 
 /* ================= 通用弹窗 ================= */
 function openDlg(title, tag, bodyHtml, btns) {
