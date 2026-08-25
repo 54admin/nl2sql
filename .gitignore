@@ -19,3 +19,4 @@ config/application-*.yml
 # 本地工具/运行产物
 .zcode/
 logs/
+.DS_Store

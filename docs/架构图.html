@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NL2SQL 智能问数平台 · 技术架构</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'JetBrains Mono', 'PingFang SC', 'Microsoft YaHei', monospace;
+      background: #020617;
+      min-height: 100vh;
+      padding: 2rem;
+      color: white;
+    }
+
+    .container { max-width: 1900px; margin: 0 auto; }
+    .header { margin-bottom: 2rem; }
+    .header-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; }
+
+    .pulse-dot {
+      width: 12px; height: 12px; background: #22d3ee;
+      border-radius: 50%; animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+    h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.025em; }
+    .subtitle { color: #94a3b8; font-size: 1rem; margin-left: 1.75rem; }
+
+    .diagram-container {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 1rem; border: 1px solid #1e293b;
+      padding: 1.5rem; overflow-x: auto;
+    }
+    svg { width: 100%; min-width: 1760px; display: block; }
+
+    .cards {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1rem; margin-top: 2rem;
+    }
+    .card {
+      background: rgba(15, 23, 42, 0.5); border-radius: 0.75rem;
+      border: 1px solid #1e293b; padding: 1.25rem;
+    }
+    .card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .card-dot.cyan { background: #22d3ee; }
+    .card-dot.emerald { background: #34d399; }
+    .card-dot.rose { background: #fb7185; }
+    .card h3 { font-size: 1rem; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: 0.875rem; }
+    .card li { margin-bottom: 0.375rem; }
+
+    .footer { text-align: center; margin-top: 1.5rem; color: #475569; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- 页头 -->
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>NL2SQL 智能问数平台 · 技术架构</h1>
+      </div>
+      <p class="subtitle">自然语言 → 查业务数据 / 查文档 / 归因分析 · 一切皆技能 · 提示词即数据 · 单 ReAct 循环涌现</p>
+    </div>
+
+    <!-- 主图 -->
+    <div class="diagram-container">
+      <svg viewBox="0 0 1100 1256" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/>
+          </marker>
+          <marker id="arrowheadOrange" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fb923c"/>
+          </marker>
+          <marker id="arrowheadRose" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#fb7185"/>
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <rect width="100%" height="100%" fill="url(#grid)"/>
+
+        <!-- ============================================================
+             连接线（先画，压在盒子下面）
+             ============================================================ -->
+
+        <!-- 用户 → 飞书 -->
+        <line x1="470" y1="80" x2="230" y2="138" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="310" y="100" fill="#94a3b8" font-size="9" text-anchor="middle">群聊@ / 私聊</text>
+
+        <!-- 用户 → Web 前端 -->
+        <line x1="630" y1="80" x2="835" y2="138" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="765" y="100" fill="#94a3b8" font-size="9" text-anchor="middle">浏览器</text>
+
+        <!-- Web 前端 → ask.py（SSE） -->
+        <line x1="835" y1="222" x2="240" y2="294" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="545" y="248" fill="#94a3b8" font-size="10.5" text-anchor="middle">POST /api/ask · SSE 流式回传</text>
+
+        <!-- 飞书 → Orchestrator（进程内直投，绕过 Web 层） -->
+        <path d="M 90 182 L 66 182 L 66 510 L 84 510" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="60" y="360" fill="#94a3b8" font-size="9" text-anchor="middle" transform="rotate(-90 60 360)">handle_message · 线程投递</text>
+
+        <!-- ask.py → Orchestrator -->
+        <line x1="235" y1="378" x2="235" y2="448" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- Orchestrator → AgentLoop -->
+        <line x1="340" y1="500" x2="378" y2="500" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- AgentLoop → LLMService（请求） -->
+        <line x1="690" y1="495" x2="728" y2="495" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="709" y="487" fill="#94a3b8" font-size="9" text-anchor="middle">流式</text>
+
+        <!-- LLMService → AgentLoop（增量回灌） -->
+        <line x1="728" y1="535" x2="692" y2="535" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- AgentLoop → 工具层 -->
+        <line x1="535" y1="576" x2="535" y2="628" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="545" y="606" fill="#94a3b8" font-size="9" text-anchor="start">registry.execute()</text>
+
+        <!-- 提示词体系 → 内核（数据装配，虚线） -->
+        <line x1="810" y1="632" x2="810" y2="612" stroke="#fb923c" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrowheadOrange)"/>
+        <text x="822" y="626" fill="#fb923c" font-size="9" text-anchor="start">assemble_system_prompt = KERNEL + Skills×4</text>
+
+        <!-- query_metadata → 平台库 -->
+        <line x1="150" y1="824" x2="163" y2="946" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="148" y="900" fill="#94a3b8" font-size="9" text-anchor="end">nl_md_* 元数据</text>
+
+        <!-- execute_sql → 业务数仓 -->
+        <line x1="315" y1="824" x2="340" y2="946" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="352" y="900" fill="#94a3b8" font-size="9" text-anchor="start">只读 SQL</text>
+
+        <!-- knowledge_search → RAGFlow -->
+        <line x1="480" y1="824" x2="700" y2="946" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="612" y="878" fill="#94a3b8" font-size="9" text-anchor="middle">检索</text>
+
+        <!-- LLMService → LLM 网关（沿右边缘绕行） -->
+        <path d="M 1000 510 L 1052 510 L 1052 924 L 925 924 L 925 946" fill="none" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <text x="1062" y="730" fill="#94a3b8" font-size="9" text-anchor="middle" transform="rotate(-90 1062 730)">chat/completions · messages</text>
+
+        <!-- 横切审计 → 平台库 -->
+        <line x1="165" y1="1090" x2="165" y2="1048" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,4" marker-end="url(#arrowheadRose)"/>
+        <text x="175" y="1074" fill="#fb7185" font-size="9" text-anchor="start">审计落库 nl_hi_*</text>
+
+        <!-- ============================================================
+             分层边界
+             ============================================================ -->
+
+        <!-- 接入层 -->
+        <rect x="50" y="112" width="980" height="128" rx="12" fill="rgba(30,41,59,0.25)" stroke="#475569" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="62" y="130" fill="#94a3b8" font-size="12.5" font-weight="600">接入层 · 双入口共用同一编排内核</text>
+
+        <!-- Web 层 -->
+        <rect x="50" y="266" width="980" height="128" rx="12" fill="rgba(30,41,59,0.25)" stroke="#475569" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="62" y="284" fill="#94a3b8" font-size="12.5" font-weight="600">Web 层 · FastAPI（main.py · lifespan 装配 + _Lazy 解析）</text>
+
+        <!-- 编排与模型层 -->
+        <rect x="50" y="420" width="980" height="188" rx="12" fill="rgba(30,41,59,0.25)" stroke="#475569" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="62" y="438" fill="#94a3b8" font-size="12.5" font-weight="600">编排与模型层 · core/（纯协议内核，零业务 if-else）</text>
+
+        <!-- 工具层 -->
+        <rect x="50" y="632" width="520" height="262" rx="12" fill="rgba(30,41,59,0.25)" stroke="#475569" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="62" y="650" fill="#94a3b8" font-size="12.5" font-weight="600">工具层 tools/ · 全原子 · 无胖工具</text>
+
+        <!-- 提示词体系 -->
+        <rect x="590" y="632" width="440" height="262" rx="12" fill="rgba(251,146,60,0.04)" stroke="#475569" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="602" y="650" fill="#94a3b8" font-size="12.5" font-weight="600">提示词体系 · DB 单一真相源</text>
+
+        <!-- 存储与外部服务 -->
+        <rect x="50" y="918" width="980" height="148" rx="12" fill="rgba(30,41,59,0.25)" stroke="#475569" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="62" y="936" fill="#94a3b8" font-size="12.5" font-weight="600">存储与外部服务（双库分离：平台库走 ORM，业务库绝不经 ORM）</text>
+
+        <!-- ============================================================
+             用户
+             ============================================================ -->
+        <rect x="410" y="36" width="280" height="44" rx="6" fill="#0f172a" stroke="#94a3b8" stroke-width="1.5"/>
+        <rect x="410" y="36" width="280" height="44" rx="6" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="550" y="54" fill="white" font-size="14" font-weight="600" text-anchor="middle">用户</text>
+        <text x="550" y="70" fill="#94a3b8" font-size="10.5" text-anchor="middle">自然语言 · 查数 / 查文档 / 归因</text>
+
+        <!-- ============================================================
+             接入层盒子
+             ============================================================ -->
+
+        <!-- 飞书机器人 -->
+        <rect x="90" y="142" width="280" height="80" rx="6" fill="#0f172a"/>
+        <rect x="90" y="142" width="280" height="80" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="230" y="160" fill="white" font-size="14" font-weight="600" text-anchor="middle">飞书机器人</text>
+        <text x="230" y="176" fill="#94a3b8" font-size="10.5" text-anchor="middle">WS 长连接 · 流式卡片 · 群聊@</text>
+        <text x="230" y="190" fill="#94a3b8" font-size="10.5" text-anchor="middle">message_id 去重 · 卡片串行锁</text>
+        <text x="230" y="212" fill="#22d3ee" font-size="9" text-anchor="middle">feishu/adapter.py · card.py</text>
+
+        <!-- Web 前端 -->
+        <rect x="680" y="142" width="310" height="80" rx="6" fill="#0f172a"/>
+        <rect x="680" y="142" width="310" height="80" rx="6" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="835" y="160" fill="white" font-size="14" font-weight="600" text-anchor="middle">Web 前端</text>
+        <text x="835" y="176" fill="#94a3b8" font-size="10.5" text-anchor="middle">SSE 问数 + 管理后台</text>
+        <text x="835" y="190" fill="#94a3b8" font-size="10.5" text-anchor="middle">EventSource 全事件透传</text>
+        <text x="835" y="212" fill="#22d3ee" font-size="9" text-anchor="middle">static/index.html</text>
+
+        <!-- ============================================================
+             Web 层盒子
+             ============================================================ -->
+
+        <!-- ask 路由 -->
+        <rect x="90" y="298" width="290" height="80" rx="6" fill="#0f172a"/>
+        <rect x="90" y="298" width="290" height="80" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="235" y="316" fill="white" font-size="14" font-weight="600" text-anchor="middle">routes/ask.py</text>
+        <text x="235" y="332" fill="#94a3b8" font-size="10.5" text-anchor="middle">POST /api/ask · SSE</text>
+        <text x="235" y="346" fill="#94a3b8" font-size="10.5" text-anchor="middle">async generator 逐事件透传</text>
+        <text x="235" y="368" fill="#34d399" font-size="9" text-anchor="middle">会话 / 消息 / 挂起恢复 REST</text>
+
+        <!-- admin 路由 -->
+        <rect x="410" y="298" width="290" height="80" rx="6" fill="#0f172a"/>
+        <rect x="410" y="298" width="290" height="80" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="555" y="316" fill="white" font-size="14" font-weight="600" text-anchor="middle">routes/admin_*.py ×10</text>
+        <text x="555" y="332" fill="#94a3b8" font-size="10.5" text-anchor="middle">模型/提示词/元数据/护栏/飞书…</text>
+        <text x="555" y="346" fill="#94a3b8" font-size="10.5" text-anchor="middle">全部落库 · 后台热改</text>
+        <text x="555" y="368" fill="#34d399" font-size="9" text-anchor="middle">改完 reset_dynamic() 即生效</text>
+
+        <!-- SSE -->
+        <rect x="730" y="298" width="270" height="80" rx="6" fill="#0f172a"/>
+        <rect x="730" y="298" width="270" height="80" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="865" y="316" fill="white" font-size="14" font-weight="600" text-anchor="middle">sse.py · session.py</text>
+        <text x="865" y="332" fill="#94a3b8" font-size="10.5" text-anchor="middle">SSEEventType 全事件外发</text>
+        <text x="865" y="346" fill="#94a3b8" font-size="10.5" text-anchor="middle">answer_delta 打字机</text>
+        <text x="865" y="368" fill="#34d399" font-size="9" text-anchor="middle">内网单租户 · user/admin 同等可见</text>
+
+        <!-- ============================================================
+             编排与模型层盒子
+             ============================================================ -->
+
+        <!-- Orchestrator -->
+        <rect x="90" y="452" width="250" height="124" rx="6" fill="#0f172a"/>
+        <rect x="90" y="452" width="250" height="124" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="215" y="474" fill="white" font-size="14" font-weight="600" text-anchor="middle">Orchestrator</text>
+        <text x="215" y="492" fill="#94a3b8" font-size="10.5" text-anchor="middle">会话忙闸门（拒重叠 run）</text>
+        <text x="215" y="506" fill="#94a3b8" font-size="10.5" text-anchor="middle">挂起判定 → 断点 resume</text>
+        <text x="215" y="520" fill="#94a3b8" font-size="10.5" text-anchor="middle">system_prompt 装配 + 日期注入</text>
+        <text x="215" y="566" fill="#34d399" font-size="9" text-anchor="middle">core/orchestrator.py</text>
+
+        <!-- AgentLoop -->
+        <rect x="380" y="452" width="310" height="124" rx="6" fill="#0f172a"/>
+        <rect x="380" y="452" width="310" height="124" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="535" y="474" fill="white" font-size="14" font-weight="600" text-anchor="middle">AgentLoop · ReAct 循环</text>
+        <text x="535" y="492" fill="#94a3b8" font-size="10.5" text-anchor="middle">思考 → 调工具 → 结果回灌 · 每轮流式外发</text>
+        <text x="535" y="506" fill="#94a3b8" font-size="10.5" text-anchor="middle">护栏：30轮 / 10次SQL / 4次追问 / 动态墙钟</text>
+        <text x="535" y="520" fill="#94a3b8" font-size="10.5" text-anchor="middle">四道工具闸 · 冗余SQL拦截 · 上下文压缩</text>
+        <text x="535" y="566" fill="#34d399" font-size="9" text-anchor="middle">core/agent_loop.py</text>
+
+        <!-- LLMService -->
+        <rect x="730" y="452" width="270" height="124" rx="6" fill="#0f172a"/>
+        <rect x="730" y="452" width="270" height="124" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="865" y="474" fill="white" font-size="14" font-weight="600" text-anchor="middle">LLMService</text>
+        <text x="865" y="492" fill="#94a3b8" font-size="10.5" text-anchor="middle">openai / anthropic 双协议分发</text>
+        <text x="865" y="506" fill="#94a3b8" font-size="10.5" text-anchor="middle">RPM+并发限流 · 指数退避重试</text>
+        <text x="865" y="520" fill="#94a3b8" font-size="10.5" text-anchor="middle">思考链透传 · 出口消息消毒</text>
+        <text x="865" y="566" fill="#34d399" font-size="9" text-anchor="middle">llm/service.py · 用途取配置</text>
+
+        <!-- ============================================================
+             工具层盒子（上排：控制流，下排：数据）
+             ============================================================ -->
+
+        <!-- 上排 -->
+        <rect x="75" y="664" width="150" height="64" rx="6" fill="#0f172a"/>
+        <rect x="75" y="664" width="150" height="64" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="150" y="682" fill="white" font-size="12" font-weight="600" text-anchor="middle">get_sql_template</text>
+        <text x="150" y="698" fill="#94a3b8" font-size="9" text-anchor="middle">按名取样板 SQL</text>
+        <text x="150" y="710" fill="#94a3b8" font-size="9" text-anchor="middle">免占常驻 prompt</text>
+
+        <rect x="240" y="664" width="150" height="64" rx="6" fill="#0f172a"/>
+        <rect x="240" y="664" width="150" height="64" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="315" y="682" fill="white" font-size="12" font-weight="600" text-anchor="middle">ask_user</text>
+        <text x="315" y="698" fill="#94a3b8" font-size="9" text-anchor="middle">澄清挂起（问清勿猜）</text>
+        <text x="315" y="710" fill="#94a3b8" font-size="9" text-anchor="middle">checkpoint → resume</text>
+
+        <rect x="405" y="664" width="150" height="64" rx="6" fill="#0f172a"/>
+        <rect x="405" y="664" width="150" height="64" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="480" y="682" fill="white" font-size="12" font-weight="600" text-anchor="middle">finish</text>
+        <text x="480" y="698" fill="#94a3b8" font-size="9" text-anchor="middle">收尾 · 查了数必归因</text>
+        <text x="480" y="710" fill="#94a3b8" font-size="9" text-anchor="middle">终态四事件之一</text>
+
+        <!-- 下排 -->
+        <rect x="75" y="748" width="150" height="76" rx="6" fill="#0f172a"/>
+        <rect x="75" y="748" width="150" height="76" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="150" y="766" fill="white" font-size="12" font-weight="600" text-anchor="middle">query_metadata</text>
+        <text x="150" y="782" fill="#94a3b8" font-size="9" text-anchor="middle">白名单表/列/关联 + 规则</text>
+        <text x="150" y="794" fill="#94a3b8" font-size="9" text-anchor="middle">列缓存 300s · 手写注释优先</text>
+        <text x="150" y="812" fill="#34d399" font-size="9" text-anchor="middle">tools/metadata.py</text>
+
+        <rect x="240" y="748" width="150" height="76" rx="6" fill="#0f172a"/>
+        <rect x="240" y="748" width="150" height="76" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="315" y="766" fill="white" font-size="12" font-weight="600" text-anchor="middle">execute_sql</text>
+        <text x="315" y="782" fill="#fb7185" font-size="9" text-anchor="middle">sqlglot 只读校验+列校验</text>
+        <text x="315" y="794" fill="#94a3b8" font-size="9" text-anchor="middle">30s / 1万行 / ≤200行</text>
+        <text x="315" y="812" fill="#34d399" font-size="9" text-anchor="middle">tools/sql_engine.py</text>
+
+        <rect x="405" y="748" width="150" height="76" rx="6" fill="#0f172a"/>
+        <rect x="405" y="748" width="150" height="76" rx="6" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="480" y="766" fill="white" font-size="12" font-weight="600" text-anchor="middle">knowledge_search</text>
+        <text x="480" y="782" fill="#94a3b8" font-size="9" text-anchor="middle">文档检索（RAGFlow）</text>
+        <text x="480" y="794" fill="#94a3b8" font-size="9" text-anchor="middle">空/失败不重试</text>
+        <text x="480" y="812" fill="#34d399" font-size="9" text-anchor="middle">tools/knowledge_tool.py</text>
+
+        <text x="180" y="842" fill="#64748b" font-size="9" text-anchor="start">Registry：动态 schema · 参数强转 · 退避重试</text>
+
+        <!-- ============================================================
+             提示词体系盒子（数据，不是代码）
+             ============================================================ -->
+
+        <rect x="610" y="664" width="400" height="64" rx="6" fill="#0f172a"/>
+        <rect x="610" y="664" width="400" height="64" rx="6" fill="rgba(251,146,60,0.12)" stroke="#fb923c" stroke-width="1.5"/>
+        <text x="810" y="682" fill="white" font-size="14" font-weight="600" text-anchor="middle">KERNEL 内核协议（代码 · 常驻）</text>
+        <text x="810" y="698" fill="#94a3b8" font-size="10.5" text-anchor="middle">意图三分法（查数/查文档/混合）+ 运行铁律</text>
+        <text x="810" y="716" fill="#fb923c" font-size="9" text-anchor="middle">中文思考 · 不编数 · 问清勿猜 · 及时收尾</text>
+
+        <rect x="610" y="742" width="400" height="64" rx="6" fill="#0f172a"/>
+        <rect x="610" y="742" width="400" height="64" rx="6" fill="rgba(251,146,60,0.12)" stroke="#fb923c" stroke-width="1.5"/>
+        <text x="810" y="760" fill="white" font-size="14" font-weight="600" text-anchor="middle">Skills ×4（数据 · 常驻 · admin 热改）</text>
+        <text x="810" y="776" fill="#94a3b8" font-size="10.5" text-anchor="middle">问数 nl2sql · kb_qa 知识库 · 归因 · 联系人推荐</text>
+        <text x="810" y="794" fill="#fb923c" font-size="9" text-anchor="middle">nl_cfg_skills · 加能力 = 插一行，不发版</text>
+
+        <rect x="610" y="820" width="400" height="64" rx="6" fill="#0f172a"/>
+        <rect x="610" y="820" width="400" height="64" rx="6" fill="rgba(251,146,60,0.12)" stroke="#fb923c" stroke-width="1.5"/>
+        <text x="810" y="838" fill="white" font-size="14" font-weight="600" text-anchor="middle">表级规则 Rules（数据 · 按需注入）</text>
+        <text x="810" y="854" fill="#94a3b8" font-size="10.5" text-anchor="middle">粒度/口径/字段含义——挂表，不占常驻 token</text>
+        <text x="810" y="872" fill="#fb923c" font-size="9" text-anchor="middle">nl_md_rules · query_metadata 查到那张表才注入</text>
+
+        <!-- ============================================================
+             存储与外部服务盒子
+             ============================================================ -->
+
+        <!-- 平台库 -->
+        <rect x="75" y="950" width="180" height="94" rx="6" fill="#0f172a"/>
+        <rect x="75" y="950" width="180" height="94" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="165" y="970" fill="white" font-size="14" font-weight="600" text-anchor="middle">平台库 PostgreSQL</text>
+        <text x="165" y="986" fill="#94a3b8" font-size="9.5" text-anchor="middle">ORM · asyncpg 连接池</text>
+        <text x="165" y="998" fill="#94a3b8" font-size="9.5" text-anchor="middle">nl_ 会话/审计/元数据/配置</text>
+        <text x="165" y="1010" fill="#94a3b8" font-size="9.5" text-anchor="middle">ask_user 挂起快照</text>
+        <text x="165" y="1032" fill="#a78bfa" font-size="9" text-anchor="middle">models.py = 表结构单一事实源</text>
+
+        <!-- 业务数仓 -->
+        <rect x="265" y="950" width="180" height="94" rx="6" fill="#0f172a"/>
+        <rect x="265" y="950" width="180" height="94" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="355" y="970" fill="white" font-size="14" font-weight="600" text-anchor="middle">业务数仓</text>
+        <text x="355" y="986" fill="#94a3b8" font-size="9.5" text-anchor="middle">StarRocks / MySQL / PG</text>
+        <text x="355" y="998" fill="#94a3b8" font-size="9.5" text-anchor="middle">按 datasource 动态建连</text>
+        <text x="355" y="1010" fill="#94a3b8" font-size="9.5" text-anchor="middle">只读 · 绝不经 ORM · 用完即弃</text>
+        <text x="355" y="1032" fill="#a78bfa" font-size="9" text-anchor="middle">问数表 + 归因素材表（双表粒度）</text>
+
+        <!-- Redis -->
+        <rect x="455" y="950" width="180" height="94" rx="6" fill="#0f172a"/>
+        <rect x="455" y="950" width="180" height="94" rx="6" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="545" y="970" fill="white" font-size="14" font-weight="600" text-anchor="middle">Redis</text>
+        <text x="545" y="986" fill="#94a3b8" font-size="9.5" text-anchor="middle">缓存 · 去重 TTL</text>
+        <text x="545" y="998" fill="#94a3b8" font-size="9.5" text-anchor="middle">连接失败自动降级</text>
+        <text x="545" y="1010" fill="#94a3b8" font-size="9.5" text-anchor="middle">→ 进程内 dict</text>
+        <text x="545" y="1032" fill="#a78bfa" font-size="9" text-anchor="middle">storage/redis_client.py</text>
+
+        <!-- RAGFlow（外部） -->
+        <rect x="645" y="950" width="180" height="94" rx="6" fill="#0f172a"/>
+        <rect x="645" y="950" width="180" height="94" rx="6" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="735" y="970" fill="white" font-size="14" font-weight="600" text-anchor="middle">RAGFlow 知识库</text>
+        <text x="735" y="986" fill="#94a3b8" font-size="9.5" text-anchor="middle">外部服务 · 向量检索</text>
+        <text x="735" y="998" fill="#94a3b8" font-size="9.5" text-anchor="middle">dataset_ids 可配</text>
+        <text x="735" y="1010" fill="#94a3b8" font-size="9.5" text-anchor="middle">地址/Key 走 nl_cfg_ragflow</text>
+        <text x="735" y="1032" fill="#fbbf24" font-size="9" text-anchor="middle">ragflow/client.py 转发</text>
+
+        <!-- LLM 网关（外部） -->
+        <rect x="835" y="950" width="180" height="94" rx="6" fill="#0f172a"/>
+        <rect x="835" y="950" width="180" height="94" rx="6" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="925" y="970" fill="white" font-size="14" font-weight="600" text-anchor="middle">LLM 网关</text>
+        <text x="925" y="986" fill="#94a3b8" font-size="9.5" text-anchor="middle">chat + embeddings</text>
+        <text x="925" y="998" fill="#94a3b8" font-size="9.5" text-anchor="middle">双协议 · 额度分桶</text>
+        <text x="925" y="1010" fill="#94a3b8" font-size="9.5" text-anchor="middle">model/key/协议 只存 nl_cfg_llm</text>
+        <text x="925" y="1032" fill="#fbbf24" font-size="9" text-anchor="middle">铁律：LLM 配置永不进 yml</text>
+
+        <!-- ============================================================
+             横切关注点
+             ============================================================ -->
+        <rect x="50" y="1090" width="980" height="56" rx="6" fill="#0f172a"/>
+        <rect x="50" y="1090" width="980" height="56" rx="6" fill="rgba(136,19,55,0.25)" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,4"/>
+        <text x="70" y="1112" fill="#fb7185" font-size="12.5" font-weight="600">横切 · 审计 / 状态 / 护栏 / 可靠性</text>
+        <text x="70" y="1130" fill="#94a3b8" font-size="10.5">AuditSink 全链路 trace/event（trace_id 隔离）· SessionState 挂起恢复+僵死清扫 · sqlglot 只读+列校验+次数熔断 · 双端代理字符消毒 · 动态墙钟 · 收尾三步 10s 超时兜底</text>
+
+        <!-- ============================================================
+             图例（所有边界之外）
+             ============================================================ -->
+        <text x="60" y="1180" fill="white" font-size="12.5" font-weight="600">图例</text>
+
+        <rect x="60" y="1192" width="16" height="10" rx="2" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="82" y="1200" fill="#94a3b8" font-size="10.5">入口/前端</text>
+
+        <rect x="160" y="1192" width="16" height="10" rx="2" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="182" y="1200" fill="#94a3b8" font-size="10.5">服务/内核/工具</text>
+
+        <rect x="290" y="1192" width="16" height="10" rx="2" fill="rgba(76,29,149,0.4)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="312" y="1200" fill="#94a3b8" font-size="10.5">存储</text>
+
+        <rect x="370" y="1192" width="16" height="10" rx="2" fill="rgba(120,53,15,0.3)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="392" y="1200" fill="#94a3b8" font-size="10.5">外部服务</text>
+
+        <rect x="470" y="1192" width="16" height="10" rx="2" fill="rgba(251,146,60,0.12)" stroke="#fb923c" stroke-width="1"/>
+        <text x="492" y="1200" fill="#94a3b8" font-size="10.5">提示词（数据）</text>
+
+        <rect x="600" y="1192" width="16" height="10" rx="2" fill="rgba(136,19,55,0.4)" stroke="#fb7185" stroke-width="1"/>
+        <text x="622" y="1200" fill="#94a3b8" font-size="10.5">横切/安全</text>
+
+        <line x1="700" y1="1197" x2="716" y2="1197" stroke="#fb923c" stroke-width="1.5" stroke-dasharray="5,4"/>
+        <text x="722" y="1200" fill="#94a3b8" font-size="10.5">数据装配流</text>
+
+        <line x1="810" y1="1197" x2="826" y2="1197" stroke="#64748b" stroke-width="1.5"/>
+        <text x="832" y="1200" fill="#94a3b8" font-size="10.5">调用/数据流</text>
+
+        <text x="60" y="1236" fill="#475569" font-size="10.5">实线 = 运行时调用 · 虚线橙 = 提示词装配（DB → 内核）· 飞书为进程内直投，Web 走 HTTP/SSE</text>
+      </svg>
+    </div>
+
+    <!-- 信息卡片 -->
+    <div class="cards">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot emerald"></div>
+          <h3>设计哲学</h3>
+        </div>
+        <ul>
+          <li>• 内核零业务：一切皆技能，nl_cfg_skills 4 行数据</li>
+          <li>• 能力 = tool × skill，表的事实 = rule</li>
+          <li>• 加能力 = 插一行，不发版；admin 热改</li>
+          <li>• 不做：意图分类器 / 强制 planner / 胖工具</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot cyan"></div>
+          <h3>一次问数链路</h3>
+        </div>
+        <ul>
+          <li>• 忙闸门 → 装配 KERNEL+Skills → ReAct 循环</li>
+          <li>• 思考 / 工具调用 / 结果全 SSE 流式外发</li>
+          <li>• ask_user 挂起 → 回答 → 断点恢复</li>
+          <li>• 查了数必归因，来源标 Btype·【标题】</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot rose"></div>
+          <h3>可靠性机制（皆出自真实故障）</h3>
+        </div>
+        <ul>
+          <li>• 动态墙钟：思考马拉松 150s 掐断催促</li>
+          <li>• 代理字符双端消毒（入口增量+出口全量）</li>
+          <li>• message_id 去重 + 忙闸门，双层防重跑</li>
+          <li>• 收尾三步 10s 兜底——只处理真见过的失败</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 页脚 -->
+    <p class="footer">nl2sql · 内网单租户智能问数 · FastAPI + SQLAlchemy 2.0 async + Redis + RAGFlow · 依据 docs/技术架构.md 与 src/ 实际代码绘制</p>
+  </div>
+</body>
+</html>
