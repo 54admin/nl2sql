@@ -356,7 +356,7 @@
       <button class="stab" data-tab="models" onclick="showSettingsTab('models')">模型</button>
       <button class="stab" data-tab="feishu" onclick="showSettingsTab('feishu')">飞书</button>
       <button class="stab" data-tab="limits" onclick="showSettingsTab('limits')">查询上限</button>
-      <button class="back" onclick="showSettings(false)">← 返回</button>
+      <button class="back" id="settings-back" onclick="showSettings(false)">← 返回</button>
     </nav>
   </header>
   <div id="chat-panel" style="display:flex">
@@ -2448,6 +2448,13 @@ function showLogin() {
 function enterApp() {
   document.getElementById("login-panel").style.display = "none";
   document.getElementById("app").style.display = "flex";   // 用 flex 不是 block——#app 是纵向 flex 容器（footer 输入框靠它贴底）
+  if (USER_ROLE !== "admin") {
+    // kb_op：无对话无统计——隐藏入口（📊统计/返回按钮），直接落知识库管理页
+    document.querySelector('#chat-nav button[onclick="showStats(true)"]').style.display = "none";
+    document.getElementById("settings-back").style.display = "none";
+    showSettings(true);
+    return;
+  }
   refreshSessionList();
 }
 async function doLogin() {

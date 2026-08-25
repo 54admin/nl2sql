@@ -249,16 +249,20 @@ def create_app() -> FastAPI:
         if verified is None:
             return JSONResponse({"detail": "未登录"}, status_code=401)
         req.state.username, req.state.role = verified
-        # kb_op（知识库操作员）：仅放行知识库管理与 EAM 端点；其余 admin 端点 403
-        # （问数 /api/ask、会话等非 admin 接口不受限；ragflow-config 含 API Key/地址，对其不可见不可改）
-        if req.state.role == "kb_op" and p.startswith("/api/admin"):
-            allowed = p.startswith(("/api/admin/ragflow/datasets",
-                                    "/api/admin/ragflow/documents",
-                                    "/api/admin/ragflow/parse",
-                                    "/api/admin/eam"))
-            if not allowed:
+        # kb_op（知识库操作员）：只做知识库管理——对话/统计/其余 admin 全拦
+        # （统计本就在 admin 前缀下被拦；对话链路 ask/session/result 也一并 403）
+        if req.state.role == "kb_op":
+            if p.startswith(("/api/ask", "/api/session", "/api/result")):
                 return JSONResponse(
-                    {"detail": "无权限：知识库操作员仅能访问知识库管理相关功能"}, status_code=403)
+                    {"detail": "无权限：知识库操作员不开放对话问数"}, status_code=403)
+            if p.startswith("/api/admin"):
+                allowed = p.startswith(("/api/admin/ragflow/datasets",
+                                        "/api/admin/ragflow/documents",
+                                        "/api/admin/ragflow/parse",
+                                        "/api/admin/eam"))
+                if not allowed:
+                    return JSONResponse(
+                        {"detail": "无权限：知识库操作员仅能访问知识库管理相关功能"}, status_code=403)
         return await call_next(req)
 
     app.include_router(build_ask_router(_Lazy("orchestrator")))
