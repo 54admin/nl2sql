@@ -1324,8 +1324,10 @@ function renderKbList() {
     <div class="kb-ds-item ${ds.id===KB.selected?"active":""}" onclick="kbSelect('${ds.id}')" title="${escapeHtml(ds.description||ds.name||"")}">
       <div class="r1"><span class="nm">${escapeHtml(ds.name||"")}</span>
         <span style="margin-left:auto;flex-shrink:0">
-          <button class="llm-edit-btn" style="padding:1px 6px;font-size:10px" title="全库文件停用，检索不再命中" onclick="event.stopPropagation();kbToggleDs('${ds.id}',false)">停用</button>
-          <button class="llm-edit-btn" style="padding:1px 6px;font-size:10px" title="全库文件恢复启用（覆盖式，含之前单独停用的）" onclick="event.stopPropagation();kbToggleDs('${ds.id}',true)">启用</button>
+          <button class="llm-edit-btn" style="padding:1px 5px;font-size:10px" title="全库文件停用，检索不再命中" onclick="event.stopPropagation();kbToggleDs('${ds.id}',false)">停用</button>
+          <button class="llm-edit-btn" style="padding:1px 5px;font-size:10px" title="全库文件恢复启用（覆盖式，含之前单独停用的）" onclick="event.stopPropagation();kbToggleDs('${ds.id}',true)">启用</button>
+          <button class="llm-edit-btn" style="padding:1px 5px;font-size:10px" title="重命名/改描述" onclick="event.stopPropagation();kbRenameModal('${ds.id}')">✎</button>
+          <button class="li-del" style="font-size:13px;padding:0 3px" title="删除知识库（含全部文档，不可恢复）" onclick="event.stopPropagation();kbDeleteDs('${ds.id}')">×</button>
         </span></div>
       <div class="r2">${kbStat(ds)}</div>
     </div>`).join("") : '<p class="placeholder">未列到知识库（检查上方连接配置）<br>或点「＋ 新建」建一个</p>';
@@ -1453,6 +1455,31 @@ function kbNewDsModal() {
     closeAdminModal(); await kbLoadDatasets();
   });
 }
+// ---------- 重命名 / 删除知识库 ----------
+function kbRenameModal(dsId) {
+  const ds = KB.datasets.find(d => d.id === dsId); if (!ds) return;
+  openAdminModal(`重命名「${ds.name}」`, `
+    <input id="kb-rn-name" value="${escapeHtml(ds.name||"")}" placeholder="新库名" style="width:100%;padding:6px 8px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px;margin-bottom:8px">
+    <input id="kb-rn-desc" value="${escapeHtml(ds.description||"")}" placeholder="描述（可选）" style="width:100%;padding:6px 8px;border:1px solid #d0d0d0;border-radius:4px;font-size:13px">`,
+  async () => {
+    const name = document.getElementById("kb-rn-name").value.trim();
+    if (!name) { alert("库名不能为空"); return; }
+    const r = await fetch(`/api/admin/ragflow/datasets/${dsId}`, {method:"PUT",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({name, description: document.getElementById("kb-rn-desc").value.trim()})});
+    if (!r.ok) { alert("重命名失败: " + (await r.json().catch(()=>({})).then(e=>e.detail||r.status))); return; }
+    closeAdminModal(); await kbLoadDatasets();
+  });
+}
+async function kbDeleteDs(dsId) {
+  const ds = KB.datasets.find(d => d.id === dsId); if (!ds) return;
+  if (!confirm(`删除知识库「${ds.name}」？\n库内 ${ds.document_count??0} 个文档及全部分段将一并删除，不可恢复！`)) return;
+  const r = await fetch(`/api/admin/ragflow/datasets?dataset_ids=${encodeURIComponent(dsId)}`, {method:"DELETE"});
+  if (!r.ok) { alert("删除失败: " + (await r.json().catch(()=>({})).then(e=>e.detail||r.status))); return; }
+  if (KB.selected === dsId) KB.selected = null;
+  await kbLoadDatasets();
+}
+
 // ---------- 上传弹窗（唯一入口：来源=本地/EAM，目标库可多选） ----------
 let KB_UP = { tab: "local", eamTree: null, eamFiles: 0, eamHidden: 0, eamChecked: new Set(), eamExpanded: new Set() };
 function kbUploadModal() {

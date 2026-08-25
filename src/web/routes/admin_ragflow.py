@@ -36,6 +36,11 @@ def _row_to_dict(r) -> dict:
             "enabled": r.enabled, "version": r.version}
 
 
+class RenameDatasetPayload(BaseModel):
+    name: str
+    description: str = ""
+
+
 class CreateDatasetPayload(BaseModel):
     name: str
     description: str = ""
@@ -110,6 +115,30 @@ def build_admin_ragflow_router() -> APIRouter:
         except Exception as e:
             raise HTTPException(400, f"RAGFlow 建库失败：{e}")
         return {"ok": True, "dataset": ds}
+
+    @router.put("/api/admin/ragflow/datasets/{dataset_id}")
+    async def rename_dataset(dataset_id: str, payload: RenameDatasetPayload) -> dict:
+        """重命名/改描述。"""
+        if not payload.name.strip():
+            raise HTTPException(400, "库名不能为空")
+        try:
+            await get_ragflow_client().rename_dataset(
+                dataset_id, payload.name.strip(), payload.description.strip())
+        except Exception as e:
+            raise HTTPException(400, f"RAGFlow 重命名失败：{e}")
+        return {"ok": True}
+
+    @router.delete("/api/admin/ragflow/datasets")
+    async def delete_datasets(dataset_ids: str) -> dict:
+        """删除知识库（query 传 dataset_ids，逗号分隔；库内文档与分段一并删除，不可恢复）。"""
+        ids = [x for x in dataset_ids.split(",") if x.strip()]
+        if not ids:
+            raise HTTPException(400, "未指定要删除的知识库")
+        try:
+            await get_ragflow_client().delete_datasets(ids)
+        except Exception as e:
+            raise HTTPException(400, f"RAGFlow 删除知识库失败：{e}")
+        return {"ok": True}
 
 
     @router.put("/api/admin/ragflow/documents-enabled")

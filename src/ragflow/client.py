@@ -169,6 +169,26 @@ class RagflowClient:
             "permission": "me"})
         return body.get("data", {}) or {}
 
+    async def rename_dataset(self, dataset_id: str, name: str,
+                             description: str = "") -> None:
+        """重命名/改描述（RAGFlow PUT /datasets/{id}，name 全局不区分大小写唯一）。"""
+        cfg = await self._require()
+        await self._request(cfg, "PUT", f"/datasets/{dataset_id}",
+                            json={"name": name, "description": description})
+
+    async def delete_datasets(self, dataset_ids: list[str]) -> None:
+        """删除知识库（连同库内全部文档与分段，不可恢复）。
+        注：部分 RAGFlow 版本删除成功仍返回错误码（实测 102 lacks permission），
+        故报错后复查列表——库确实没了就当成功。"""
+        cfg = await self._require()
+        try:
+            await self._request(cfg, "DELETE", "/datasets", json={"ids": dataset_ids})
+        except RagflowError as e:
+            remain = {d.get("id") for d in await self.list_datasets()}
+            if any(i in remain for i in dataset_ids):
+                raise
+            log.warning("RAGFlow 删除知识库返回错误但已删除（忽略误报）: %s", e)
+
     # ---------- 文档管理 ----------
     async def upload_document(self, dataset_id: str, filename: str,
                               content: bytes) -> list[dict]:
